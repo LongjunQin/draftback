@@ -48,7 +48,7 @@ mdreview status "<文档绝对路径.md>" --json
 
 1. 先运行 `mdreview status <文档> --json`；若存在活动会话，严格遵守上面的冻结状态机。
 2. 读取该文档的 sidecar:`<文档.md>.annotations.json`(**与原文件同名同目录**;JSON 顶层 `sourceFile`=原文件绝对路径、`_apply`=自述说明——据此确认要改的就是 `sourceFile` 那个文件)。
-3. **只处理 `status` 为 `open` 的批注。完全忽略 `applied` 和 `wontfix`。**
+3. **只处理 `status` 为 `open` 的批注(缺 `status` 的旧批注同样按 `open` 处理,程序也是这样计数的)。完全忽略 `applied` 和 `wontfix`。**
 4. 定位:**以 `quote`(原文引用)+ `headingPath`(章节)为主**来找到位置;`lineStart` 只作辅助
    (因为之前的修改可能已让行号偏移)。`figureRef` 表示该批注针对某图/表。
    **`scope: "document"` 表示总体意见**:针对全篇、没有任何文字锚点。若它要求重写、调整

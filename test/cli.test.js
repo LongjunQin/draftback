@@ -249,3 +249,56 @@ test('手工修改轮:complete 后 beginManualEdit 开 applying/manual;open 不�
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /用户已手工改完/);
 });
+
+test('手工修改轮期间,智能体入口 mdreview complete 必须拒绝,会话与文件原样保留', async () => {
+  const f = fixture('mdturn-manual-guard-');
+  const source = path.join(f.docs, '手工守护.md');
+  fs.writeFileSync(source, '# 手工守护\n');
+  const env = { MDREAD_DATA_DIR: f.dataDir };
+  assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
+  assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);
+  assert.equal((await storeCall(env, `await s.beginManualEdit(${JSON.stringify(source)});`)).status, 0);
+
+  // 用户正在编辑:文件已经改了但还没提交,批注为零 —— 正是漏洞能触发的条件
+  fs.writeFileSync(source, '# 手工守护\n用户改到一半。\n');
+  const reviewsPath = path.join(f.dataDir, 'reviews.json');
+  const before = { reviews: fs.readFileSync(reviewsPath, 'utf8'), source: fs.readFileSync(source, 'utf8') };
+
+  const complete = await runNodeAsync(MDREVIEW, ['complete', source], env);
+  assert.notEqual(complete.status, 0, '手工轮不应被智能体入口结束');
+  assert.match(complete.stderr, /只有 agent 改稿模式可以从此入口完成/);
+  assert.equal(fs.readFileSync(reviewsPath, 'utf8'), before.reviews, '拒绝后会话状态文件不得变化');
+  assert.equal(fs.readFileSync(source, 'utf8'), before.source, '拒绝后正文不得变化');
+  const active = Object.values(readReviews(f.dataDir).reviews).find((r) => r.status === 'applying');
+  assert.ok(active && active.applyMode === 'manual', '会话仍为 applying/manual');
+
+  // 合法的 App 手工完成入口不受影响
+  assert.equal((await storeCall(env, `await s.completeReview(${JSON.stringify(source)}, { expectedApplyMode: 'manual' });`)).status, 0);
+});
+
+test('agent 改稿轮:批注全部处理后 mdreview complete 成功并记录 finalHash', async () => {
+  const f = fixture('mdturn-agent-complete-');
+  const source = path.join(f.docs, '智能体.md');
+  fs.writeFileSync(source, '# 智能体\n原文。\n');
+  const env = { MDREAD_DATA_DIR: f.dataDir };
+  assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
+  // 一条旧格式批注(缺 status),必须按 open 计数;标 applied 后才能 complete
+  fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({
+    version: 1, file: '智能体.md', annotations: [{ id: 'n1', comment: '改一下', quote: '原文' }],
+  }));
+  assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);
+  assert.equal((await runNodeAsync(MDREVIEW, ['begin-apply', source], env)).status, 0);
+
+  const blocked = await runNodeAsync(MDREVIEW, ['complete', source], env);
+  assert.notEqual(blocked.status, 0, '缺 status 的旧批注应按 open 计数,阻止完成');
+  assert.match(blocked.stderr, /OPEN_ANNOTATIONS/);
+
+  fs.writeFileSync(source, '# 智能体\n改过了。\n');
+  fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({
+    version: 1, file: '智能体.md', annotations: [{ id: 'n1', comment: '改一下', quote: '原文', status: 'applied' }],
+  }));
+  const done = await runNodeAsync(MDREVIEW, ['complete', source], env);
+  assert.equal(done.status, 0, done.stderr);
+  const review = Object.values(readReviews(f.dataDir).reviews).find((r) => r.status === 'complete');
+  assert.ok(review && review.applyMode === 'agent' && typeof review.finalHash === 'string' && review.finalHash.length === 64);
+});

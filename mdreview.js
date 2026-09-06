@@ -323,7 +323,7 @@ async function main() {
       if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
       const review = await beginApply(args.file);
       printReview(review);
-      console.log(`→ 只处理 ${review.absPath}.annotations.json 中 status=open 的批注,用 quote+headingPath 定位改稿,逐条就地标 applied/wontfix(可附 appliedNote 说明改法);全部清零后运行 mdreview complete "${review.absPath}"。`);
+      console.log(`→ 只处理 ${review.absPath}.annotations.json 中 status=open(或缺 status,同样算待处理)的批注,用 quote+headingPath 定位改稿,逐条就地标 applied/wontfix(可附 appliedNote 说明改法);全部清零后运行 mdreview complete "${review.absPath}"。`);
       await notifyReviewChangedBestEffort(review, 'agent-apply-started');
       return;
     }
@@ -332,7 +332,9 @@ async function main() {
       // Completion is the source of truth.  Notify the long-running service
       // only after the atomic state transition succeeds, and never turn a
       // delivery failure into a failed completion command.
-      const review = await completeReview(args.file);
+      // 这里是智能体入口,只允许结束 agent 改稿轮:用户在 App 里手工修改
+      // (applying/manual)期间,误调/重试 complete 不得替用户结束其编辑轮。
+      const review = await completeReview(args.file, { expectedApplyMode: 'agent' });
       printReview(review);
       console.log(`→ 闭环完成(本轮): 批注已全部处理,MDTurn 会自动加载最新版并通知用户。用户接下来可能再审一轮或定稿——立即再以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交新批注或定稿时返回;不要主动去关 MDTurn 里的标签或移动 .annotations.json。`);
       await notifyReviewChangedBestEffort(review, 'agent-complete');
