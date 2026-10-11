@@ -42,7 +42,18 @@ async function main() {
   try {
     fs.mkdirSync(docRoot, { recursive: true });
     fs.mkdirSync(profileDir, { recursive: true });
-    fs.writeFileSync(source, '# 普通文档\n\n<p id="plain-para">这一段用来验证普通阅读时不能划词批注。</p>\n\n## 第二节\n\n第二节正文。\n', 'utf8');
+    // 原文故意带上编辑器"不认识"的内容:Front Matter、原始 HTML、公式、带 4 空格缩进与 * 标记的嵌套列表、
+    // 尾随两空格硬换行。只改最后一段,其余必须字节不变(路线图 6.2 节的保真要求)。
+    const ORIGINAL = [
+      '---', 'title: 普通文档', 'tags: [a, b]', '---',
+      '# 普通文档', '',
+      '<p id="plain-para">这一段用来验证普通阅读时不能划词批注。</p>', '',
+      '行内公式 $E=mc^2$ 与*强调*,还有尾随两空格硬换行  ', '续行。', '',
+      '* 第一项', '* 第二项', '    * 子项甲', '    * 子项乙', '* 第三项', '',
+      '## 第二节', '',
+      '第二节正文。', '',
+    ].join('\n');
+    fs.writeFileSync(source, ORIGINAL, 'utf8');
     store.ensureDataDir({ dataDir });
 
     server = await startServer(dataDir);
@@ -115,6 +126,9 @@ async function main() {
     await waitUntil('保存完成', () => chrome.cdp.evaluate(`document.querySelector('#saveButton').disabled && document.querySelector('#editorSaveState').textContent.includes('已保存')`));
     const saved = fs.readFileSync(source, 'utf8');
     assert.match(saved, /普通编辑新增的一句话/, '普通编辑必须直接写回文件');
+    assert.equal(saved, ORIGINAL.replace('第二节正文。', '第二节正文。普通编辑新增的一句话。'),
+      '块级回写:只有被改的段落变化,Front Matter、HTML、公式、列表缩进与标记、硬换行全部字节一致');
+    await waitUntil('保存提示列出改动与保留数', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion *')).some((node) => /改动 1 处/.test(node.textContent))`));
     const backupsRoot = path.join(dataDir, 'backups', 'documents');
     assert.ok(fs.existsSync(backupsRoot) && fs.readdirSync(backupsRoot).length === 1, '覆盖前必须备份');
     assert.equal(await store.getReviewByPath(source, { dataDir, activeOnly: true }), null, '普通保存不得创建审阅会话');

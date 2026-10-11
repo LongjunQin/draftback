@@ -1836,9 +1836,17 @@
     } catch (error) { toast(friendlyError(error, '更新批注状态'), 'error'); }
   }
 
+  const Patcher = window.MDTurnPatch || null;
+  function splitFrontMatter(text) {
+    return Patcher ? Patcher.splitFrontMatter(String(text || '')) : { frontMatter: '', body: String(text || '') };
+  }
+  // 编辑器拿到的是去掉 Front Matter 的正文;对外(草稿、保存)的值一律把 Front Matter 原样接回去。
+  function editorBody(text) { return splitFrontMatter(text).body; }
+  function withFrontMatter(tab, body) { return splitFrontMatter(tab.source).frontMatter + body; }
+
   function captureEditorValue(tab) {
     if (!tab || state.editorTabId !== tab.id || !state.editorView) return;
-    const value = getEditorValue();
+    const value = withFrontMatter(tab, getEditorValue());
     if (value !== tab.source) { tab.editorDraft = value; tab.dirty = true; }
   }
 
@@ -1851,13 +1859,13 @@
   function createEditor(tab) {
     destroyEditor();
     nodes.codeEditor.replaceChildren();
-    const doc = tab.editorDraft != null ? tab.editorDraft : tab.source;
+    const doc = editorBody(tab.editorDraft != null ? tab.editorDraft : tab.source);
     if (window.MDTurnEditor) {
-      state.editorView = window.MDTurnEditor.create(nodes.codeEditor, { doc, onChange: (value) => editorChanged(tab, value) });
+      state.editorView = window.MDTurnEditor.create(nodes.codeEditor, { doc, onChange: (value) => editorChanged(tab, withFrontMatter(tab, value)) });
     } else {
       const textarea = document.createElement('textarea');
       textarea.value = doc; textarea.className = 'fallback-editor'; textarea.__mdturnFallback = true;
-      textarea.addEventListener('input', () => editorChanged(tab, textarea.value));
+      textarea.addEventListener('input', () => editorChanged(tab, withFrontMatter(tab, textarea.value)));
       nodes.codeEditor.appendChild(textarea); state.editorView = textarea;
     }
     state.editorTabId = tab.id;
@@ -1907,7 +1915,10 @@
       toast('仍有未保存的修改，已返回编辑模式。', 'error');
       return false;
     }
-    const content = tab.editorDraft != null ? tab.editorDraft : getEditorValue();
+    const edited = tab.editorDraft != null ? tab.editorDraft : withFrontMatter(tab, getEditorValue());
+    const writeback = patchForSave(tab, edited);
+    if (writeback.needsConfirm && !(await confirmWriteback(writeback))) { updateSaveState(tab); return false; }
+    const content = writeback.text;
     const idempotencyKey = tab.saveRequestId || requestId('source'); tab.saveRequestId = idempotencyKey;
     updateSaveState(tab, 'saving');
     try {
@@ -1926,8 +1937,12 @@
       if (result.review) tab.review = { ...tab.review, ...result.review };
       tab.dirty = false; tab.editorDraft = null; tab.saveRequestId = null; tab.renderedHash = null;
       clearDraft(tab);
+      if (state.editorTabId === tab.id && state.editorView && window.MDTurnEditor && state.editorView.__mdturnFallback !== true) {
+        // 编辑器里的内容按回写后的正文重置,下次保存以这一版为原文。
+        try { window.MDTurnEditor.setValue(state.editorView, editorBody(content)); } catch (_) {}
+      }
       updateSaveState(tab); renderTabs();
-      toast('Markdown 已安全保存。');
+      toast(writeback.summary);
       if (tab.remotePending) {
         const pending = tab.remotePending;
         void queueRemoteReviewChange(pending.reviewId || tab.id, pending);
@@ -1938,6 +1953,40 @@
       toast(friendlyError(error, '保存 Markdown'), 'error');
       return false;
     }
+  }
+
+  // 块级局部回写:只把用户真改过的块写回文件,其余块保持原文字节(static/markdown-patch.js)。
+  function patchForSave(tab, edited) {
+    const live = state.editorTabId === tab.id && state.editorView && window.MDTurnEditor && state.editorView.__mdturnFallback !== true;
+    if (!Patcher || !live || typeof window.MDTurnEditor.normalize !== 'function') {
+      return { text: edited, summary: 'Markdown 已保存。', stats: null };
+    }
+    let normalized = null;
+    try { normalized = window.MDTurnEditor.normalize(state.editorView, editorBody(tab.source)); } catch (_) { normalized = null; }
+    if (typeof normalized !== 'string') return { text: edited, summary: 'Markdown 已保存。', stats: null };
+    let result;
+    try { result = Patcher.patch(md, tab.source, normalized, editorBody(edited)); }
+    catch (error) { console.warn('块级回写失败,退回整篇保存', error); return { text: edited, summary: 'Markdown 已保存(整篇写入)。', stats: null }; }
+    const s = result.stats;
+    const touched = s.modified + s.inserted + s.deleted;
+    const summary = `已保存:改动 ${touched} 处,其余 ${s.kept} 处原样保留。`;
+    const risky = s.lossyTouched + s.listFallback + s.fallback + s.unmatched;
+    if (!risky) return { text: result.text, summary, stats: s };
+    const reasons = [];
+    if (s.lossyTouched) reasons.push(`${s.lossyTouched} 处含编辑器无法无损表示的内容(原始 HTML、公式、脚注等),将按编辑器的写法改写`);
+    if (s.listFallback) reasons.push(`${s.listFallback} 个列表增删了项,整个列表将按编辑器的写法重排`);
+    if (s.fallback || s.unmatched) reasons.push(`${s.fallback + s.unmatched} 处无法与原文对齐,将整段改写`);
+    return { text: result.text, summary, stats: s, needsConfirm: reasons };
+  }
+
+  async function confirmWriteback(writeback) {
+    if (!writeback || !writeback.needsConfirm) return true;
+    const s = writeback.stats;
+    return confirmAction(
+      '保存会改写你没改过的内容',
+      `本次保存:改动 ${s.modified + s.inserted + s.deleted} 处,保留 ${s.kept} 处。其中:\n${writeback.needsConfirm.map((item) => `• ${item}`).join('\n')}\n\n继续保存,或取消后把这些段落改回去再保存。`,
+      '仍然保存',
+    );
   }
 
   async function enterEditMode() {

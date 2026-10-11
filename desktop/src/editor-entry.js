@@ -10,7 +10,7 @@ import { placeholder } from '@milkdown/crepe/feature/placeholder';
 import { toolbar } from '@milkdown/crepe/feature/toolbar';
 import { codeMirror } from '@milkdown/crepe/feature/code-mirror';
 import { table } from '@milkdown/crepe/feature/table';
-import { editorViewCtx, editorViewOptionsCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core';
+import { editorViewCtx, editorViewOptionsCtx, remarkStringifyOptionsCtx, parserCtx, serializerCtx } from '@milkdown/kit/core';
 import { replaceAll } from '@milkdown/kit/utils';
 // 样式同样按功能逐个引入(不用聚合的 common/style.css,它会连带 KaTeX 字体)
 import '@milkdown/crepe/theme/common/prosemirror.css';
@@ -113,6 +113,18 @@ function destroy(handle) {
   if (handle.ready) { try { handle.crepe.destroy(); } catch (_) {} }
 }
 
+// 规范化基线:把一段 Markdown 走一遍"解析 → 序列化"但不做任何修改。
+// 块级局部回写(static/markdown-patch.js)用它判断哪些块是编辑器自己的格式改写、哪些是用户真改了。
+function normalize(handle, markdown) {
+  assertHandle(handle);
+  if (!handle.ready) return null;
+  return handle.crepe.editor.action((ctx) => {
+    const parser = ctx.get(parserCtx);
+    const serializer = ctx.get(serializerCtx);
+    return serializer(parser(String(markdown ?? '')));
+  });
+}
+
 function focus(handle) {
   assertHandle(handle);
   if (!handle.ready) return;
@@ -160,7 +172,7 @@ function revealLine(handle, lineNumber) {
 }
 
 Object.defineProperty(window, 'MDTurnEditor', {
-  value: Object.freeze({ create, setValue, getValue, destroy, focus, revealLine }),
+  value: Object.freeze({ create, setValue, getValue, destroy, focus, revealLine, normalize }),
   configurable: false,
   enumerable: true,
   writable: false,
