@@ -14,6 +14,7 @@ const {
   completeReview,
   unlockReview,
 } = require('./lib/review-store');
+const snapshot = require('./lib/snapshot');
 
 function usage() {
   return [
@@ -24,6 +25,9 @@ function usage() {
     '  mdreview begin-apply <绝对路径.md>',
     '  mdreview complete <绝对路径.md>',
     '  mdreview unlock <绝对路径.md> --reason "<原因>"',
+    '  mdreview snapshot [--reason "<原因>"]              # 整体备份审阅索引与全部批注文件(手动快照不自动清理)',
+    '  mdreview snapshots [--json]                        # 列出快照',
+    '  mdreview restore <快照id> [--dry-run] --yes         # 从快照恢复;恢复前自动再做一份 pre-restore 快照',
   ].join('\n');
 }
 
@@ -33,12 +37,14 @@ function fail(message, exitCode = 1) {
 }
 
 function parseArgs(argv) {
-  const result = { command: argv[0], file: null, json: false, noOpen: false, reason: null, timeoutMinutes: null };
+  const result = { command: argv[0], file: null, json: false, noOpen: false, reason: null, timeoutMinutes: null, yes: false, dryRun: false };
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === '--json') result.json = true;
     else if (value === '--no-open') result.noOpen = true;
     else if (value === '--reason') result.reason = argv[++index];
+    else if (value === '--yes') result.yes = true;
+    else if (value === '--dry-run') result.dryRun = true;
     else if (value === '--timeout-minutes') {
       const minutes = Number(argv[++index]);
       if (!Number.isFinite(minutes) || minutes <= 0) throw new ReviewStoreError('BAD_ARGUMENT', '--timeout-minutes 需要一个正数', { httpStatus: 400 });
@@ -338,6 +344,40 @@ async function main() {
       printReview(review);
       console.log(`→ 闭环完成(本轮): 批注已全部处理,MDTurn 会自动加载最新版并通知用户。用户接下来可能再审一轮或定稿——立即再以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交新批注或定稿时返回;不要主动去关 MDTurn 里的标签或移动 .annotations.json。`);
       await notifyReviewChangedBestEffort(review, 'agent-complete');
+      return;
+    }
+    if (args.command === 'snapshot') {
+      const manifest = await snapshot.createSnapshot({ reason: args.reason || 'manual' });
+      if (args.json) { console.log(JSON.stringify(manifest, null, 2)); return; }
+      console.log(`快照: ${manifest.id}`);
+      console.log(`位置: ${path.join(snapshot.snapshotsDir(), manifest.id)}`);
+      console.log(`审阅索引: ${manifest.reviewsJson ? `${manifest.reviewsJson.bytes} 字节${manifest.reviewsJson.valid ? '' : '(JSON 已损坏,仍按原样保存)'}` : '不存在'}`);
+      console.log(`批注文件: ${manifest.sidecars.length} 份已备份,${manifest.missingSidecars.length} 篇文档旁没有批注文件;手工改稿原文备份 ${manifest.originalsCopied} 个`);
+      return;
+    }
+    if (args.command === 'snapshots') {
+      const items = snapshot.listSnapshots();
+      if (args.json) { console.log(JSON.stringify(items, null, 2)); return; }
+      if (!items.length) { console.log('还没有快照。运行 mdreview snapshot 创建一份。'); return; }
+      for (const item of items) {
+        if (item.corrupt) { console.log(`${item.id}  (清单损坏: ${item.error})`); continue; }
+        console.log(`${item.id}  ${item.createdAt}  ${item.reason}  批注文件 ${item.sidecars} 份`);
+      }
+      return;
+    }
+    if (args.command === 'restore') {
+      if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
+      const result = await snapshot.restoreSnapshot({ id: args.file, dryRun: args.dryRun, confirm: args.yes });
+      if (args.json) { console.log(JSON.stringify(result, null, 2)); return; }
+      const { plan } = result;
+      console.log(`快照: ${plan.id}(${plan.createdAt})`);
+      console.log(`审阅索引: ${plan.reviewsJson === 'restore' ? '恢复' : plan.reviewsJson === 'absent' ? '快照里没有' : '快照中的索引已损坏,跳过'}`);
+      for (const item of plan.sidecars) {
+        console.log(`  ${item.action === 'restore' ? '恢复' : '跳过(目录已不存在)'}  ${item.absPath}.annotations.json`);
+      }
+      if (result.dryRun) { console.log('（仅预览,未改动任何文件;确认无误后加 --yes 执行）'); return; }
+      console.log(`已恢复: 审阅索引 ${result.restored.reviewsJson ? '1' : '0'} 份,批注文件 ${result.restored.sidecars} 份,跳过 ${result.restored.skipped.length} 份`);
+      console.log(`恢复前的状态已另存为快照 ${result.preSnapshot},如需反悔: mdreview restore ${result.preSnapshot} --yes`);
       return;
     }
     if (args.command === 'unlock') {

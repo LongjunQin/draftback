@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
+  <!-- 内容安全策略:文档里夹带的脚本一律不执行;脚本只能来自本机服务自带的静态文件。
+       服务端对 /desktop 也下发同一份策略(server.js),两处保持一致。 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self'; media-src 'self' data: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>MDTurn</title>
   <link rel="stylesheet" href="/static/vendor/highlight-github.min.css">
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
@@ -195,8 +198,9 @@
   <script src="/static/vendor/texmath.min.js"></script>
   <script src="/static/vendor/highlight.min.js"></script>
   <script src="/static/vendor/mermaid.min.js"></script>
+  <script src="/static/vendor/dompurify.min.js"></script>
   <script src="/static/vendor/mdturn-editor.js?v=6"></script>
   <script src="/static/desktop-anchor.js?v=4"></script>
-  <script src="/static/desktop.js?v=12"></script>
+  <script src="/static/desktop.js?v=13"></script>
 </body>
 </html>

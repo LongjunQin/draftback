@@ -8,9 +8,11 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const store = require('./lib/review-store');
 const documents = require('./lib/document-service');
+const snapshot = require('./lib/snapshot');
 const { createReviewEventHub } = require('./lib/review-events');
 
 function parsePort(value, fallback = null, options = {}) {
@@ -69,12 +71,45 @@ function send(res, code, body, headers = {}) {
 }
 const sendJson = (res, code, obj) =>
   send(res, code, JSON.stringify(obj), { 'Content-Type': 'application/json; charset=utf-8' });
-function sendFile(res, abs, cacheControl = 'no-store') {
+function sendFile(res, abs, cacheControl = 'no-store', extraHeaders = {}) {
   fs.readFile(abs, (err, buf) => {
     if (err) return send(res, 404, 'Not found');
-    res.writeHead(200, { 'Content-Type': mimeOf(abs), 'Cache-Control': cacheControl });
+    res.writeHead(200, { 'Content-Type': mimeOf(abs), 'Cache-Control': cacheControl, ...extraHeaders });
     res.end(buf);
   });
+}
+
+// 桌面页的内容安全策略(与 static/desktop.html 里的 meta 保持一致):
+// 文档夹带的脚本一律不执行;脚本只能来自本机服务的静态文件;页面只能连回本机服务。
+const DESKTOP_CSP = [
+  "default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https: http:", "font-src 'self' data:", "connect-src 'self'",
+  "media-src 'self' data: blob:", "object-src 'none'", "frame-src 'none'", "base-uri 'none'", "form-action 'none'",
+].join('; ');
+
+// 文档资源(图片、附件)的访问边界:只提供文档所在目录树、用户主目录、系统临时目录之内的文件,
+// 且主目录与临时目录下不进入任何以 . 开头的隐藏目录(.ssh、.mdread、.git 等);
+// 文档自己就住在隐藏目录里时,它所在的目录树照常可用。
+function isInside(root, target) {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+function hasHiddenSegment(root, target) {
+  return path.relative(root, target).split(path.sep).some((segment) => segment.startsWith('.') && segment !== '.' && segment !== '..');
+}
+function resolveDocumentAsset(reviewAbsPath, candidate) {
+  const documentDir = path.dirname(reviewAbsPath);
+  const abs = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(documentDir, candidate);
+  let real = abs;
+  try { real = fs.realpathSync(abs); } catch { return null; }
+  const roots = [documentDir, os.homedir(), os.tmpdir()].map((root) => {
+    try { return fs.realpathSync(root); } catch { return root; }
+  });
+  if (isInside(roots[0], real)) return real;
+  for (const root of roots.slice(1)) {
+    if (isInside(root, real) && !hasHiddenSegment(root, real)) return real;
+  }
+  return null;
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -494,9 +529,8 @@ async function handleAppApi(req, res, pathname, q) {
     const review = await documents.requireReview(ref);
     let candidate = String(q.get('path') || '');
     try { candidate = decodeURIComponent(candidate); } catch {}
-    const abs = path.isAbsolute(candidate)
-      ? path.resolve(candidate)
-      : path.resolve(path.dirname(review.absPath), candidate);
+    const abs = resolveDocumentAsset(review.absPath, candidate);
+    if (!abs) return send(res, 404, 'Not found');
     return sendFile(res, abs, 'private, no-store');
   }
   if (pathname === '/api/app/review/begin-apply') {
@@ -582,12 +616,12 @@ async function handler(req, res) {
     if (!localOnly(req, res)) return;
     if (localPage) {
       if (!allowMethods(req, res, ['GET'])) return;
-      return sendFile(res, path.join(STATIC_DIR, 'desktop.html'), 'no-store');
+      return sendFile(res, path.join(STATIC_DIR, 'desktop.html'), 'no-store', { 'Content-Security-Policy': DESKTOP_CSP });
     }
-    if (pathname.startsWith('/api/app/')) {
-      if (!localAppOriginOnly(req, res)) return;
-      return handleAppApi(req, res, pathname, q);
-    }
+    // 所有审阅接口都拒绝来自其他站点的浏览器请求(浏览器里打开的网页不得代替用户提交或改批注);
+    // CLI 与 App 自身的请求不带跨站来源,照常放行。
+    if (!localAppOriginOnly(req, res)) return;
+    if (pathname.startsWith('/api/app/')) return handleAppApi(req, res, pathname, q);
     return handleLocalReviewApi(req, res, pathname, q);
   }
 
@@ -634,6 +668,10 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 
 (function start(port, tries) {
   store.ensureDataDir();
+  // 启动即做一份自动快照(24 小时内已有则跳过,只留最近 10 份):动真实文件前先有退路。失败只记日志,不影响服务。
+  snapshot.ensureAutoSnapshot().then((result) => {
+    if (result.created) console.log(`  自动快照: ${result.latest}`);
+  }).catch((error) => { console.error('自动快照失败:', error.message); });
   const server = http.createServer((req, res) => {
     handler(req, res).catch((error) => {
       if (!Number.isInteger(error && error.httpStatus) || error.httpStatus >= 500) console.error(error);

@@ -876,10 +876,22 @@
 
   function statusCanAnnotate(tab) { return tab && tab.mode === 'read' && tab.review.status === 'reviewing'; }
 
+  // 文档里夹带的原始 HTML 只保留排版用途(<br>、<img>、<details>、带 id 的 <p> 等);
+  // 脚本、事件属性、<style>、<iframe>/<object>/<form>、javascript: 链接一律剥掉。
+  // 风险在文档内容而不在来源:智能体抓网页写出的文档同样可能夹带代码。
+  // DOMPurify 缺席时退回 html:false,原始 HTML 按文本显示——宁可难看,不可执行。
+  const purifier = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function' ? window.DOMPurify : null;
+  const PURIFY_OPTIONS = Object.freeze({
+    USE_PROFILES: { html: true, svg: true, svgFilters: true, mathMl: true },
+    FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed', 'base', 'meta', 'link', 'template'],
+    FORBID_ATTR: ['srcdoc', 'formaction'],
+  });
+  function sanitizeHtml(html) { return purifier ? purifier.sanitize(html, PURIFY_OPTIONS) : html; }
+
   function markdownEngine() {
     const texmath = window.texmath || window.markdownitTexmath || window['markdown-it-texmath'];
     const engine = window.markdownit({
-      html: true, linkify: true, breaks: false,
+      html: Boolean(purifier), linkify: true, breaks: false,
       highlight(source, language) {
         if (language === 'mermaid') return '';
         if (language && window.hljs && window.hljs.getLanguage(language)) {
@@ -926,7 +938,8 @@
   }
 
   const md = markdownEngine();
-  if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' });
+  // strict:图表文字经 Mermaid 自带的净化,不允许 HTML 标签与点击脚本进入 SVG。
+  if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
 
   function posixDir(value) { const index = value.lastIndexOf('/'); return index < 0 ? '' : value.slice(0, index); }
   function posixJoin(base, relative) {
@@ -994,7 +1007,7 @@
     const renderToken = Symbol('mdturn-render');
     root.__mdturnRenderToken = renderToken;
     const target = document.createElement('div');
-    target.innerHTML = md.render(source || '');
+    target.innerHTML = sanitizeHtml(md.render(source || ''));
     adoptBareInlineRuns(target);
     target.querySelectorAll('img[src]').forEach((image) => {
       const src = image.getAttribute('src') || '';
