@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const listeners = new Set();
 const commandListeners = new Set();
@@ -34,6 +34,13 @@ contextBridge.exposeInMainWorld('mdturnDesktop', Object.freeze({
   revealPath: (targetPath) => ipcRenderer.invoke('mdturn:reveal-path', targetPath),
   openExternal: (url) => ipcRenderer.invoke('mdturn:open-external', url),
   notifyReviewComplete: (payload) => ipcRenderer.invoke('mdturn:notify-review-complete', payload),
+  exportPdf: (payload) => ipcRenderer.invoke('mdturn:export-pdf', payload),
+  print: () => ipcRenderer.invoke('mdturn:print'),
+  // 拖放:沙盒渲染进程拿不到 File.path,由预加载脚本换算成绝对路径
+  pathsForFiles(files) {
+    const list = Array.from(files || []);
+    return list.map((file) => { try { return webUtils.getPathForFile(file); } catch { return ''; } }).filter(Boolean);
+  },
   onOpenFiles(callback) {
     if (typeof callback !== 'function') throw new TypeError('onOpenFiles 需要函数参数。');
     listeners.add(callback);

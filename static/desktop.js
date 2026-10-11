@@ -27,6 +27,8 @@
     annotationSave: $('#saveAnnotation'), annotationCancel: $('#cancelAnnotation'), annotationClose: $('#closeAnnotationDialog'),
     confirmDialog: $('#confirmDialog'), confirmTitle: $('#confirmTitle'), confirmMessage: $('#confirmMessage'),
     confirmAccept: $('#confirmAccept'), confirmCancel: $('#confirmCancel'), toastRegion: $('#toastRegion'),
+    findBar: $('#findBar'), findInput: $('#findInput'), findCount: $('#findCount'), findPrev: $('#findPrev'), findNext: $('#findNext'), findClose: $('#findClose'),
+    dropOverlay: $('#dropOverlay'),
   };
 
   const STATUS = {
@@ -831,7 +833,150 @@
     }
     if (command === 'zoom-in') { setReaderZoom(state.readerZoom * 1.1); return; }
     if (command === 'zoom-out') { setReaderZoom(state.readerZoom / 1.1); return; }
-    if (command === 'zoom-reset') setReaderZoom(1);
+    if (command === 'zoom-reset') { setReaderZoom(1); return; }
+    if (command === 'find') { openFind(); return; }
+    if (command === 'find-next') { stepFind(1); return; }
+    if (command === 'find-prev') { stepFind(-1); return; }
+    if (command === 'export-pdf') { void exportPdf(); return; }
+    if (command === 'print') void printDocument();
+  }
+
+  // ---------- 查找(阅读模式,正文内) ----------
+  const find = { query: '', ranges: [], index: -1 };
+  function findSupported() { return !!(globalThis.CSS && CSS.highlights && globalThis.Highlight); }
+  function openFind() {
+    const tab = activeTab();
+    if (!tab) return;
+    if (tab.mode === 'edit') { toast('查找目前只在阅读模式下可用;编辑模式可用编辑器自带的搜索。'); return; }
+    nodes.findBar.hidden = false;
+    const selected = String(window.getSelection() || '').trim();
+    if (selected && selected.length <= 80 && !selected.includes('\n')) nodes.findInput.value = selected;
+    nodes.findInput.focus(); nodes.findInput.select();
+    runFind();
+  }
+  function closeFind() {
+    nodes.findBar.hidden = true;
+    clearFind();
+    nodes.readerScroll.focus?.();
+  }
+  function clearFind() {
+    find.ranges = []; find.index = -1; find.query = '';
+    if (findSupported()) { CSS.highlights.delete('mdturn-find'); CSS.highlights.delete('mdturn-find-current'); }
+    nodes.findCount.textContent = '0 / 0'; nodes.findBar.classList.remove('no-match');
+  }
+  function textNodesOf(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => (node.parentElement && node.parentElement.closest('script, style, .note-pin') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    const nodes_ = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes_.push(node);
+    return nodes_;
+  }
+  // 跨文本节点匹配:把正文拼成一串,记录每个字符落在哪个节点的哪个偏移。
+  function runFind() {
+    const query = nodes.findInput.value;
+    const tab = activeTab();
+    if (!tab || tab.mode !== 'read' || !query) { clearFind(); return; }
+    const textNodes = textNodesOf(nodes.content);
+    const pieces = []; let whole = '';
+    for (const node of textNodes) { pieces.push({ node, start: whole.length, end: whole.length + node.data.length }); whole += node.data; }
+    const haystack = whole.toLowerCase(); const needle = query.toLowerCase();
+    const ranges = [];
+    const locate = (offset) => {
+      let low = 0, high = pieces.length - 1;
+      while (low < high) { const mid = (low + high) >> 1; if (pieces[mid].end <= offset) low = mid + 1; else high = mid; }
+      return pieces[low];
+    };
+    for (let at = haystack.indexOf(needle); at !== -1 && ranges.length < 2000; at = haystack.indexOf(needle, at + needle.length)) {
+      const from = locate(at), to = locate(at + needle.length - 1);
+      if (!from || !to) break;
+      const range = document.createRange();
+      range.setStart(from.node, at - from.start); range.setEnd(to.node, at + needle.length - to.start);
+      ranges.push(range);
+    }
+    const keepIndex = find.query === query ? find.index : -1;
+    find.query = query; find.ranges = ranges;
+    find.index = ranges.length ? Math.min(Math.max(keepIndex, 0), ranges.length - 1) : -1;
+    if (findSupported()) CSS.highlights.set('mdturn-find', new Highlight(...ranges));
+    nodes.findBar.classList.toggle('no-match', !ranges.length);
+    highlightCurrentFind(true);
+  }
+  function highlightCurrentFind(scroll) {
+    if (!find.ranges.length || find.index < 0) {
+      if (findSupported()) CSS.highlights.delete('mdturn-find-current');
+      nodes.findCount.textContent = `0 / ${find.ranges.length}`; return;
+    }
+    const current = find.ranges[find.index];
+    if (findSupported()) CSS.highlights.set('mdturn-find-current', new Highlight(current));
+    nodes.findCount.textContent = `${find.index + 1} / ${find.ranges.length}`;
+    if (scroll) {
+      const rect = current.getBoundingClientRect();
+      const host = nodes.readerScroll.getBoundingClientRect();
+      if (rect.top < host.top + 40 || rect.bottom > host.bottom - 40) {
+        nodes.readerScroll.scrollTop += rect.top - host.top - host.height / 3;
+      }
+    }
+  }
+  function stepFind(direction) {
+    if (nodes.findBar.hidden) { openFind(); return; }
+    if (!find.ranges.length) { runFind(); if (!find.ranges.length) return; }
+    find.index = (find.index + direction + find.ranges.length) % find.ranges.length;
+    highlightCurrentFind(true);
+  }
+
+  // ---------- 导出 PDF / 打印 ----------
+  // 折叠块在关闭状态下不会被打印,导出前临时展开,结束后恢复。
+  let reopenedDetails = [];
+  function expandDetailsForPrint() {
+    reopenedDetails = Array.from(nodes.content.querySelectorAll('details:not([open])'));
+    reopenedDetails.forEach((node) => { node.open = true; });
+  }
+  function restoreDetailsAfterPrint() {
+    reopenedDetails.forEach((node) => { node.open = false; });
+    reopenedDetails = [];
+  }
+  window.addEventListener('beforeprint', expandDetailsForPrint);
+  window.addEventListener('afterprint', restoreDetailsAfterPrint);
+
+  async function exportPdf() {
+    const tab = activeTab();
+    if (!tab) { toast('先打开一篇文档再导出。', 'error'); return; }
+    if (tab.mode === 'edit') { toast('请先回到阅读模式再导出 PDF。', 'error'); return; }
+    if (!bridge || typeof bridge.exportPdf !== 'function') { window.print(); return; }
+    const wasHidden = nodes.findBar.hidden; nodes.findBar.hidden = true;
+    expandDetailsForPrint();
+    try {
+      const result = await bridge.exportPdf({ suggestedName: tab.review.title || 'document', directory: posixDir(tab.review.sourceFile || '') });
+      if (result && result.ok) toast('PDF 已导出。');
+    } catch (error) { toast(`导出 PDF 失败:${error.message || error}`, 'error'); }
+    finally { nodes.findBar.hidden = wasHidden; restoreDetailsAfterPrint(); }
+  }
+  async function printDocument() {
+    const tab = activeTab();
+    if (!tab) { toast('先打开一篇文档再打印。', 'error'); return; }
+    if (tab.mode === 'edit') { toast('请先回到阅读模式再打印。', 'error'); return; }
+    if (!bridge || typeof bridge.print !== 'function') { window.print(); return; }
+    expandDetailsForPrint();
+    try { await bridge.print(); } catch (error) { toast(`打印失败:${error.message || error}`, 'error'); }
+    finally { restoreDetailsAfterPrint(); }
+  }
+
+  // ---------- 拖放打开 ----------
+  function installDragAndDrop() {
+    let depth = 0;
+    const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes('Files');
+    window.addEventListener('dragenter', (event) => { if (!hasFiles(event)) return; event.preventDefault(); depth += 1; nodes.dropOverlay.hidden = false; });
+    window.addEventListener('dragover', (event) => { if (!hasFiles(event)) return; event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; });
+    window.addEventListener('dragleave', (event) => { if (!hasFiles(event)) return; depth = Math.max(0, depth - 1); if (!depth) nodes.dropOverlay.hidden = true; });
+    window.addEventListener('drop', (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault(); depth = 0; nodes.dropOverlay.hidden = true;
+      const files = Array.from(event.dataTransfer.files || []);
+      const paths = bridge && typeof bridge.pathsForFiles === 'function' ? bridge.pathsForFiles(files) : files.map((file) => file.path).filter(Boolean);
+      const markdown = paths.filter((item) => /\.(md|markdown)$/i.test(item));
+      if (!markdown.length) { toast('只能打开 .md 文件。', 'error'); return; }
+      void openPaths(markdown);
+    });
   }
 
   function renderTabs() {
@@ -959,6 +1104,7 @@
         nodes.content.dataset.tabId = tab.id;
         buildOutline(tab);
         renderMarkers(tab);
+        if (!nodes.findBar.hidden) runFind();
         requestAnimationFrame(() => {
           nodes.readerScroll.scrollTop = tab.scrollTop || 0;
           updateOutlineActive();
@@ -1041,7 +1187,8 @@
 
   const md = markdownEngine();
   // strict:图表文字经 Mermaid 自带的净化,不允许 HTML 标签与点击脚本进入 SVG。
-  if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+  const prefersDark = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
+  if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: prefersDark ? 'dark' : 'default' });
 
   function posixDir(value) { const index = value.lastIndexOf('/'); return index < 0 ? '' : value.slice(0, index); }
   function posixJoin(base, relative) {
@@ -1892,6 +2039,7 @@
 
   function renderEditor(tab) {
     clearMarkerOverlay();
+    if (!nodes.findBar.hidden) closeFind();
     tab.mode = 'edit';
     nodes.readerPane.hidden = true; nodes.editorPane.hidden = false;
     if (state.editorTabId !== tab.id) createEditor(tab);
@@ -2214,11 +2362,23 @@
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') { event.preventDefault(); handleDesktopCommand('open'); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); handleDesktopCommand('save'); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w') { event.preventDefault(); handleDesktopCommand('close-tab'); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); handleDesktopCommand('find'); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g') { event.preventDefault(); handleDesktopCommand(event.shiftKey ? 'find-prev' : 'find-next'); }
       if (event.key === 'Escape') {
         if (!nodes.annotationDialog.hidden) closeAnnotationDialog();
+        else if (!nodes.findBar.hidden) closeFind();
         else { nodes.annotate.hidden = true; window.getSelection()?.removeAllRanges(); }
       }
     });
+    nodes.findInput.addEventListener('input', runFind);
+    nodes.findInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); stepFind(event.shiftKey ? -1 : 1); }
+      else if (event.key === 'Escape') { event.preventDefault(); closeFind(); }
+    });
+    nodes.findNext.addEventListener('click', () => stepFind(1));
+    nodes.findPrev.addEventListener('click', () => stepFind(-1));
+    nodes.findClose.addEventListener('click', closeFind);
+    installDragAndDrop();
     window.addEventListener('beforeunload', (event) => {
       if (state.eventSource) state.eventSource.close();
       if (state.reconcileTimer) clearInterval(state.reconcileTimer);

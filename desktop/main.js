@@ -8,6 +8,7 @@ const {
   dialog,
   ipcMain,
   Menu,
+  nativeTheme,
   Notification: ElectronNotification,
   shell,
 } = require('electron');
@@ -163,7 +164,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     show: false,
-    backgroundColor: '#f5f5f7',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1d22' : '#f5f5f7',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -214,6 +215,33 @@ function installIpc() {
     if (!isTrustedRenderer(event) || !isSafeExternalUrl(url)) throw new Error('只允许打开 http/https 外部链接。');
     await shell.openExternal(url);
     return true;
+  });
+  // 导出 PDF / 打印:都走 Chromium 的打印媒体(desktop.css 的 @media print 只留正文)。
+  ipcMain.handle('mdturn:export-pdf', async (event, payload) => {
+    if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的导出请求。');
+    const suggested = payload && typeof payload.suggestedName === 'string' ? payload.suggestedName.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 120) : 'document';
+    const defaultDir = payload && typeof payload.directory === 'string' && path.isAbsolute(payload.directory) ? payload.directory : app.getPath('documents');
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出为 PDF',
+      defaultPath: path.join(defaultDir, `${suggested.replace(/\.md$/i, '')}.pdf`),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
+    const pdf = await mainWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+      margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 },
+      preferCSSPageSize: false,
+    });
+    await fs.promises.writeFile(result.filePath, pdf);
+    shell.showItemInFolder(result.filePath);
+    return { ok: true, filePath: result.filePath };
+  });
+  ipcMain.handle('mdturn:print', async (event) => {
+    if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的打印请求。');
+    return new Promise((resolve) => {
+      mainWindow.webContents.print({ printBackground: true }, (success, reason) => resolve({ ok: success, reason: reason || null }));
+    });
   });
   ipcMain.handle('mdturn:notify-review-complete', async (event, payload) => {
     if (!isTrustedRenderer(event) || !payload || typeof payload !== 'object') {
@@ -278,12 +306,27 @@ function installMenu() {
           accelerator: 'CmdOrCtrl+S',
           click: () => { sendRendererCommand('save'); },
         },
+        { type: 'separator' },
+        {
+          label: '导出为 PDF…',
+          accelerator: 'CmdOrCtrl+Shift+E',
+          click: () => { sendRendererCommand('export-pdf'); },
+        },
+        {
+          label: '打印…',
+          accelerator: 'CmdOrCtrl+P',
+          click: () => { sendRendererCommand('print'); },
+        },
       ],
     }, {
       label: '编辑',
       submenu: [
         { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+        { type: 'separator' },
+        { label: '查找…', accelerator: 'CmdOrCtrl+F', click: () => { sendRendererCommand('find'); } },
+        { label: '查找下一个', accelerator: 'CmdOrCtrl+G', click: () => { sendRendererCommand('find-next'); } },
+        { label: '查找上一个', accelerator: 'CmdOrCtrl+Shift+G', click: () => { sendRendererCommand('find-prev'); } },
       ],
     }, {
       label: '显示',

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <!-- 内容安全策略:文档里夹带的脚本一律不执行;脚本只能来自本机服务自带的静态文件。
        服务端对 /desktop 也下发同一份策略(server.js),两处保持一致。 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self'; media-src 'self' data: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/mdturn-editor.css?v=7">
-  <link rel="stylesheet" href="/static/desktop.css?v=12">
+  <link rel="stylesheet" href="/static/desktop.css?v=13">
 </head>
 <body>
   <div id="appShell" class="app-shell">
@@ -73,6 +73,15 @@
         </div>
         <span id="reviewCount" class="review-count">本轮 0 条未处理</span>
         <span class="toolbar-spacer"></span>
+        <div id="findBar" class="find-bar" role="search" hidden>
+          <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+          <input id="findInput" type="search" placeholder="在正文中查找" aria-label="在正文中查找" autocomplete="off" spellcheck="false">
+          <span id="findCount" class="find-count">0 / 0</span>
+          <button id="findPrev" class="icon-button compact" type="button" title="上一个(⇧↩)" aria-label="上一个"><i class="ph ph-caret-up" aria-hidden="true"></i></button>
+          <button id="findNext" class="icon-button compact" type="button" title="下一个(↩)" aria-label="下一个"><i class="ph ph-caret-down" aria-hidden="true"></i></button>
+          <button id="findClose" class="icon-button compact" type="button" title="关闭(Esc)" aria-label="关闭查找"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </div>
+        <div id="dropOverlay" class="drop-overlay" hidden><div class="drop-card"><i class="ph ph-file-arrow-down" aria-hidden="true"></i>松开即打开 Markdown</div></div>
         <button id="readingModeButton" class="mode-button active" type="button">
           <i class="ph ph-book-open-text" aria-hidden="true"></i>阅读与批注
         </button>
@@ -202,6 +211,6 @@
   <script src="/static/vendor/mdturn-editor.js?v=7"></script>
   <script src="/static/markdown-patch.js?v=1"></script>
   <script src="/static/desktop-anchor.js?v=4"></script>
-  <script src="/static/desktop.js?v=15"></script>
+  <script src="/static/desktop.js?v=16"></script>
 </body>
 </html>
