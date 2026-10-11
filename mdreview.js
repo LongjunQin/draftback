@@ -15,6 +15,7 @@ const {
   unlockReview,
 } = require('./lib/review-store');
 const snapshot = require('./lib/snapshot');
+const batches = require('./lib/batches');
 
 function usage() {
   return [
@@ -28,6 +29,7 @@ function usage() {
     '  mdreview snapshot [--reason "<原因>"]              # 整体备份审阅索引与全部批注文件(手动快照不自动清理)',
     '  mdreview snapshots [--json]                        # 列出快照',
     '  mdreview restore <快照id> [--dry-run] --yes         # 从快照恢复;恢复前自动再做一份 pre-restore 快照',
+    '  mdreview import-batch <批次文件.json> [--json]      # 导入手机导出的批注批次(按版本指纹匹配审阅中的会话)',
   ].join('\n');
 }
 
@@ -344,6 +346,20 @@ async function main() {
       printReview(review);
       console.log(`→ 闭环完成(本轮): 批注已全部处理,MDTurn 会自动加载最新版并通知用户。用户接下来可能再审一轮或定稿——立即再以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交新批注或定稿时返回;不要主动去关 MDTurn 里的标签或移动 .annotations.json。`);
       await notifyReviewChangedBestEffort(review, 'agent-complete');
+      return;
+    }
+    if (args.command === 'import-batch') {
+      if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
+      const { receipt, review } = await batches.importBatchFile(args.file);
+      if (args.json) { console.log(JSON.stringify({ receipt, review }, null, 2)); return; }
+      if (!receipt.accepted) {
+        fail(`批次被拒收(${receipt.reason}):${receipt.message}`);
+        return;
+      }
+      printReview(review);
+      console.log(`${receipt.reused ? '(重复导入,沿用上次回执)' : ''}已接收 ${receipt.acceptedIds.length} 条批注${receipt.skippedIds.length ? `,跳过已存在 ${receipt.skippedIds.length} 条` : ''};回执 ${receipt.batchId}`);
+      if (review) await notifyReviewChangedBestEffort(review, 'batch-imported');
+      if (review && review.status === 'ready_to_apply') console.log(`→ Agent 下一步: 运行 mdreview begin-apply "${review.absPath}" 开始按批注改稿。`);
       return;
     }
     if (args.command === 'snapshot') {

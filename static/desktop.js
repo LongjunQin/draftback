@@ -961,6 +961,22 @@
     finally { restoreDetailsAfterPrint(); }
   }
 
+  // 手机导出的批注批次(.mdturn-batch.json)拖进窗口即导入;结果以提示显示,会话标签随事件流自动刷新。
+  async function importBatchFile(file) {
+    try {
+      const result = await requestJson('/api/app/batch/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: file }),
+      });
+      const receipt = result.receipt || {};
+      if (receipt.accepted) {
+        toast(`已接收手机批注 ${receipt.acceptedIds.length} 条${receipt.skippedIds && receipt.skippedIds.length ? `,跳过重复 ${receipt.skippedIds.length} 条` : ''}。`);
+        if (result.review && result.review.id) void queueRemoteReviewChange(result.review.id, { reason: 'batch-imported' });
+      } else {
+        toast(`批次未被采用(${receipt.reason}):${receipt.message}`, 'error');
+      }
+    } catch (error) { toast(friendlyError(error, '导入批注批次'), 'error'); }
+  }
+
   // ---------- 拖放打开 ----------
   function installDragAndDrop() {
     let depth = 0;
@@ -973,9 +989,11 @@
       event.preventDefault(); depth = 0; nodes.dropOverlay.hidden = true;
       const files = Array.from(event.dataTransfer.files || []);
       const paths = bridge && typeof bridge.pathsForFiles === 'function' ? bridge.pathsForFiles(files) : files.map((file) => file.path).filter(Boolean);
+      const batchFiles = paths.filter((item) => /\.mdturn-batch\.json$/i.test(item));
       const markdown = paths.filter((item) => /\.(md|markdown)$/i.test(item));
-      if (!markdown.length) { toast('只能打开 .md 文件。', 'error'); return; }
-      void openPaths(markdown);
+      if (batchFiles.length) { batchFiles.forEach((file) => void importBatchFile(file)); }
+      if (!markdown.length && !batchFiles.length) { toast('只能打开 .md 文件或 .mdturn-batch.json 批注批次。', 'error'); return; }
+      if (markdown.length) void openPaths(markdown);
     });
   }
 
@@ -1252,11 +1270,19 @@
     });
   }
 
+  // Front Matter(---/+++ 包住的元数据)不属于正文:阅读时替换成同样行数的空行,行号不变、批注锚点不受影响。
+  const FRONT_MATTER = /^(---|\+\+\+)[ \t]*\r?\n[\s\S]*?\r?\n\1[ \t]*(?:\r?\n|$)/;
+  function blankFrontMatter(text) {
+    const match = String(text || '').match(FRONT_MATTER);
+    if (!match) return String(text || '');
+    const lines = match[0].split('\n').length - 1;
+    return '\n'.repeat(lines) + text.slice(match[0].length);
+  }
   async function renderMarkdown(root, source, tab, options = {}) {
     const renderToken = Symbol('mdturn-render');
     root.__mdturnRenderToken = renderToken;
     const target = document.createElement('div');
-    target.innerHTML = sanitizeHtml(md.render(source || ''));
+    target.innerHTML = sanitizeHtml(md.render(blankFrontMatter(source || '')));
     adoptBareInlineRuns(target);
     target.querySelectorAll('img[src]').forEach((image) => {
       const src = image.getAttribute('src') || '';

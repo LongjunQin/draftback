@@ -14,6 +14,7 @@ const store = require('./lib/review-store');
 const documents = require('./lib/document-service');
 const snapshot = require('./lib/snapshot');
 const plainDocuments = require('./lib/documents');
+const batches = require('./lib/batches');
 const { createReviewEventHub } = require('./lib/review-events');
 
 function parsePort(value, fallback = null, options = {}) {
@@ -547,6 +548,16 @@ async function handleAppApi(req, res, pathname, q) {
       return sendJson(res, 400, { error: 'bad_request', message: '请提供 path 与 editing(布尔)。' });
     }
     return sendJson(res, 200, await plainDocuments.setEditing(body.path, body.editing, { token: body.token }));
+  }
+  if (pathname === '/api/app/batch/import') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim()) {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供批次文件路径。' });
+    }
+    const result = await batches.importBatchFile(body.path);
+    if (result.review) await publishReviewChangedSafe(result.review.id, 'batch-imported');
+    return sendJson(res, 200, result);
   }
   if (pathname === '/api/app/recent') {
     if (!allowMethods(req, res, ['GET'])) return;
