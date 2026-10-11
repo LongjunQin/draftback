@@ -38,6 +38,8 @@
     complete: { text: '修改已完成 · 已加载最新版', detail: '可以开始下一轮审阅，或点右上「定稿并关闭」结束。', icon: 'ph-check-circle' },
     conflict: { text: '版本冲突 · 已停止写入', detail: '需要先处理冲突。', icon: 'ph-warning-circle' },
     cancelled: { text: '审阅已取消', detail: '本轮已人工结束。', icon: 'ph-x-circle' },
+    plain: { text: '普通阅读 · 未冻结', detail: '没有建立审阅会话,原文可随时编辑。要划词批注请点右上「开始审阅」。', icon: 'ph-book-open' },
+    plainEdit: { text: '编辑中 · 直接保存到文件', detail: '保存前会核对文件是否被别的程序改过;编辑期间智能体不会冻结这篇文档。', icon: 'ph-pencil-simple-line' },
   };
 
   const state = {
@@ -138,11 +140,36 @@
 
   function activeTab() { return state.tabs.find((tab) => tab.id === state.activeId) || null; }
   function tabByPath(sourceFile) { return state.tabs.find((tab) => tab.review && tab.review.sourceFile === sourceFile) || null; }
+  function isPlain(tab) { return !!tab && tab.kind === 'document'; }
+  function editingToken() {
+    if (!state.editingToken) state.editingToken = `tab-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
+    return state.editingToken;
+  }
   function effectiveStatus(note) { return Anchor ? Anchor.effectiveStatus(note) : (note.status || 'open'); }
   function openAnnotations(tab) { return (tab && tab.annotations || []).filter((note) => effectiveStatus(note) === 'open'); }
   function isDocNote(note) { return !!note && note.scope === 'document'; }
 
+  // 普通文档载荷(/api/app/document*)→ 与审阅 bundle 同形的结构:review 字段是一个 status='plain' 的占位对象,
+  // 这样标签页、状态条、编辑器的代码路径可以复用;真正的区别只在 kind 与几处分支。
+  function normalizeDocument(payload) {
+    const document = payload.document || {};
+    const source = payload.source || {};
+    return {
+      kind: 'document',
+      review: {
+        id: document.id, status: 'plain', sourceFile: document.absPath, absPath: document.absPath,
+        file: document.file, title: document.title || document.file, directory: document.directory,
+      },
+      source: { content: String(source.content || ''), hash: source.hash, revision: 0 },
+      annotations: [],
+      activeReview: payload.activeReview || null,
+      editing: payload.editing || null,
+    };
+  }
+
   function normalizeBundle(bundle) {
+    if (bundle && bundle.kind === 'document') return bundle;
+    if (bundle && bundle.document && !bundle.review) return normalizeDocument(bundle);
     const review = bundle.review || {};
     const source = bundle.source && typeof bundle.source === 'object'
       ? bundle.source
@@ -159,10 +186,20 @@
     return normalizeBundle(await requestJson(`/api/app/bundle?r=${encodeURIComponent(reviewId)}`));
   }
 
+  async function fetchDocument(filePath) {
+    return normalizeDocument(await requestJson(`/api/app/document?path=${encodeURIComponent(filePath)}`));
+  }
+
+  async function fetchTabBundle(tab) {
+    return isPlain(tab) ? fetchDocument(tab.review.sourceFile) : fetchBundle(tab.id);
+  }
+
   function makeTab(bundle) {
-    const { review, source, annotations } = normalizeBundle(bundle);
+    const normalized = normalizeBundle(bundle);
+    const { review, source, annotations } = normalized;
     const tab = {
       id: review.id,
+      kind: normalized.kind === 'document' ? 'document' : 'review',
       review,
       source: source.content || '',
       sourceHash: source.hash || review.workingHash || review.sourceHash,
@@ -232,7 +269,7 @@
   function persistTabs() {
     const payload = {
       activeId: state.activeId,
-      tabs: state.tabs.map((tab) => ({ id: tab.id, path: tab.review.sourceFile })),
+      tabs: state.tabs.map((tab) => ({ id: tab.id, path: tab.review.sourceFile, kind: tab.kind })),
     };
     localStorage.setItem('mdturn.tabs', JSON.stringify(payload));
   }
@@ -245,7 +282,7 @@
     for (const entry of entries) {
       if (!entry || typeof entry.id !== 'string') continue;
       try {
-        const bundle = await fetchBundle(entry.id);
+        const bundle = entry.kind === 'document' ? await fetchDocument(entry.path) : await fetchBundle(entry.id);
         state.tabs.push(makeTab(bundle));
       } catch (_) {}
     }
@@ -254,16 +291,23 @@
       : (state.tabs[0] && state.tabs[0].id) || null;
   }
 
+  // 返回审阅摘要(供 reconcileOpenReviews 对账);同时刷新"最近文件"列表(普通打开 ∪ 审阅)。
   async function refreshRecents() {
+    let reviews = [];
     try {
       const result = await requestJson('/api/reviews');
-      state.recents = Array.isArray(result.reviews) ? result.reviews : [];
-      renderRecents();
-      return state.recents;
+      reviews = Array.isArray(result.reviews) ? result.reviews : [];
     } catch (error) {
       nodes.recentList.replaceChildren(emptyBlock(friendlyError(error, '读取最近审阅'), 'recent-empty'));
-      return [];
     }
+    try {
+      const recent = await requestJson('/api/app/recent');
+      state.recents = Array.isArray(recent.items) ? recent.items : [];
+      renderRecents();
+    } catch (error) {
+      nodes.recentList.replaceChildren(emptyBlock(friendlyError(error, '读取最近文件'), 'recent-empty'));
+    }
+    return reviews;
   }
 
   function emptyBlock(text, className = 'notes-empty') {
@@ -291,17 +335,22 @@
     containers.forEach((container) => {
       container.replaceChildren();
       if (!state.recents.length) {
-        container.appendChild(emptyBlock('还没有最近审阅。打开一篇 Markdown 后会出现在这里。', 'recent-empty'));
+        container.appendChild(emptyBlock('还没有最近文件。打开一篇 Markdown 后会出现在这里。', 'recent-empty'));
         return;
       }
       const fragment = document.createDocumentFragment();
-      state.recents.slice(0, container === nodes.welcomeRecent ? 5 : 18).forEach((review) => {
+      state.recents.slice(0, container === nodes.welcomeRecent ? 5 : 18).forEach((item) => {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'recent-item';
-        const title = document.createElement('strong'); title.textContent = review.title || review.file || 'Markdown';
+        const title = document.createElement('strong'); title.textContent = item.file || 'Markdown';
         const meta = document.createElement('span');
-        meta.textContent = `${formatDirectory(review.directory)} · ${statusLabel(review.status, review.applyMode)}${review.openCount ? ` · ${review.openCount} 条未处理` : ''}`;
+        const active = item.activeReview;
+        const stateText = !item.exists ? '文件已不存在'
+          : active ? `${statusLabel(active.status, active.applyMode)}${active.openCount ? ` · ${active.openCount} 条未处理` : ''}`
+            : item.editing ? '编辑中' : item.lastReview ? '上次审阅已结束' : '普通文档';
+        meta.textContent = `${formatDirectory(item.directory)} · ${stateText}`;
         button.append(title, meta);
-        button.addEventListener('click', () => openReviewId(review.id));
+        button.disabled = !item.exists;
+        button.addEventListener('click', () => (active ? openReviewId(active.id) : openDocumentPath(item.absPath)));
         fragment.appendChild(button);
       });
       container.appendChild(fragment);
@@ -336,8 +385,44 @@
   async function openPaths(paths) {
     for (const filePath of Array.isArray(paths) ? paths : []) {
       if (typeof filePath !== 'string' || !filePath.toLowerCase().endsWith('.md')) continue;
-      await openReviewPath(filePath);
+      await openDocumentPath(filePath);
     }
+  }
+
+  // 普通打开:不建会话、不冻结。文档已有活动审阅会话(通常是智能体 mdreview open 建的)时直接进那个会话。
+  async function openDocumentPath(filePath) {
+    try {
+      const payload = await requestJson('/api/app/document/open', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath }),
+      });
+      if (payload.activeReview && payload.activeReview.id) {
+        await openReviewId(payload.activeReview.id);
+        await refreshRecents();
+        return;
+      }
+      upsertTab(normalizeDocument(payload), { activate: true });
+      await refreshRecents();
+    } catch (error) { toast(friendlyError(error, '打开文档'), 'error'); }
+  }
+
+  // 「开始审阅」:把普通文档标签转成审阅会话(冻结 + 指纹 + 可批注)。
+  async function startReview(tab = activeTab()) {
+    if (!tab || !isPlain(tab)) return;
+    captureEditorValue(tab);
+    if (tab.dirty && !(await saveSource(tab))) return;
+    if (tab.mode === 'edit') { tab.mode = 'read'; await setEditing(tab, false); }
+    await openReviewPath(tab.review.sourceFile);
+  }
+
+  async function setEditing(tab, editing) {
+    if (!tab || !isPlain(tab)) return;
+    try {
+      await requestJson('/api/app/document/editing', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: tab.review.sourceFile, editing, token: editingToken() }),
+      });
+      tab.editingRegistered = editing;
+    } catch (error) { if (editing) toast(friendlyError(error, '登记编辑状态'), 'error'); }
   }
 
   async function openReviewPath(filePath) {
@@ -374,6 +459,7 @@
         return existing;
       }
       const index = state.tabs.indexOf(existing);
+      if (existing.editingRegistered && existing.id !== next.id) void setEditing(existing, false);
       // Reopening the same session may preserve its view.  A new review round
       // for the same file must always return to frozen read mode instead of
       // inheriting an old edit-mode tab.
@@ -410,7 +496,12 @@
   async function refreshTab(tab, options = {}) {
     if (!tab || tab.dirty) return tab;
     try {
-      const bundle = await fetchBundle(tab.id);
+      const bundle = await fetchTabBundle(tab);
+      if (isPlain(tab) && bundle.activeReview && bundle.activeReview.id) {
+        // 别处(通常是智能体)已为这篇文档建了审阅会话:把普通标签换成会话标签。
+        await queueRemoteReviewChange(bundle.activeReview.id, { reason: 'document-now-reviewing', forceSource: true });
+        return tab;
+      }
       applyBundleToTab(tab, bundle, options);
       return tab;
     } catch (error) {
@@ -593,9 +684,18 @@
       const summaries = new Map(reviews.map((review) => [review.id || review.sessionId, review]));
       const latestByPath = new Map(reviews.map((review) => [review.sourceFile || review.absPath, review]));
       const updates = [];
+      const ACTIVE = new Set(['reviewing', 'ready_to_apply', 'applying', 'conflict']);
       for (const tab of state.tabs.slice()) {
         const summary = summaries.get(tab.id);
         const latest = latestByPath.get(tab.review.sourceFile);
+        if (isPlain(tab)) {
+          if (latest && ACTIVE.has(latest.status)) {
+            updates.push(queueRemoteReviewChange(latest.id || latest.sessionId, { reason: 'document-now-reviewing', forceSource: true }));
+          } else if (!tab.dirty) {
+            updates.push(refreshTab(tab, { silent: true }));
+          }
+          continue;
+        }
         if (latest && (latest.id || latest.sessionId) !== tab.id) {
           updates.push(queueRemoteReviewChange(latest.id || latest.sessionId, {
             reason: 'reconcile-new-round', forceSource: true,
@@ -677,6 +777,7 @@
       if (!discard) return;
       clearDraft(tab);
     }
+    if (tab.editingRegistered) void setEditing(tab, false);
     const index = state.tabs.indexOf(tab);
     state.tabs.splice(index, 1);
     if (state.editorTabId === id) destroyEditor();
@@ -820,7 +921,7 @@
 
   function renderStatus(tab) {
     const review = tab.review;
-    const descriptor = statusDescriptor(review);
+    const descriptor = isPlain(tab) && tab.mode === 'edit' ? STATUS.plainEdit : statusDescriptor(review);
     nodes.reviewState.dataset.status = review.status || 'unknown';
     nodes.reviewStateText.textContent = tab.remotePending
       ? `${descriptor.text} · 远程更新待同步`
@@ -830,13 +931,14 @@
       ? `${descriptor.detail}当前草稿不会被覆盖，保存或退出编辑后将立即同步。`
       : descriptor.detail;
     const count = openAnnotations(tab).length;
-    nodes.reviewCount.textContent = `本轮 ${count} 条未处理`;
+    nodes.reviewCount.textContent = isPlain(tab) ? '未审阅' : `本轮 ${count} 条未处理`;
     nodes.readingMode.classList.toggle('active', tab.mode !== 'edit');
     nodes.editingMode.classList.toggle('active', tab.mode === 'edit');
     nodes.editingMode.disabled = review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual');
     nodes.primaryAction.hidden = false;
     nodes.primaryAction.disabled = false;
-    if (review.status === 'reviewing') nodes.primaryAction.textContent = '完成本轮审阅';
+    if (isPlain(tab)) nodes.primaryAction.textContent = '开始审阅';
+    else if (review.status === 'reviewing') nodes.primaryAction.textContent = '完成本轮审阅';
     else if (review.status === 'ready_to_apply') nodes.primaryAction.textContent = '开始手工修改';
     else if (review.status === 'applying' && review.applyMode === 'manual') nodes.primaryAction.textContent = '提交修改';
     else if (review.status === 'complete' || review.status === 'cancelled') nodes.primaryAction.textContent = '开始新一轮审阅';
@@ -1261,14 +1363,14 @@
   function maybeHintNextRound(selection) {
     const tab = activeTab();
     if (!tab || tab.mode !== 'read') return;
-    if (tab.review.status !== 'complete' && tab.review.status !== 'cancelled') return;
+    if (!isPlain(tab) && tab.review.status !== 'complete' && tab.review.status !== 'cancelled') return;
     if (!selection || selection.isCollapsed || !selection.rangeCount) return;
     if (nodes.content.dataset.tabId !== tab.id) return;
     if (!nodes.content.contains(selection.getRangeAt(0).startContainer)) return;
     const now = Date.now();
     if (now - (state.nextRoundHintAt || 0) < 6000) return;
     state.nextRoundHintAt = now;
-    toast('本轮审阅已结束，点右上角「开始新一轮审阅」即可继续批注。');
+    toast(isPlain(tab) ? '这是普通阅读。要划词批注,先点右上角「开始审阅」。' : '本轮审阅已结束，点右上角「开始新一轮审阅」即可继续批注。');
   }
 
   function handleSelectionChange() {
@@ -1439,9 +1541,11 @@
   function renderNotes(tab) {
     nodes.openNotesList.replaceChildren(); nodes.historyNotesList.replaceChildren();
     nodes.docNoteButton.hidden = !tab || tab.review.status !== 'reviewing';
-    if (!tab) {
+    if (!tab || isPlain(tab)) {
       nodes.notesTotal.textContent = '0'; nodes.openNotesCount.textContent = '0'; nodes.historyNotesCount.textContent = '0';
-      nodes.openNotesList.appendChild(emptyBlock('打开文档后，这里会显示当前轮次的批注。'));
+      nodes.openNotesList.appendChild(emptyBlock(tab
+        ? '这是普通阅读,还没有审阅会话。点右上「开始审阅」后即可划词批注,批注会交给智能体。'
+        : '打开文档后，这里会显示当前轮次的批注。'));
       return;
     }
     state.renderingHistory = true;
@@ -1807,10 +1911,15 @@
     const idempotencyKey = tab.saveRequestId || requestId('source'); tab.saveRequestId = idempotencyKey;
     updateSaveState(tab, 'saving');
     try {
-      const result = await requestJson(`/api/app/source?r=${encodeURIComponent(tab.id)}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, expectedHash: tab.sourceHash, clientRequestId: idempotencyKey }),
-      });
+      const result = isPlain(tab)
+        ? await requestJson('/api/app/document', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: tab.review.sourceFile, content, expectedHash: tab.sourceHash, clientRequestId: idempotencyKey }),
+        })
+        : await requestJson(`/api/app/source?r=${encodeURIComponent(tab.id)}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, expectedHash: tab.sourceHash, clientRequestId: idempotencyKey }),
+        });
       tab.source = content;
       tab.sourceHash = result.currentHash || result.hash || (result.review && result.review.workingHash) || tab.sourceHash;
       tab.revision = Number(result.currentRevision ?? result.revision ?? tab.revision);
@@ -1833,6 +1942,12 @@
 
   async function enterEditMode() {
     let tab = activeTab(); if (!tab) return;
+    if (isPlain(tab)) {
+      await setEditing(tab, true);
+      tab.mode = 'edit'; persistTabs(); renderApp();
+      setTimeout(() => { if (window.MDTurnEditor && state.editorView) window.MDTurnEditor.focus(state.editorView); }, 60);
+      return;
+    }
     const review = tab.review;
     if (review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual')) return;
     if (review.status === 'reviewing') {
@@ -1880,6 +1995,7 @@
     captureEditorValue(tab);
     if (tab.dirty && !(await saveSource(tab))) return;
     tab.mode = 'read'; persistTabs(); renderApp();
+    if (isPlain(tab)) await setEditing(tab, false);
   }
 
   async function submitReview(tab, options = {}) {
@@ -1942,6 +2058,7 @@
 
   async function handlePrimaryAction() {
     const tab = activeTab(); if (!tab) return;
+    if (isPlain(tab)) return startReview(tab);
     if (tab.review.status === 'reviewing') return submitReview(tab);
     if (tab.review.status === 'ready_to_apply') return enterEditMode();
     if (tab.review.status === 'applying' && tab.review.applyMode === 'manual') return finishManualApply();
@@ -2072,6 +2189,19 @@
       });
     }
   }
+
+  // App 关闭或页面重载时尽力解除编辑登记(服务重启也会清空,这里只是让智能体更早拿到解锁)。
+  window.addEventListener('pagehide', () => {
+    for (const tab of state.tabs) {
+      if (!tab.editingRegistered) continue;
+      try {
+        fetch('/api/app/document/editing', {
+          method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: tab.review.sourceFile, editing: false, token: editingToken() }),
+        }).catch(() => {});
+      } catch (_) {}
+    }
+  });
 
   async function init() {
     installEvents();

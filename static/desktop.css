@@ -183,6 +183,7 @@ textarea:focus-visible,
 .tab-state.ready_to_apply, .tab-state.applying { background: var(--amber); }
 .tab-state.complete { background: var(--green); }
 .tab-state.conflict { background: var(--red); }
+.tab-state.plain { background: var(--line); }
 
 .tab-close {
   display: inline-flex;
@@ -453,6 +454,7 @@ kbd {
 .review-state[data-status="complete"] { border-color: #bfe2cc; background: var(--green-soft); color: #237445; }
 .review-state[data-status="conflict"] { border-color: #edc0bc; background: var(--red-soft); color: #9b302d; }
 .review-state[data-status="cancelled"] { border-color: var(--line); background: #f4f5f7; color: var(--muted); }
+.review-state[data-status="plain"] { border-color: var(--line); background: #f4f5f7; color: var(--muted); }
 
 .review-count {
   padding-left: 10px;

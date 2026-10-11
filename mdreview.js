@@ -392,6 +392,9 @@ async function main() {
   } catch (error) {
     const suffix = error.code ? ` [${error.code}]` : '';
     fail(`${error.message}${suffix}`);
+    if (error.code === 'USER_EDITING' && args.file) {
+      console.error(`→ 不要改这个文件。稍后重试 mdreview open "${path.resolve(args.file)}";用户在 MDTurn 里退出编辑模式后即可冻结。`);
+    }
     if (error.code === 'OPEN_ANNOTATIONS' && args.file) {
       console.error(`→ 回到 ${path.resolve(args.file)}.annotations.json 把剩余 open 批注逐条标为 applied/wontfix,再运行 mdreview complete。`);
     }

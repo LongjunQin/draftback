@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const store = require('./lib/review-store');
 const documents = require('./lib/document-service');
 const snapshot = require('./lib/snapshot');
+const plainDocuments = require('./lib/documents');
 const { createReviewEventHub } = require('./lib/review-events');
 
 function parsePort(value, fallback = null, options = {}) {
@@ -517,6 +518,41 @@ async function handleAppApi(req, res, pathname, q) {
     });
   }
 
+  // ---- 普通文档(不建审阅会话)----
+  if (pathname === '/api/app/document/open') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim()) {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供 Markdown 文档路径。' });
+    }
+    return sendJson(res, 200, await plainDocuments.readDocument(body.path));
+  }
+  if (pathname === '/api/app/document') {
+    if (req.method === 'GET') {
+      const candidate = q.get('path');
+      if (!candidate) return sendJson(res, 400, { error: 'bad_request', message: '缺少 path。' });
+      return sendJson(res, 200, await plainDocuments.readDocument(candidate, { touch: false }));
+    }
+    if (!allowMethods(req, res, ['GET', 'PUT'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim()) {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供 Markdown 文档路径。' });
+    }
+    return sendJson(res, 200, await plainDocuments.writeDocument(body.path, body));
+  }
+  if (pathname === '/api/app/document/editing') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim() || typeof body.editing !== 'boolean') {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供 path 与 editing(布尔)。' });
+    }
+    return sendJson(res, 200, await plainDocuments.setEditing(body.path, body.editing, { token: body.token }));
+  }
+  if (pathname === '/api/app/recent') {
+    if (!allowMethods(req, res, ['GET'])) return;
+    return sendJson(res, 200, { items: await plainDocuments.listRecent() });
+  }
+
   const ref = q.get('r');
   if (!ref) return sendJson(res, 400, { error: 'bad_request', message: '缺少审阅会话 r。' });
 
@@ -668,6 +704,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 
 (function start(port, tries) {
   store.ensureDataDir();
+  // 编辑登记归本服务所有:上一次运行留下的条目一律作废。
+  plainDocuments.clearEditing().catch((error) => { console.error('清理编辑登记失败:', error.message); });
   // 启动即做一份自动快照(24 小时内已有则跳过,只留最近 10 份):动真实文件前先有退路。失败只记日志,不影响服务。
   snapshot.ensureAutoSnapshot().then((result) => {
     if (result.created) console.log(`  自动快照: ${result.latest}`);
