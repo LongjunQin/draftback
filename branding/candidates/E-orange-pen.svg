@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9d2e"/><stop offset="1" stop-color="#e2590b"/></linearGradient>
+ <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f7"/></linearGradient><radialGradient id="sheen" cx="0.18" cy="0.08" r="0.9"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset="0.6" stop-color="#fff" stop-opacity="0"/></radialGradient><filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="26" stdDeviation="26" flood-color="#000" flood-opacity=".38"/></filter><filter id="psh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="-10" dy="22" stdDeviation="16" flood-color="#000" flood-opacity=".42"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#bg)"/><rect width="1024" height="1024" fill="url(#sheen)"/>
+
+<g transform="rotate(-5 512 512)">
+  <g filter="url(#sh)"><path d="M 296 176 H 728 A 104 104 0 0 1 832 280 V 640 A 104 104 0 0 1 728 744 H 452 L 310 868 L 332 744 H 296 A 104 104 0 0 1 192 640 V 280 A 104 104 0 0 1 296 176 Z" fill="url(#pg)" stroke="#f4f6fa" stroke-width="18" stroke-linejoin="round"/></g>
+  <g fill="#c5ccda">
+    <rect x="284" y="282" width="312" height="38" rx="19"/>
+    <rect x="284" y="368" width="456" height="38" rx="19"/>
+    <rect x="284" y="556" width="456" height="38" rx="19"/>
+    <rect x="284" y="642" width="260" height="38" rx="19"/>
+  </g>
+  <rect x="262" y="446" width="620" height="72" rx="24" fill="#ffd23f"/>
+  <rect x="284" y="463" width="372" height="38" rx="19" fill="#1d2b5c"/>
+</g>
+<g transform="translate(812 462) rotate(62)" filter="url(#psh)">
+  <defs><linearGradient id="pb62" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2f3f7a"/><stop offset="1" stop-color="#1b2650"/></linearGradient></defs>
+  <polygon points="0,0 96,-34.56 96,34.56" fill="#101a3a"/>
+  <rect x="88" y="-48.0" width="342" height="96" rx="29.759999999999998" fill="url(#pb62)"/>
+  <rect x="88" y="-48.0" width="64" height="96" rx="18" fill="#ffd23f"/>
+  <rect x="360" y="-42.0" width="70" height="84" rx="22" fill="#ffd23f"/>
+  <rect x="190" y="-26.0" width="150" height="14" rx="7" fill="#1f2937" opacity=".12"/>
+</g>
+</svg>
