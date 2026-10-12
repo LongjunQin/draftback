@@ -12,6 +12,12 @@ struct Note: Identifiable, Equatable {
     var status: String { (raw["status"] as? String ?? "open").lowercased() }
     var createdAt: String { raw["createdAt"] as? String ?? "" }
     var isOpen: Bool { status == "open" }
+    /// 已打包导出、等 Mac 接收(跨端规则 6.2:导出即锁定,不能再改)。
+    var isSubmitted: Bool { status == "submitted" }
+    var submittedBatchId: String? { raw["submittedBatchId"] as? String }
+    var baseVersion: String? { raw["baseVersion"] as? String }
+    /// 批注是否写在这个版本上;没有版本指纹的旧数据按当前版本对待。
+    func belongs(toVersion hash: String) -> Bool { baseVersion == nil || baseVersion == hash }
     var isDocumentScope: Bool { (raw["scope"] as? String) == "document" }
     var headingPath: [String] { raw["headingPath"] as? [String] ?? [] }
 

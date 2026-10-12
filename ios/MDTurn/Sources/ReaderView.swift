@@ -48,6 +48,9 @@ struct ReaderView: View {
                     Button { exportPDF() } label: { Label("导出 PDF", systemImage: "doc.richtext") }
                     Button { store.submitBatch(for: document) } label: { Label("完成本轮:导出批注批次", systemImage: "paperplane") }
                         .disabled(document.openNotes.isEmpty)
+                    if !document.submittedNotes.isEmpty {
+                        Button { store.resubmitBatch(for: document) } label: { Label("重新导出已提交的批次", systemImage: "arrow.clockwise") }
+                    }
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
@@ -76,6 +79,15 @@ struct ReaderView: View {
             Button("好", role: .cancel) {}
         } message: { Text(message ?? "") }
         .overlay { if exportingPDF { ProgressView("正在生成 PDF…").padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
+        #if DEBUG
+        // 仅调试版:模拟器自动化验证用(--export-batch 导出、--resubmit-batch 重发、--show-notes 打开批注列表)
+        .onAppear {
+            let args = CommandLine.arguments
+            if args.contains("--export-batch") { store.submitBatch(for: document) }
+            if args.contains("--resubmit-batch") { store.resubmitBatch(for: document) }
+            if args.contains("--show-notes") { showNotes = true }
+        }
+        #endif
     }
 
     private var badge: some View {
@@ -92,14 +104,22 @@ struct ReaderView: View {
 
     private var statusBar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "lock.open")
-            Text("手机批注 · 本地已保存 \(document.openNotes.count) 条")
+            Image(systemName: document.openNotes.isEmpty && !document.submittedNotes.isEmpty ? "paperplane" : "lock.open")
+            Text(statusText)
             Spacer()
             Text("选中文字 → 菜单「批注」").foregroundStyle(.secondary)
         }
         .font(.footnote)
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(.bar)
+    }
+
+    /// 跨端规则第 7 节的手机状态链,文件传递阶段只有"本地已保存"和"已导出,等待 Mac 接收"两档。
+    private var statusText: String {
+        let open = document.openNotes.count, sent = document.submittedNotes.count
+        if sent > 0 && open == 0 { return "已导出 \(sent) 条 · 等待 Mac 接收" }
+        if sent > 0 { return "本地已保存 \(open) 条 · 已导出 \(sent) 条" }
+        return "手机批注 · 本地已保存 \(open) 条"
     }
 
     private func handle(_ event: ReaderEvent) {
@@ -157,36 +177,47 @@ struct NotesSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("本轮未处理 \(document.openNotes.count)") {
+                Section("本轮未提交 \(document.openNotes.count)") {
                     if document.openNotes.isEmpty {
                         Text("还没有批注。选中正文文字,在弹出的菜单里点「批注」。").foregroundStyle(.secondary)
                     }
                     ForEach(document.openNotes) { note in
-                        VStack(alignment: .leading, spacing: 6) {
-                            if note.isDocumentScope {
-                                Text("总体意见").font(.caption.bold()).foregroundStyle(.orange)
-                            } else if !note.quote.isEmpty {
-                                Text(note.quote).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                        NoteRow(note: note)
+                            .contentShape(Rectangle())
+                            .onTapGesture { if !note.isDocumentScope { onFocus(note.id) } }
+                            .swipeActions {
+                                Button(role: .destructive) { onDelete(note) } label: { Label("删除", systemImage: "trash") }
+                                Button { onEdit(note) } label: { Label("修改", systemImage: "pencil") }.tint(.blue)
                             }
-                            Text(note.comment)
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture { if !note.isDocumentScope { onFocus(note.id) } }
-                        .swipeActions {
-                            Button(role: .destructive) { onDelete(note) } label: { Label("删除", systemImage: "trash") }
-                            Button { onEdit(note) } label: { Label("修改", systemImage: "pencil") }.tint(.blue)
-                        }
                     }
                 }
-                let history = document.notes.filter { !$0.isOpen }
-                if !history.isEmpty {
-                    Section("历史 \(history.count)") {
-                        ForEach(history) { note in
+                if !document.submittedNotes.isEmpty {
+                    Section {
+                        ForEach(document.submittedNotes) { note in
+                            NoteRow(note: note)
+                                .contentShape(Rectangle())
+                                .onTapGesture { if !note.isDocumentScope { onFocus(note.id) } }
+                        }
+                    } header: {
+                        Text("已导出,等待 Mac 接收 \(document.submittedNotes.count)")
+                    } footer: {
+                        Text("已导出的批注锁定,不能再改;要补充就写新批注,下一批再交。")
+                    }
+                }
+                let older = document.olderVersionNotes
+                if !older.isEmpty {
+                    Section {
+                        ForEach(older) { note in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(note.comment)
-                                Text(note.status).font(.caption).foregroundStyle(.secondary)
+                                NoteRow(note: note)
+                                Text(note.isSubmitted ? "已导出" : (note.isOpen ? "未提交" : note.status))
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
                         }
+                    } header: {
+                        Text("旧版本上的批注 \(older.count)")
+                    } footer: {
+                        Text("文档已换成新版本,这些批注写在旧版本上,只读保留,不会再导出。")
                     }
                 }
             }
@@ -194,6 +225,20 @@ struct NotesSheet: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+struct NoteRow: View {
+    let note: Note
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if note.isDocumentScope {
+                Text("总体意见").font(.caption.bold()).foregroundStyle(.orange)
+            } else if !note.quote.isEmpty {
+                Text(note.quote).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            }
+            Text(note.comment)
+        }
     }
 }
 

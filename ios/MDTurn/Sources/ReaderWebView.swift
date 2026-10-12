@@ -58,7 +58,7 @@ struct ReaderWebView: UIViewRepresentable {
     func updateUIView(_ webView: AnnotatingWebView, context: Context) {
         if context.coordinator.lastReloadToken != reloadToken {
             context.coordinator.lastReloadToken = reloadToken
-            context.coordinator.bridge?.setAnnotations(document.notes)
+            context.coordinator.bridge?.setAnnotations(document.highlightPayload)
         }
     }
 
@@ -132,13 +132,13 @@ final class ReaderBridge {
     func load(_ document: OpenedDocument) {
         let payload: [String: Any] = [
             "markdown": document.markdown,
-            "annotations": document.notes.map { $0.raw },
+            "annotations": document.highlightPayload,
             "assets": document.assets,
         ]
         call("window.MDTurnReader.load(\(json(payload)))")
     }
 
-    func setAnnotations(_ notes: [Note]) { call("window.MDTurnReader.setAnnotations(\(json(notes.map { $0.raw })))") }
+    func setAnnotations(_ notes: [[String: Any]]) { call("window.MDTurnReader.setAnnotations(\(json(notes)))") }
     func focus(noteId: String) { call("window.MDTurnReader.focusNote(\(json(noteId)))") }
     func scrollToHeading(_ id: String) { call("window.MDTurnReader.scrollToHeading(\(json(id)))") }
     func clearSelection() { call("window.MDTurnReader.clearSelection()") }

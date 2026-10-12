@@ -27,7 +27,20 @@ final class OpenedDocument: ObservableObject, Identifiable {
 
     deinit { if securityScoped { url.stopAccessingSecurityScopedResource() } }
 
-    var openNotes: [Note] { notes.filter { $0.isOpen } }
+    /// 当前版本上还没导出的批注:可改可删,"完成本轮"时打包。
+    var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash) } }
+    /// 当前版本上已导出的批注:锁定,等 Mac 接收。
+    var submittedNotes: [Note] { notes.filter { $0.isSubmitted && $0.belongs(toVersion: hash) } }
+    /// 写在旧版本上的批注:只读保留,不高亮、不再导出(跨端规则 6.6、6.7:不静默丢弃)。
+    var olderVersionNotes: [Note] { notes.filter { !$0.belongs(toVersion: hash) } }
+    /// 交给正文高亮的批注:只画当前版本的(旧版本锚点对不上新正文);已导出的照样画出来。
+    var highlightPayload: [[String: Any]] {
+        notes.filter { $0.belongs(toVersion: hash) && ($0.isOpen || $0.isSubmitted) }.map { note in
+            var raw = note.raw
+            raw["status"] = "open"
+            return raw
+        }
+    }
 }
 
 /// 文档库:最近文件(书签)、打开/读取、批注本地持久化(先落盘再说)、批次导出。
@@ -228,32 +241,66 @@ final class DocumentStore: ObservableObject {
     }
 
     func update(noteId: String, comment: String, in document: OpenedDocument) {
-        guard let index = document.notes.firstIndex(where: { $0.id == noteId }) else { return }
+        guard let index = document.notes.firstIndex(where: { $0.id == noteId }), document.notes[index].isOpen else { return }
         document.notes[index].raw["comment"] = comment
         document.notes[index].raw["updatedAt"] = ISO8601DateFormatter().string(from: Date())
         persistNotes(document)
     }
 
     func remove(noteId: String, from document: OpenedDocument) {
-        document.notes.removeAll { $0.id == noteId }
+        document.notes.removeAll { $0.id == noteId && $0.isOpen }
         persistNotes(document)
     }
 
     // MARK: 完成本轮:打包批次
 
+    /// 打包当前版本上未导出的批注。成功后这些批注标为"已导出"并锁定(跨端规则 6.2),
+    /// 下一次导出不会再带上它们;分享被取消时可用 resubmitBatch 按原批次编号重发,Mac 按编号去重。
     func submitBatch(for document: OpenedDocument) {
         let open = document.openNotes
         guard !open.isEmpty else { lastError = "这一轮还没有批注。"; return }
-        guard let data = try? JSONSerialization.data(withJSONObject: open.map { $0.raw }),
-              let json = String(data: data, encoding: .utf8) else { return }
-        let batch = AnnotationBatch(
-            batchId: UUID().uuidString.lowercased(), documentName: document.name, baseVersion: document.hash,
-            completedAt: ISO8601DateFormatter().string(from: Date()), device: UIDevice.current.name, annotationsJSON: json)
+        let batchId = UUID().uuidString.lowercased()
+        let completedAt = ISO8601DateFormatter().string(from: Date())
+        guard let batch = makeBatch(open, id: batchId, completedAt: completedAt, document: document) else { return }
         do {
             pendingShare = try transport.submit(batch: batch)
         } catch {
             lastError = "打包批注失败:\(error.localizedDescription)"
+            return
         }
+        let ids = Set(open.map { $0.id })
+        for index in document.notes.indices where ids.contains(document.notes[index].id) {
+            document.notes[index].raw["status"] = "submitted"
+            document.notes[index].raw["submittedBatchId"] = batchId
+            document.notes[index].raw["submittedAt"] = completedAt
+        }
+        persistNotes(document)
+    }
+
+    /// 重新导出最近一批(同一批次编号、同样内容),用于分享面板被取消或传输失败后重发。
+    func resubmitBatch(for document: OpenedDocument) {
+        let submitted = document.submittedNotes
+        guard let last = submitted.compactMap({ note -> (String, String)? in
+            guard let id = note.submittedBatchId else { return nil }
+            return (id, note.raw["submittedAt"] as? String ?? "")
+        }).max(by: { $0.1 < $1.1 }) else { lastError = "没有已导出的批次。"; return }
+        let notes = submitted.filter { $0.submittedBatchId == last.0 }.map { note -> Note in
+            var raw = note.raw
+            raw["status"] = "open"
+            raw.removeValue(forKey: "submittedBatchId")
+            raw.removeValue(forKey: "submittedAt")
+            return Note(raw: raw)
+        }
+        guard let batch = makeBatch(notes, id: last.0, completedAt: last.1, document: document) else { return }
+        do { pendingShare = try transport.submit(batch: batch) }
+        catch { lastError = "打包批注失败:\(error.localizedDescription)" }
+    }
+
+    private func makeBatch(_ notes: [Note], id: String, completedAt: String, document: OpenedDocument) -> AnnotationBatch? {
+        guard let data = try? JSONSerialization.data(withJSONObject: notes.map { $0.raw }),
+              let json = String(data: data, encoding: .utf8) else { lastError = "打包批注失败。"; return nil }
+        return AnnotationBatch(batchId: id, documentName: document.name, baseVersion: document.hash,
+                               completedAt: completedAt, device: UIDevice.current.name, annotationsJSON: json)
     }
 
     func sharePDF(_ data: Data, name: String) {
