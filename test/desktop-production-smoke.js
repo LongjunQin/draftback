@@ -831,23 +831,30 @@ async function main() {
       false,
       '第三段不得被整段回退高亮',
     );
-    const markerGeometry = await waitUntil('批注图标贴近选区起点', () => chrome.cdp.evaluate(`(() => {
-      const pin = document.querySelector('#annotationOverlay .note-pin:not([hidden])');
-      const highlight = CSS.highlights && CSS.highlights.get('mdturn-open');
-      const range = highlight && Array.from(highlight)[0];
-      if (!pin || !range) return null;
-      const pinBox = pin.getBoundingClientRect();
-      const start = range.cloneRange(); start.collapse(true);
-      const startBox = start.getClientRects()[0] || range.getClientRects()[0];
-      return {
-        pinInBody: Boolean(document.querySelector('#documentContent .note-pin')),
-        horizontalDistance: Math.abs((pinBox.left + pinBox.width / 2) - startBox.left),
-        verticalDistance: Math.abs((pinBox.top + pinBox.height / 2) - (startBox.top + startBox.height / 2)),
-      };
-    })()`));
+    // 图标在高亮落地后异步定位(字体、右栏布局稳定后才是终位),所以等它落到选区起点附近再判定;
+    // 一直不到位才失败,并报出最后一次的实际距离。
+    let lastMarkerGeometry = null;
+    const markerGeometry = await waitUntil('批注图标贴近选区起点', async () => {
+      lastMarkerGeometry = await chrome.cdp.evaluate(`(() => {
+        const pin = document.querySelector('#annotationOverlay .note-pin:not([hidden])');
+        const highlight = CSS.highlights && CSS.highlights.get('mdturn-open');
+        const range = highlight && Array.from(highlight)[0];
+        if (!pin || !range) return null;
+        const pinBox = pin.getBoundingClientRect();
+        const start = range.cloneRange(); start.collapse(true);
+        const startBox = start.getClientRects()[0] || range.getClientRects()[0];
+        return {
+          pinInBody: Boolean(document.querySelector('#documentContent .note-pin')),
+          horizontalDistance: Math.abs((pinBox.left + pinBox.width / 2) - startBox.left),
+          verticalDistance: Math.abs((pinBox.top + pinBox.height / 2) - (startBox.top + startBox.height / 2)),
+        };
+      })()`);
+      const g = lastMarkerGeometry;
+      return g && g.horizontalDistance < 58 && g.verticalDistance < 22 ? g : null;
+    }, 5_000).catch(() => {
+      throw new Error(`FAIL: 批注图标应显示在精确选区起点附近:${JSON.stringify(lastMarkerGeometry)}`);
+    });
     assert.equal(markerGeometry.pinInBody, false, '批注图标不得插入段尾改变正文排版');
-    assert.ok(markerGeometry.horizontalDistance < 58 && markerGeometry.verticalDistance < 22,
-      '批注图标应显示在精确选区起点附近');
 
     await chrome.cdp.click('#collapseLeft');
     const collapsedBrand = await waitUntil('左栏收起后批注图标与标题栏自动重定位', () => chrome.cdp.evaluate(`(() => {
@@ -1240,56 +1247,71 @@ async function main() {
         const pane = document.querySelector('#editorPane');
         const status = document.querySelector('#reviewStateText').textContent;
         return !pane.hidden && status.includes('手工修改中') && !status.includes('原文已解冻') &&
-          !!(document.querySelector('.cm-content') || document.querySelector('.fallback-editor'));
+          !!document.querySelector('#codeEditor .ProseMirror[contenteditable="true"]') &&
+          !document.querySelector('.fallback-editor');
       })()`);
     });
     await chrome.cdp.evaluate('document.querySelector("#outlineModeButton").click()');
     await waitUntil('编辑模式显示大纲面板', () => chrome.cdp.evaluate(
       `!document.querySelector('#outlinePanel').hidden`,
     ));
+    // 所见即所得编辑器没有"当前行":大纲点击要把对应标题滚进编辑区可视范围并聚焦编辑器。
+    // 先把编辑区滚到底(能滚的话),证明是大纲把标题带回视野。
+    const headingInEditor = (text) => `Array.from(document.querySelectorAll('#codeEditor .ProseMirror h2')).find((el) => el.textContent.trim() === ${JSON.stringify(text)})`;
+    await chrome.cdp.evaluate(`(() => { const s = document.querySelector('.editor-scroll'); if (s) s.scrollTop = s.scrollHeight; })()`);
     await chrome.cdp.clickText('#outlinePanel .outline-link', '跨段精确批注');
-    await waitUntil('编辑模式大纲定位 CodeMirror 行', () => chrome.cdp.evaluate(`(() => {
-      const activeLine = document.querySelector('.cm-activeLine');
-      return activeLine && activeLine.textContent.includes('## 跨段精确批注');
+    await waitUntil('编辑模式大纲定位到标题并聚焦编辑器', () => chrome.cdp.evaluate(`(() => {
+      const scroller = document.querySelector('.editor-scroll');
+      const heading = ${headingInEditor('跨段精确批注')};
+      if (!scroller || !heading) return null;
+      const box = scroller.getBoundingClientRect();
+      const rect = heading.getBoundingClientRect();
+      const active = document.activeElement;
+      const focused = !!(active && active.closest && active.closest('#codeEditor .ProseMirror'));
+      return rect.top >= box.top && rect.bottom <= box.bottom && focused;
     })()`));
 
+    // 真实点击标题末尾并键入:草稿进 localStorage → 整页刷新后原样恢复 → Cmd+S 块级回写。
+    // 样例里其余内容几乎全是原始 HTML、围栏代码和带内联 HTML 的表格,保存后它们必须逐字节不变,
+    // 只有被编辑的这一行标题变化(路线图 6.2 编辑保存保真)。
     const originalSource = fs.readFileSync(source, 'utf8');
-    const draftContent = `${originalSource.trimEnd()}\n\n## 手工草稿恢复验证\n\n这段内容必须在刷新后原样恢复，然后才能安全保存。\n`;
-    const editorSelector = await chrome.cdp.evaluate(
-      `document.querySelector('.cm-content') ? '.cm-content' : '.fallback-editor'`,
-    );
-    await chrome.cdp.click(editorSelector);
-    await chrome.cdp.send('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown', key: 'a', code: 'KeyA', modifiers: 4, nativeVirtualKeyCode: 65,
-    });
-    await chrome.cdp.send('Input.dispatchKeyEvent', {
-      type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 4, nativeVirtualKeyCode: 65,
-    });
-    await chrome.cdp.send('Input.insertText', { text: draftContent });
+    const editedHeadingText = '跨段精确批注（已校）';
+    assert.equal(originalSource.split('\n## 跨段精确批注\n').length, 2, '样例中应恰有一处待编辑标题');
+    const expectedSaved = originalSource.replace('\n## 跨段精确批注\n', `\n## ${editedHeadingText}\n`);
+    const caret = await chrome.cdp.evaluate(`(() => {
+      const heading = ${headingInEditor('跨段精确批注')};
+      heading.scrollIntoView({ block: 'center' });
+      const range = document.createRange();
+      range.selectNodeContents(heading);
+      const rects = range.getClientRects();
+      const last = rects[rects.length - 1];
+      const box = heading.getBoundingClientRect();
+      return { x: Math.min(last.right + 8, box.right - 2), y: last.top + last.height / 2 };
+    })()`);
+    await chrome.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: caret.x, y: caret.y });
+    await chrome.cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: caret.x, y: caret.y, button: 'left', buttons: 1, clickCount: 1 });
+    await chrome.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: caret.x, y: caret.y, button: 'left', buttons: 0, clickCount: 1 });
+    await chrome.cdp.send('Input.insertText', { text: '（已校）' });
+    const draftStorageKey = `mdturn.draft.${opened.review.id}`;
     await waitUntil('dirty 草稿进入 localStorage', () => chrome.cdp.evaluate(`(() => {
-      const raw = localStorage.getItem(${JSON.stringify(`mdturn.draft.${opened.review.id}`)});
+      const raw = localStorage.getItem(${JSON.stringify(draftStorageKey)});
       if (!raw) return null;
       const draft = JSON.parse(raw);
-      return draft.content === ${JSON.stringify(draftContent)} &&
+      return draft.content.includes(${JSON.stringify(`## ${editedHeadingText}\n`)}) &&
         document.querySelector('#editorSaveState').textContent.includes('未保存');
     })()`));
 
     await chrome.cdp.evaluate('window.__mdturnSmokePreReload = true');
     await chrome.cdp.send('Page.reload', { ignoreCache: true });
-    // CodeMirror virtualizes off-screen lines, so .cm-content.textContent is
-    // not a valid full-document oracle once this fixture grows.  Here we prove
-    // the exact draft was restored into the active dirty tab; the immediately
-    // following Cmd+S assertion then proves the editor value byte-for-byte by
-    // requiring the source file to equal draftContent.
-    await waitUntil('刷新后 dirty 草稿自动恢复', () => chrome.cdp.evaluate(`(() => {
+    await waitUntil('刷新后 dirty 草稿自动恢复进编辑器', () => chrome.cdp.evaluate(`(() => {
       if (window.__mdturnSmokePreReload || document.readyState !== 'complete') return null;
       const pane = document.querySelector('#editorPane');
       const saveState = document.querySelector('#editorSaveState');
       if (!pane || pane.hidden || !saveState || !saveState.textContent.includes('未保存')) return null;
       const active = document.querySelector('#tabList .tab.active .tab-title');
       if (!active || !active.textContent.includes('MDTurn桌面真实回归.md')) return null;
-      const raw = localStorage.getItem(${JSON.stringify(`mdturn.draft.${opened.review.id}`)});
-      return raw && JSON.parse(raw).content === ${JSON.stringify(draftContent)};
+      const raw = localStorage.getItem(${JSON.stringify(draftStorageKey)});
+      return !!(${headingInEditor(editedHeadingText)}) && !!raw && JSON.parse(raw).content.includes(${JSON.stringify(editedHeadingText)});
     })()`));
     assert.ok(chrome.cdp.dialogs.some((dialog) => dialog.type === 'beforeunload'),
       'dirty reload 应触发 beforeunload 防误关保护');
@@ -1302,13 +1324,21 @@ async function main() {
       return { defaultPrevented: event.defaultPrevented, dispatched };
     })()`);
     assert.deepEqual(saveShortcut, { defaultPrevented: true, dispatched: false }, 'Cmd+S 应触发恢复草稿保存');
-    await waitUntil('恢复草稿安全保存到源文件', () => {
-      try { return fs.readFileSync(source, 'utf8') === draftContent; }
-      catch (_) { return false; }
+    await waitUntil('恢复草稿保存到源文件(无需过渡保护确认)', async () => {
+      const confirmTitle = await chrome.cdp.evaluate(
+        `document.querySelector('#confirmDialog').hidden ? '' : document.querySelector('#confirmTitle').textContent`,
+      );
+      if (confirmTitle) throw new Error(`FAIL: 只改了一行纯文本标题却弹出确认框:${confirmTitle}`);
+      try { return fs.readFileSync(source, 'utf8') !== originalSource; } catch (_) { return false; }
     });
+    assert.equal(fs.readFileSync(source, 'utf8'), expectedSaved,
+      '块级回写:除被编辑的标题外,原始 HTML、围栏代码、表格必须逐字节保持原样');
+    await waitUntil('保存提示给出块级回写统计', () => chrome.cdp.evaluate(
+      `Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('改动 1 处'))`,
+    ));
     await waitUntil('保存后清除 dirty 草稿', () => chrome.cdp.evaluate(`(() =>
       document.querySelector('#editorSaveState').textContent.includes('所有更改均已保存') &&
-      !localStorage.getItem(${JSON.stringify(`mdturn.draft.${opened.review.id}`)})
+      !localStorage.getItem(${JSON.stringify(draftStorageKey)})
     )()`));
 
     // Resolve both open notes only after the source save, then complete the
@@ -1370,6 +1400,7 @@ async function main() {
       activePushTargetIsolation: 'PASS',
       closedTabCompletionNotification: 'PASS',
       dirtyDraftReload: 'PASS',
+      blockWritebackFidelity: 'PASS',
       manualApplyClosedLoop: 'PASS',
       persistedAnnotations: store.readAnnotations(source).annotations.length,
     }));
