@@ -45,19 +45,40 @@ final class DocumentStore: ObservableObject {
 
     // MARK: 目录
 
+    /// 用户自己的文档:「文件」App → 我的 iPhone → MDTurn。
     private var documentsDirectory: URL {
         fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
-    private var annotationsDirectory: URL {
-        let url = documentsDirectory.appendingPathComponent("annotations", isDirectory: true)
+    /// App 内部数据(批注、最近文件)放在 Application Support:随 iCloud 备份,但不出现在「文件」App 里,
+    /// 免得被当成普通文件误删误改。
+    private var dataDirectory: URL {
+        let url = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MDTurn", isDirectory: true)
         try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
-    private var recentsFile: URL { documentsDirectory.appendingPathComponent("recent.json") }
+    private var annotationsDirectory: URL {
+        let url = dataDirectory.appendingPathComponent("annotations", isDirectory: true)
+        try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+    private var recentsFile: URL { dataDirectory.appendingPathComponent("recent.json") }
 
-    /// 批注文件按"文档路径的 SHA-256"命名,与文档内容版本无关;每条批注自带它所依据的版本指纹。
+    /// 文档的稳定键。iOS 更新或重装 App 时会换沙盒路径,所以 App 自己的文件夹(Documents)
+    /// 和随 App 自带的示例文档用相对路径;iCloud 云盘、其他 App 的文件夹等外部位置用完整路径。
+    func documentKey(for url: URL) -> String {
+        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+        let roots: [(String, URL)] = [("documents", documentsDirectory), ("bundle", Bundle.main.bundleURL)]
+        for (label, root) in roots {
+            let base = root.standardizedFileURL.resolvingSymlinksInPath().path
+            if path.hasPrefix(base + "/") { return "\(label):" + String(path.dropFirst(base.count + 1)) }
+        }
+        return path
+    }
+
+    /// 批注文件按"文档稳定键的 SHA-256"命名,与文档内容版本无关;每条批注自带它所依据的版本指纹。
     private func annotationsFile(for url: URL) -> URL {
-        annotationsDirectory.appendingPathComponent("\(Hashing.sha256(url.path)).annotations.json")
+        annotationsDirectory.appendingPathComponent("\(Hashing.sha256(documentKey(for: url))).annotations.json")
     }
 
     // MARK: 最近文件
@@ -74,7 +95,7 @@ final class DocumentStore: ObservableObject {
 
     private func remember(url: URL) {
         guard let bookmark = try? url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
-        let entry = RecentDocument(id: Hashing.sha256(url.path), name: url.lastPathComponent, bookmark: bookmark,
+        let entry = RecentDocument(id: Hashing.sha256(documentKey(for: url)), name: url.lastPathComponent, bookmark: bookmark,
                                    lastOpenedAt: Date(), directoryHint: url.deletingLastPathComponent().lastPathComponent)
         recents.removeAll { $0.id == entry.id }
         recents.insert(entry, at: 0)

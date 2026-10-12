@@ -14,6 +14,8 @@ settings:
     CODE_SIGN_STYLE: Automatic
     # 开发者账户激活后把 Team ID 填到这里,或 xcodebuild DEVELOPMENT_TEAM=XXXX
     DEVELOPMENT_TEAM: ""
+    # 主屏幕上的名字。scripts/install-device.sh 装测试版时改成"MDTurn 测试",与将来的正式版区分
+    MDTURN_DISPLAY_NAME: MDTurn
 targets:
   MDTurn:
     type: application
@@ -29,15 +31,16 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.mdturn.ios
         PRODUCT_NAME: MDTurn
         TARGETED_DEVICE_FAMILY: "1,2"
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        INFOPLIST_KEY_CFBundleDisplayName: MDTurn
     info:
       path: MDTurn/Info.plist
       properties:
-        CFBundleDisplayName: MDTurn
+        CFBundleDisplayName: $(MDTURN_DISPLAY_NAME)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        # 用自己的 Info.plist 时 INFOPLIST_KEY_* 构建设置不生效,方向必须写在这里
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         LSSupportsOpeningDocumentsInPlace: true
         UISupportsDocumentBrowser: false
         UIFileSharingEnabled: true
