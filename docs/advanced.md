@@ -201,6 +201,12 @@ xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContai
   --domain-identifier org.mdturn.ios.dev --source <本机文件> --destination Documents/<文件名>
 ```
 
+图标:源文件在 `branding/icon.svg`(候选与对比图在 `branding/candidates/`),改完渲染成 1024×1024 PNG 后一条命令生成三端图标:
+
+```bash
+python3 scripts/make-icons.py branding/icon-1024.png   # iOS 资源目录、macOS icon.png(打包时转 icns)、Windows icon.ico
+```
+
 生成 macOS arm64 App：
 
 ```bash

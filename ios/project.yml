@@ -23,6 +23,7 @@ targets:
     sources:
       - path: MDTurn/Sources
       - path: MDTurn/Resources
+      - path: MDTurn/Assets.xcassets
       - path: MDTurn/Web
         type: folder
         buildPhase: resources
@@ -30,6 +31,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.mdturn.ios
         PRODUCT_NAME: MDTurn
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
     info:
       path: MDTurn/Info.plist

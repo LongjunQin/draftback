@@ -46,12 +46,17 @@ xcodebuild -project "$IOS/MDTurn.xcodeproj" -scheme MDTurn -configuration "$CONF
 
 APP="$DERIVED/Build/Products/$CONFIGURATION-iphoneos/MDTurn.app"
 xcrun devicectl device install app --device "$DEVICE" "$APP"
-if ! xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID" >/dev/null 2>&1; then
+LAUNCH_LOG="$(mktemp)"
+if xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID" >"$LAUNCH_LOG" 2>&1; then
+  echo "已安装并启动「$DISPLAY_NAME」。"
+elif grep -q "not been explicitly trusted\|invalid code signature" "$LAUNCH_LOG"; then
   cat <<'TIP'
 已装好,但手机还没信任这个开发者证书,所以暂时打不开。在手机上:
   设置 → 通用 → VPN 与设备管理 → 开发者 App 下点 "Apple Development: …" → 信任
 然后点主屏幕上的「MDTurn 测试」即可。每台手机只需信任一次。
 TIP
-  exit 0
+else
+  echo "已装好,但没能从 Mac 上启动(手机可能锁屏了),直接在手机上点「$DISPLAY_NAME」即可。原因:"
+  grep -m1 "NSLocalizedFailureReason" "$LAUNCH_LOG" || tail -3 "$LAUNCH_LOG"
 fi
-echo "已安装并启动「$DISPLAY_NAME」。"
+rm -f "$LAUNCH_LOG"
