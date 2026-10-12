@@ -201,6 +201,14 @@ xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContai
   --domain-identifier org.mdturn.ios.dev --source <本机文件> --destination Documents/<文件名>
 ```
 
+新建与导出(0.6.0 起):
+
+- **新建 Markdown**(⌘N,或欢迎页/左栏「文件」里的按钮):先选位置和文件名,由本地服务创建文件(已存在绝不覆盖,而是直接打开它),建好即进入编辑。
+- **导出**在工具栏「导出」菜单和菜单栏「文件」里:PDF(⇧⌘E)、单文件 HTML、Word、打印(⌘P)。
+- 单文件 HTML:正文样式、代码高亮、公式样式与字体、同目录图片全部内联,可脱离 MDTurn 单独打开或发送。
+- Word 由 pandoc 转换,公式成为 Word 原生可编辑公式,图片与表格按 Word 结构落地。电脑上要先装 pandoc(`brew install pandoc`);
+  没装时导出会给出安装提示。公开版再决定随 App 附带 pandoc 还是改纯 JS 转换器。
+
 图标:源文件在 `branding/icon.svg`(候选与对比图在 `branding/candidates/`),改完渲染成 1024×1024 PNG 后一条命令生成三端图标:
 
 ```bash

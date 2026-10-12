@@ -14,6 +14,7 @@ const {
 } = require('electron');
 const { markdownPathsFromArguments, normalizeMarkdownPath } = require('./open-files');
 const { ensureService, stopOwnedService } = require('./service');
+const { exportDocx, findPandoc } = require('./export-docx');
 
 const OPEN_FILES_CHANNEL = 'mdturn:open-files';
 const COMMAND_CHANNEL = 'mdturn:command';
@@ -243,6 +244,70 @@ function installIpc() {
       mainWindow.webContents.print({ printBackground: true }, (success, reason) => resolve({ ok: success, reason: reason || null }));
     });
   });
+  function safeFileStem(value, fallback) {
+    const stem = typeof value === 'string' ? value.replace(/\.(md|markdown)$/i, '').replace(/[\\/:*?"<>|]+/g, '-').trim().slice(0, 120) : '';
+    return stem || fallback;
+  }
+  function defaultDirectory(value) {
+    return typeof value === 'string' && path.isAbsolute(value) ? value : app.getPath('documents');
+  }
+  // 新建:只负责让用户选位置和文件名;真正建文件由本地服务完成(拒绝覆盖、计入最近文件)。
+  ipcMain.handle('mdturn:new-document', async (event, payload) => {
+    if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的新建请求。');
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '新建 Markdown 文档',
+      defaultPath: path.join(defaultDirectory(payload && payload.directory), '未命名.md'),
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
+    const filePath = /\.md$/i.test(result.filePath) ? result.filePath : `${result.filePath}.md`;
+    return { ok: true, filePath };
+  });
+  // 导出单文件 HTML:页面把正文、样式、图片都内联好,主进程只管存盘。
+  ipcMain.handle('mdturn:export-html', async (event, payload) => {
+    if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的导出请求。');
+    const html = payload && typeof payload.html === 'string' ? payload.html : '';
+    if (!html || html.length > 64 * 1024 * 1024) throw new Error('没有可导出的内容,或内容过大。');
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出为 HTML',
+      defaultPath: path.join(defaultDirectory(payload.directory), `${safeFileStem(payload.suggestedName, 'document')}.html`),
+      filters: [{ name: 'HTML', extensions: ['html'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
+    await fs.promises.writeFile(result.filePath, html, 'utf8');
+    shell.showItemInFolder(result.filePath);
+    return { ok: true, filePath: result.filePath };
+  });
+  // 导出 Word:用 pandoc 从磁盘上的源文件转换(见 export-docx.js);没装 pandoc 时说明怎么装。
+  ipcMain.handle('mdturn:export-docx', async (event, payload) => {
+    if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的导出请求。');
+    const sourcePath = payload && typeof payload.sourcePath === 'string' ? payload.sourcePath : '';
+    if (!path.isAbsolute(sourcePath) || !/\.md$/i.test(sourcePath) || !fs.existsSync(sourcePath)) throw new Error('找不到要导出的 Markdown 文件。');
+    if (!findPandoc()) {
+      await dialog.showMessageBox(mainWindow, {
+        type: 'info', title: '导出 Word 需要 pandoc',
+        message: '导出 Word 由 pandoc 完成(公式会成为 Word 可编辑公式)。这台电脑上还没有它。',
+        detail: '在终端运行:brew install pandoc\n装好后再导出一次即可。',
+        buttons: ['好'],
+      });
+      return { ok: false, reason: 'no-pandoc' };
+    }
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出为 Word',
+      defaultPath: path.join(path.dirname(sourcePath), `${safeFileStem(payload.suggestedName || path.basename(sourcePath), 'document')}.docx`),
+      filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
+    const outputPath = /\.docx$/i.test(result.filePath) ? result.filePath : `${result.filePath}.docx`;
+    try {
+      await exportDocx({ sourcePath, outputPath });
+    } catch (error) {
+      return { ok: false, error: error.message || String(error) };
+    }
+    shell.showItemInFolder(outputPath);
+    return { ok: true, filePath: outputPath };
+  });
   ipcMain.handle('mdturn:notify-review-complete', async (event, payload) => {
     if (!isTrustedRenderer(event) || !payload || typeof payload !== 'object') {
       throw new Error('拒绝无效的通知请求。');
@@ -288,6 +353,11 @@ function installMenu() {
       label: '文件',
       submenu: [
         {
+          label: '新建 Markdown…',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => { sendRendererCommand('new'); },
+        },
+        {
           label: '打开 Markdown…',
           accelerator: 'CmdOrCtrl+O',
           click: async () => {
@@ -311,6 +381,14 @@ function installMenu() {
           label: '导出为 PDF…',
           accelerator: 'CmdOrCtrl+Shift+E',
           click: () => { sendRendererCommand('export-pdf'); },
+        },
+        {
+          label: '导出为 HTML…',
+          click: () => { sendRendererCommand('export-html'); },
+        },
+        {
+          label: '导出为 Word…',
+          click: () => { sendRendererCommand('export-docx'); },
         },
         {
           label: '打印…',

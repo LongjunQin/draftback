@@ -528,6 +528,14 @@ async function handleAppApi(req, res, pathname, q) {
     }
     return sendJson(res, 200, await plainDocuments.readDocument(body.path));
   }
+  if (pathname === '/api/app/document/create') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim()) {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供要新建的 Markdown 文档路径。' });
+    }
+    return sendJson(res, 201, await plainDocuments.createDocument(body.path, { content: body.content }));
+  }
   if (pathname === '/api/app/document') {
     if (req.method === 'GET') {
       const candidate = q.get('path');

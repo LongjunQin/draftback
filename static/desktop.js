@@ -15,6 +15,7 @@
     toolbar: $('#documentToolbar'), reviewState: $('#reviewStatePill'), reviewStateIcon: $('#reviewStateIcon'),
     reviewStateText: $('#reviewStateText'), reviewCount: $('#reviewCount'), readingMode: $('#readingModeButton'),
     editingMode: $('#editingModeButton'), readerPane: $('#readerPane'), welcome: $('#welcome'), welcomeOpen: $('#welcomeOpenButton'),
+    welcomeNew: $('#welcomeNewButton'), newFileButton: $('#newFileButton'), exportMenuButton: $('#exportMenuButton'), exportMenu: $('#exportMenu'),
     welcomeRecent: $('#welcomeRecent'), readerScroll: $('#readerScroll'), content: $('#documentContent'), editorPane: $('#editorPane'),
     codeEditor: $('#codeEditor'), editorSaveState: $('#editorSaveState'), saveButton: $('#saveButton'),
     finishManual: $('#finishManualButton'), notesTotal: $('#notesTotal'), openNotesCount: $('#openNotesCount'),
@@ -838,7 +839,158 @@
     if (command === 'find-next') { stepFind(1); return; }
     if (command === 'find-prev') { stepFind(-1); return; }
     if (command === 'export-pdf') { void exportPdf(); return; }
+    if (command === 'export-html') { void exportHtml(); return; }
+    if (command === 'export-docx') { void exportDocx(); return; }
+    if (command === 'new') { void newDocument(); return; }
     if (command === 'print') void printDocument();
+  }
+
+  // ---------- 新建 ----------
+  // 外壳只负责让用户选位置;文件由本地服务创建(已存在绝不覆盖,而是直接打开它),建好即进入编辑。
+  async function newDocument() {
+    if (commandBlocked()) return;
+    let filePath = '';
+    if (bridge && typeof bridge.newDocument === 'function') {
+      try {
+        const picked = await bridge.newDocument({ directory: posixDir(activeTab()?.review.sourceFile || '') });
+        if (!picked || !picked.ok) return;
+        filePath = picked.filePath;
+      } catch (error) { toast(`新建失败:${error.message || error}`, 'error'); return; }
+    } else {
+      filePath = window.prompt('请输入要新建的 Markdown 文件绝对路径：') || '';
+      if (!filePath.trim()) return;
+    }
+    try {
+      const payload = await requestJson('/api/app/document/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath }),
+      });
+      upsertTab(normalizeDocument(payload), { activate: true });
+      await refreshRecents();
+      await enterEditMode();
+      toast(`已新建《${payload.document.file}》。`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) { toast('这个文件已经存在,未覆盖,已直接打开它。'); await openDocumentPath(filePath); return; }
+      toast(friendlyError(error, '新建文档'), 'error');
+    }
+  }
+
+  // ---------- 导出 HTML(单文件) ----------
+  // 正文取当前渲染结果;样式只带 desktop.css 里 :root 变量与 .markdown-body 规则(浅色),
+  // 代码高亮与公式样式整份内联,公式字体内联成 data: URI;图片读回来内联。文件可脱离 MDTurn 单独打开与发送。
+  async function fetchAsDataUrl(url) {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`${response.status}`);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+  function collectExportCss() {
+    const parts = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      if (!/desktop\.css/.test(sheet.href || '')) continue;
+      let rules; try { rules = Array.from(sheet.cssRules); } catch { continue; }
+      for (const rule of rules) {
+        if (!(rule instanceof CSSStyleRule)) continue;
+        if (rule.selectorText === ':root' || /\.markdown-body/.test(rule.selectorText)) parts.push(rule.cssText);
+      }
+    }
+    return parts.join('\n');
+  }
+  async function katexCssInlined() {
+    let css = await (await fetch('/static/vendor/katex.min.css', { cache: 'no-store' })).text();
+    const fonts = Array.from(new Set(Array.from(css.matchAll(/url\(fonts\/([^)]+\.woff2)\)/g), (m) => m[1])));
+    const data = new Map();
+    await Promise.all(fonts.map(async (name) => { try { data.set(name, await fetchAsDataUrl(`/static/vendor/fonts/${name}`)); } catch (_) {} }));
+    // 每个 @font-face 只留 woff2 一种来源,其余(woff/ttf)去掉
+    css = css.replace(/src:url\(fonts\/([^)]+\.woff2)\) format\("woff2"\)[^;}]*/g, (whole, name) => (data.has(name) ? `src:url(${data.get(name)}) format("woff2")` : whole));
+    return css;
+  }
+  function escapeHtml(value) { return String(value).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])); }
+  async function buildStandaloneHtml(tab) {
+    const article = document.getElementById('documentContent').cloneNode(true);
+    article.removeAttribute('id');
+    article.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
+    await Promise.all(Array.from(article.querySelectorAll('img[src]')).map(async (image) => {
+      const src = image.getAttribute('src') || '';
+      if (!src.startsWith('/api/app/file')) return;
+      try { image.setAttribute('src', await fetchAsDataUrl(src)); }
+      catch (_) { image.setAttribute('src', image.dataset.sourceSrc || src); }
+      image.removeAttribute('loading');
+    }));
+    article.querySelectorAll('a[href]').forEach((link) => {
+      if (link.dataset.sourceHref) { link.setAttribute('href', link.dataset.sourceHref); link.removeAttribute('target'); link.removeAttribute('rel'); }
+    });
+    const vendor = [await (await fetch('/static/vendor/highlight-github.min.css', { cache: 'no-store' })).text()];
+    if (article.querySelector('.katex')) vendor.push(await katexCssInlined());
+    const title = tab.review.title || 'Markdown';
+    return [
+      '<!doctype html>', '<html lang="zh-CN">', '<head>', '<meta charset="utf-8">',
+      '<meta name="viewport" content="width=device-width, initial-scale=1">',
+      '<meta name="generator" content="MDTurn">',
+      `<title>${escapeHtml(title)}</title>`,
+      `<style>${vendor.join('\n')}</style>`,
+      `<style>${collectExportCss()}</style>`,
+      '<style>html{background:#ffffff}body{margin:0;padding:40px 24px;background:#ffffff;color:var(--text)}.markdown-body{max-width:820px;margin:0 auto}@media print{body{padding:0}}</style>',
+      '</head>', '<body>', `<article class="markdown-body">${article.innerHTML}</article>`, '</body>', '</html>',
+    ].join('\n');
+  }
+  async function exportHtml() {
+    const tab = activeTab();
+    if (!tab) { toast('先打开一篇文档再导出。', 'error'); return; }
+    if (tab.mode === 'edit') { toast('请先回到阅读模式再导出 HTML。', 'error'); return; }
+    let html;
+    try { html = await buildStandaloneHtml(tab); }
+    catch (error) { toast(`生成 HTML 失败:${error.message || error}`, 'error'); return; }
+    const suggestedName = (tab.review.title || 'document').replace(/\.md$/i, '');
+    if (bridge && typeof bridge.exportHtml === 'function') {
+      try {
+        const result = await bridge.exportHtml({ html, suggestedName, directory: posixDir(tab.review.sourceFile || '') });
+        if (result && result.ok) toast('HTML 已导出。');
+      } catch (error) { toast(`导出 HTML 失败:${error.message || error}`, 'error'); }
+      return;
+    }
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${suggestedName}.html`;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    toast('HTML 已导出。');
+  }
+
+  // ---------- 导出 Word ----------
+  // 从磁盘上的源文件转换(由主进程调 pandoc),所以要先保存。
+  async function exportDocx() {
+    const tab = activeTab();
+    if (!tab) { toast('先打开一篇文档再导出。', 'error'); return; }
+    if (tab.mode === 'edit') captureEditorValue(tab);
+    if (tab.dirty) { toast('有未保存的修改,请先按 ⌘S 保存,再导出 Word。', 'error'); return; }
+    if (!bridge || typeof bridge.exportDocx !== 'function') { toast('导出 Word 需要在 MDTurn 应用里使用。', 'error'); return; }
+    try {
+      const result = await bridge.exportDocx({ sourcePath: tab.review.sourceFile, suggestedName: tab.review.title || 'document' });
+      if (result && result.ok) toast('Word 已导出。');
+      else if (result && result.error) toast(`导出 Word 失败:${result.error}`, 'error');
+    } catch (error) { toast(`导出 Word 失败:${error.message || error}`, 'error'); }
+  }
+
+  // ---------- 导出菜单 ----------
+  function toggleExportMenu(force) {
+    const open = typeof force === 'boolean' ? force : nodes.exportMenu.hidden;
+    nodes.exportMenu.hidden = !open;
+    nodes.exportMenuButton.setAttribute('aria-expanded', String(open));
+    if (open) { const first = nodes.exportMenu.querySelector('button'); if (first) first.focus(); }
+  }
+  function installExportMenu() {
+    nodes.exportMenuButton.addEventListener('click', (event) => { event.stopPropagation(); toggleExportMenu(); });
+    nodes.exportMenu.addEventListener('click', (event) => {
+      const item = event.target.closest('button[data-command]');
+      if (!item) return;
+      toggleExportMenu(false);
+      handleDesktopCommand(item.dataset.command);
+    });
+    document.addEventListener('click', (event) => { if (!nodes.exportMenu.hidden && !event.target.closest('#exportMenu, #exportMenuButton')) toggleExportMenu(false); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !nodes.exportMenu.hidden) { toggleExportMenu(false); nodes.exportMenuButton.focus(); } });
   }
 
   // ---------- 查找(阅读模式,正文内) ----------
@@ -1293,6 +1445,7 @@
       const src = image.getAttribute('src') || '';
       if (/^(https?:|data:)/i.test(src)) return;
       const localPath = localAssetPath(src);
+      image.dataset.sourceSrc = src;
       image.src = `/api/app/file?r=${encodeURIComponent(tab.id)}&path=${encodeURIComponent(localPath)}`;
       image.loading = 'lazy';
     });
@@ -1312,6 +1465,7 @@
           void openReviewPath(resolveDocumentPath(tab.review.sourceFile, clean));
         });
       } else {
+        link.dataset.sourceHref = href;
         link.href = `/api/app/file?r=${encodeURIComponent(tab.id)}&path=${encodeURIComponent(localAssetPath(href))}`;
         link.target = '_blank'; link.rel = 'noopener';
       }
@@ -2312,6 +2466,9 @@
     nodes.openTabButton.addEventListener('click', chooseMarkdown);
     nodes.openFileButton.addEventListener('click', chooseMarkdown);
     nodes.welcomeOpen.addEventListener('click', chooseMarkdown);
+    nodes.welcomeNew.addEventListener('click', () => { void newDocument(); });
+    nodes.newFileButton.addEventListener('click', () => { void newDocument(); });
+    installExportMenu();
     nodes.outlineMode.addEventListener('click', () => setLeftMode('outline'));
     nodes.filesMode.addEventListener('click', () => setLeftMode('files'));
     nodes.collapseLeft.addEventListener('click', () => toggleLeft(true));
@@ -2391,6 +2548,7 @@
         event.preventDefault(); return;
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') { event.preventDefault(); handleDesktopCommand('open'); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n' && !event.shiftKey && !event.altKey) { event.preventDefault(); handleDesktopCommand('new'); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); handleDesktopCommand('save'); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w') { event.preventDefault(); handleDesktopCommand('close-tab'); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); handleDesktopCommand('find'); }

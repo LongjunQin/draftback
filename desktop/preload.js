@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('mdturnDesktop', Object.freeze({
   notifyReviewComplete: (payload) => ipcRenderer.invoke('mdturn:notify-review-complete', payload),
   exportPdf: (payload) => ipcRenderer.invoke('mdturn:export-pdf', payload),
   print: () => ipcRenderer.invoke('mdturn:print'),
+  newDocument: (payload) => ipcRenderer.invoke('mdturn:new-document', payload),
+  exportHtml: (payload) => ipcRenderer.invoke('mdturn:export-html', payload),
+  exportDocx: (payload) => ipcRenderer.invoke('mdturn:export-docx', payload),
   // 拖放:沙盒渲染进程拿不到 File.path,由预加载脚本换算成绝对路径
   pathsForFiles(files) {
     const list = Array.from(files || []);

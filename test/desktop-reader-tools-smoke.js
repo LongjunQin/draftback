@@ -41,8 +41,10 @@ async function main() {
       '| 列 | 值 |', '|---|---|', '| 苹果 | 1 |', '',
       '```js', 'const apple = "苹果";', '```', '',
       '<details><summary>折叠</summary>折叠里的苹果</details>', '',
+      '![同目录图片](smoke.svg) 与 [附件链接](smoke.svg)', '',
       '最后一段没有水果。', '',
     ].join('\n'), 'utf8');
+    fs.writeFileSync(path.join(docRoot, 'smoke.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#f59a23"/></svg>', 'utf8');
     store.ensureDataDir({ dataDir });
     await store.openReview(source, { dataDir });
 
@@ -143,9 +145,50 @@ async function main() {
     await dropFile('不是 JSON', '坏的.mdturn-batch.json');
     await waitUntil('坏批次提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('不是有效的批注批次文件'))`));
 
+    // 6. 导出单文件 HTML:工具栏「导出」菜单 → 导出为 HTML。浏览器里没有外壳,走下载;这里截住生成的 Blob 读内容:
+    //    文件应自带样式、图片内联、链接还原为相对路径,不引用本地服务。
+    await chrome.cdp.evaluate(`(() => {
+      window.__mdturnExportBlobs = [];
+      const original = URL.createObjectURL.bind(URL);
+      URL.createObjectURL = (blob) => { window.__mdturnExportBlobs.push(blob); return original(blob); };
+    })()`);
+    await chrome.cdp.evaluate(`document.querySelector('#exportMenuButton').click()`);
+    await waitUntil('导出菜单打开', () => chrome.cdp.evaluate(`!document.querySelector('#exportMenu').hidden`));
+    await screenshot(chrome.cdp, 'export-menu.png');
+    await chrome.cdp.evaluate(`document.querySelector('#exportMenu button[data-command="export-html"]').click()`);
+    await waitUntil('HTML 导出完成提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('HTML 已导出'))`));
+    const html = await chrome.cdp.evaluate(`window.__mdturnExportBlobs.length ? window.__mdturnExportBlobs[0].text() : null`);
+    assert.ok(html, '应生成 HTML 文件内容');
+    assert.equal(await chrome.cdp.evaluate(`document.querySelector('#exportMenu').hidden`), true, '点击菜单项后菜单应关闭');
+    assert.match(html, /<title>工具冒烟\.md<\/title>/);
+    assert.match(html, /\.markdown-body\s*\{/, '应内联正文样式');
+    assert.match(html, /\.hljs/, '应内联代码高亮样式');
+    assert.match(html, /<img[^>]+src="data:image\/svg\+xml/, '同目录图片应内联为 data: URI');
+    assert.match(html, /<a[^>]+href="smoke\.svg"/, '附件链接应还原为相对路径');
+    assert.doesNotMatch(html, /\/api\/app\/file/, '导出文件不得引用本地服务地址');
+    assert.match(html, /折叠里的苹果/);
+
+    // 7. 新建:左栏「新建 Markdown 文档」→(浏览器里用路径输入框)→ 文件建好、进入编辑模式、计入最近文件;再次新建同名文件不覆盖。
+    const fresh = path.join(docRoot, '新建冒烟.md');
+    await chrome.cdp.evaluate(`document.querySelector('#filesModeButton').click()`);
+    chrome.cdp.nextPromptText = fresh;
+    await chrome.cdp.evaluate(`document.querySelector('#newFileButton').click()`);
+    await waitUntil('新建文件已写入并进入编辑', () => {
+      if (!fs.existsSync(fresh)) return null;
+      return chrome.cdp.evaluate(`!document.querySelector('#editorPane').hidden && document.querySelector('#tabList .tab.active .tab-title').textContent.includes('新建冒烟.md')`);
+    });
+    assert.equal(fs.readFileSync(fresh, 'utf8'), '# 新建冒烟\n\n');
+    await chrome.cdp.evaluate(`document.querySelector('#readingModeButton').click()`);
+    await waitUntil('退出编辑', () => chrome.cdp.evaluate(`document.querySelector('#editorPane').hidden`));
+    fs.writeFileSync(fresh, '# 已有内容\n');
+    chrome.cdp.nextPromptText = fresh;
+    await chrome.cdp.evaluate(`document.querySelector('#newFileButton').click()`);
+    await waitUntil('同名文件不覆盖并提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('已经存在'))`));
+    assert.equal(fs.readFileSync(fresh, 'utf8'), '# 已有内容\n', '新建不得覆盖已有文件');
+
     const fatal = chrome.cdp.exceptions.filter((item) => !/favicon/i.test(item));
     assert.deepEqual(fatal, [], `页面不得抛出未处理异常:\n${fatal.join('\n')}`);
-    console.log('PASS: 查找(计数/上下/高亮/关闭)、深色模式、打印样式、拖放提示、拖入手机批次导入。');
+    console.log('PASS: 查找(计数/上下/高亮/关闭)、深色模式、打印样式、拖放提示、拖入手机批次导入、导出单文件 HTML、新建文档。');
   } finally {
     if (chrome) { try { chrome.cdp.socket && chrome.cdp.socket.close(); } catch (_) {} await stopChild(chrome.child); }
     if (server) await stopChild(server.child);

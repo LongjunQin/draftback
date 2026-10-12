@@ -240,3 +240,36 @@ test('服务接口:/api/app/document* 与 /api/app/recent;启动清空编辑登�
   const missing = await request(port, '/api/app/document/open', { method: 'POST', body: { path: path.join(docDir, '无.md') } });
   assert.equal(missing.status, 404);
 });
+
+test('新建文档:createDocument 写入模板并计入最近文件;已存在则 409 不覆盖;服务接口同', async (t) => {
+  const { dataDir, docDir, options } = setup(t);
+  const fresh = path.join(docDir, '子目录', '新文档.md');
+  const created = await documents.createDocument(fresh, {}, options);
+  assert.equal(created.created, true);
+  assert.equal(fs.readFileSync(fresh, 'utf8'), '# 新文档\n\n');
+  assert.equal(created.source.content, '# 新文档\n\n');
+  assert.equal((await documents.listRecent(options))[0].file, '新文档.md');
+
+  fs.writeFileSync(fresh, '原内容');
+  await assert.rejects(() => documents.createDocument(fresh, {}, options), (error) => error.code === 'DOCUMENT_EXISTS' && error.httpStatus === 409);
+  assert.equal(fs.readFileSync(fresh, 'utf8'), '原内容', '已存在的文件一个字都不能动');
+  await assert.rejects(() => documents.createDocument(path.join(docDir, '不是md.txt'), {}, options), (error) => error.code === 'INVALID_DOCUMENT');
+
+  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(async () => { child.kill('SIGTERM'); await Promise.race([new Promise((resolve) => child.once('exit', resolve)), new Promise((resolve) => setTimeout(resolve, 5000))]); });
+  const portFile = store.getPaths({ dataDir }).port;
+  const deadline = Date.now() + 5000;
+  let port = 0;
+  while (Date.now() < deadline && !port) {
+    try { port = Number(fs.readFileSync(portFile, 'utf8').trim()); } catch {}
+    if (!port) await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(port > 0);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const viaApi = await request(port, '/api/app/document/create', { method: 'POST', body: { path: path.join(docDir, '接口新建.md'), content: '# 自定义\n' } });
+  assert.equal(viaApi.status, 201, viaApi.text);
+  assert.equal(viaApi.json.created, true);
+  assert.equal(fs.readFileSync(path.join(docDir, '接口新建.md'), 'utf8'), '# 自定义\n');
+  const again = await request(port, '/api/app/document/create', { method: 'POST', body: { path: path.join(docDir, '接口新建.md') } });
+  assert.equal(again.status, 409, again.text);
+});

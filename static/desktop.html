@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/mdturn-editor.css?v=7">
-  <link rel="stylesheet" href="/static/desktop.css?v=13">
+  <link rel="stylesheet" href="/static/desktop.css?v=14">
 </head>
 <body>
   <div id="appShell" class="app-shell">
@@ -56,6 +56,11 @@
           <span>打开 Markdown 文档</span>
           <kbd>⌘O</kbd>
         </button>
+        <button id="newFileButton" class="open-file-button" type="button">
+          <i class="ph ph-file-plus" aria-hidden="true"></i>
+          <span>新建 Markdown 文档</span>
+          <kbd>⌘N</kbd>
+        </button>
         <div class="section-label">最近文件</div>
         <div id="recentList" class="recent-list"></div>
       </section>
@@ -82,6 +87,18 @@
           <button id="findClose" class="icon-button compact" type="button" title="关闭(Esc)" aria-label="关闭查找"><i class="ph ph-x" aria-hidden="true"></i></button>
         </div>
         <div id="dropOverlay" class="drop-overlay" hidden><div class="drop-card"><i class="ph ph-file-arrow-down" aria-hidden="true"></i>松开即打开 Markdown</div></div>
+        <div class="export-menu-wrap">
+          <button id="exportMenuButton" class="mode-button" type="button" aria-haspopup="menu" aria-expanded="false" title="导出或打印当前文档">
+            <i class="ph ph-export" aria-hidden="true"></i>导出<i class="ph ph-caret-down menu-caret" aria-hidden="true"></i>
+          </button>
+          <div id="exportMenu" class="popover-menu" role="menu" aria-label="导出" hidden>
+            <button type="button" role="menuitem" data-command="export-pdf"><span>导出为 PDF…</span><kbd>⇧⌘E</kbd></button>
+            <button type="button" role="menuitem" data-command="export-html"><span>导出为 HTML…</span><small>单文件,可直接发送</small></button>
+            <button type="button" role="menuitem" data-command="export-docx"><span>导出为 Word…</span><small>需要 pandoc</small></button>
+            <div class="popover-sep" role="separator"></div>
+            <button type="button" role="menuitem" data-command="print"><span>打印…</span><kbd>⌘P</kbd></button>
+          </div>
+        </div>
         <button id="readingModeButton" class="mode-button active" type="button">
           <i class="ph ph-book-open-text" aria-hidden="true"></i>阅读与批注
         </button>
@@ -95,9 +112,14 @@
           <div class="welcome-mark"><i class="ph ph-markdown-logo" aria-hidden="true"></i></div>
           <h1>打开一篇 Markdown</h1>
           <p>打开即读、可直接编辑。需要让智能体按你的批注改稿时,点「开始审阅」冻结原文,再划词批注。</p>
-          <button id="welcomeOpenButton" class="primary-button large" type="button">
-            <i class="ph ph-folder-open" aria-hidden="true"></i>打开 Markdown
-          </button>
+          <div class="welcome-actions">
+            <button id="welcomeOpenButton" class="primary-button large" type="button">
+              <i class="ph ph-folder-open" aria-hidden="true"></i>打开 Markdown
+            </button>
+            <button id="welcomeNewButton" class="secondary-button large" type="button">
+              <i class="ph ph-file-plus" aria-hidden="true"></i>新建 Markdown
+            </button>
+          </div>
           <div id="welcomeRecent" class="welcome-recent"></div>
         </div>
         <div id="readerScroll" class="reader-scroll" hidden>
@@ -211,6 +233,6 @@
   <script src="/static/vendor/mdturn-editor.js?v=7"></script>
   <script src="/static/markdown-patch.js?v=1"></script>
   <script src="/static/desktop-anchor.js?v=4"></script>
-  <script src="/static/desktop.js?v=19"></script>
+  <script src="/static/desktop.js?v=20"></script>
 </body>
 </html>
