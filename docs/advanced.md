@@ -168,7 +168,7 @@ npm --prefix desktop run build:vendor
 
 ```bash
 node --test test/*.test.js
-node test/desktop-production-smoke.js          # 注意:编辑模式那段仍按旧编辑器(CodeMirror)编写,待更新
+node test/desktop-production-smoke.js          # 审阅全流程;编辑段验证刷新恢复草稿、保存只改动编辑过的块
 MDTURN_SMOKE_WIDTH=980 node test/desktop-production-smoke.js
 node test/desktop-security-smoke.js            # 安全收口:夹带脚本不执行、CSP 无告警
 node test/desktop-plain-document-smoke.js      # 普通阅读/编辑/开始审阅,块级回写保真
@@ -185,6 +185,20 @@ iOS 工程(`ios/`,XcodeGen):
 ios/scripts/sync-web.sh && (cd ios && xcodegen generate)
 cd ios && xcodebuild -project MDTurn.xcodeproj -scheme MDTurn -destination 'platform=iOS Simulator,id=<模拟器UDID>' build
 xcrun simctl launch <UDID> org.mdturn.ios --open-sample   # 直接进入示例文档
+```
+
+装到连着这台 Mac 的 iPhone(手机需已信任此电脑、开启开发者模式;Xcode 已登录 Apple ID):
+
+```bash
+ios/scripts/install-device.sh            # 免费个人团队签名,包标识 org.mdturn.ios.dev,主屏名「MDTurn 测试」
+```
+
+免费签名 7 天有效,过期重跑即可;首次安装后要在手机「设置 → 通用 → VPN 与设备管理」里信任开发者证书。
+把文件放进手机应用文件夹(「文件」→ 我的 iPhone → MDTurn 测试):
+
+```bash
+xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContainer \
+  --domain-identifier org.mdturn.ios.dev --source <本机文件> --destination Documents/<文件名>
 ```
 
 生成 macOS arm64 App：

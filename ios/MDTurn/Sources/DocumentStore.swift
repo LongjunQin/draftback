@@ -37,11 +37,16 @@ final class DocumentStore: ObservableObject {
     @Published var current: OpenedDocument?
     @Published var lastError: String?
     @Published var pendingShare: URL?
+    /// App 自己文件夹里的 Markdown(「文件」→ 我的 iPhone → MDTurn),首页直接列出,不必再走文件选择器。
+    @Published var localFiles: [URL] = []
 
     private let fileManager = FileManager.default
     private var transport: SyncTransport = ExportTransport()
 
-    init() { loadRecents() }
+    init() {
+        loadRecents()
+        refreshLocalFiles()
+    }
 
     // MARK: 目录
 
@@ -79,6 +84,29 @@ final class DocumentStore: ObservableObject {
     /// 批注文件按"文档稳定键的 SHA-256"命名,与文档内容版本无关;每条批注自带它所依据的版本指纹。
     private func annotationsFile(for url: URL) -> URL {
         annotationsDirectory.appendingPathComponent("\(Hashing.sha256(documentKey(for: url))).annotations.json")
+    }
+
+    // MARK: App 文件夹
+
+    func refreshLocalFiles() {
+        let keys: [URLResourceKey] = [.contentModificationDateKey]
+        let items = (try? fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: keys,
+                                                          options: [.skipsHiddenFiles])) ?? []
+        func modified(_ url: URL) -> Date {
+            (try? url.resourceValues(forKeys: Set(keys)).contentModificationDate) ?? .distantPast
+        }
+        localFiles = items
+            .filter { ["md", "markdown"].contains($0.pathExtension.lowercased()) }
+            .sorted { modified($0) > modified($1) }
+    }
+
+    func openLocal(named name: String) {
+        refreshLocalFiles()
+        guard let url = localFiles.first(where: { $0.lastPathComponent == name }) else {
+            lastError = "App 文件夹里没有《\(name)》。"
+            return
+        }
+        open(url: url, fromExternal: true)
     }
 
     // MARK: 最近文件

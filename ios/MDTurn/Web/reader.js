@@ -123,10 +123,20 @@
     const lines = match[0].split('\n').length - 1;
     return '\n'.repeat(lines) + text.slice(match[0].length);
   }
+  // 手机屏窄,表格按内容自动分列时,短单元格(如"版本指纹")会被挤成一字一行。
+  // 短单元格不折行,长单元格照常换行;整表过宽时由表格自身横向滚动(见 reader.css)。
+  function keepShortCellsTogether(root) {
+    root.querySelectorAll('th, td').forEach((cell) => {
+      let width = 0;
+      for (const ch of cell.textContent.trim()) width += /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(ch) ? 2 : 1;
+      if (width && width <= 12) cell.classList.add('md-cell-short');
+    });
+  }
   async function render(markdown) {
     const target = document.createElement('div');
     target.innerHTML = sanitize(md.render(blankFrontMatter(markdown)));
     adoptBareInlineRuns(target);
+    keepShortCellsTogether(target);
     target.querySelectorAll('img[src]').forEach((image) => {
       const src = image.getAttribute('src') || '';
       if (/^(https?:|data:)/i.test(src)) return;

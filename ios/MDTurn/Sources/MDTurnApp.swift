@@ -12,8 +12,14 @@ struct MDTurnApp: App {
             LibraryView()
                 .environmentObject(store)
                 .onOpenURL { url in store.open(url: url, fromExternal: true) }
-                // 调试/截图用:xcrun simctl launch ... --open-sample 直接进入示例文档
-                .onAppear { if CommandLine.arguments.contains("--open-sample") { store.openSample() } }
+                // 调试/截图用:--open-sample 直接进入示例文档;--open-local <文件名> 打开 App 文件夹里的文档
+                .onAppear {
+                    let args = CommandLine.arguments
+                    if args.contains("--open-sample") { store.openSample() }
+                    if let index = args.firstIndex(of: "--open-local"), index + 1 < args.count {
+                        store.openLocal(named: args[index + 1])
+                    }
+                }
         }
     }
 }
