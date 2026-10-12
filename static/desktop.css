@@ -11,8 +11,9 @@
   --muted-2: #8d96a6;
   --line: #e3e6eb;
   --line-strong: #d4d9e1;
-  --blue: #0b6df2;
-  --blue-soft: #eaf2ff;
+  /* 强调色取自图标的青绿(branding/icon.svg);批注/高亮用琥珀色,与图标里的荧光笔一致 */
+  --accent: #0d8077;
+  --accent-soft: #e2f3f0;
   --amber: #f59a23;
   --amber-soft: #fff0c9;
   --amber-pale: #fff8e8;
@@ -24,8 +25,8 @@
   --hover: #eef1f5;
   --text-2: #43526b;
   --code-bg: #eef0f3;
-  --quote-bg: #f5f9ff;
-  --quote-line: #8ab5ef;
+  --quote-bg: #f2f9f7;
+  --quote-line: #7fc4b9;
   --amber-bg: #fffaf0;
   --amber-bg-hover: #fff0d0;
   --amber-line: #ffc273;
@@ -33,13 +34,13 @@
   --amber-text: #c56d00;
   --amber-text-2: #81500c;
   --amber-deep: #9a6a1f;
-  --blue-bg: #f0f6ff;
-  --blue-bg-hover: #ddebff;
-  --blue-line: #cfe0fa;
-  --blue-line-2: #9dc2f7;
-  --blue-text: #225c9c;
-  --blue-muted: #6d9bdd;
-  --blue-hover: #075fcf;
+  --accent-bg: #ecf7f5;
+  --accent-bg-hover: #d5eee9;
+  --accent-line: #bfe2db;
+  --accent-line-2: #86c9bf;
+  --accent-text: #0a665e;
+  --accent-muted: #5aa89e;
+  --accent-hover: #0a6a62;
   --green-line: #bfe2cc;
   --green-text: #237445;
   --red-line: #edc0bc;
@@ -79,7 +80,7 @@ button {
 button:focus-visible,
 textarea:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--blue) 34%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--accent) 34%, transparent);
   outline-offset: 2px;
 }
 
@@ -141,10 +142,12 @@ textarea:focus-visible,
   height: 23px;
   flex: 0 0 23px;
   border-radius: 7px;
-  background: var(--blue);
+  overflow: hidden;
+  background: var(--accent);
   color: white;
   font-size: 16px;
 }
+.brand-mark img, .welcome-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
 
 .tab-list {
   display: flex;
@@ -189,7 +192,7 @@ textarea:focus-visible,
   bottom: 0;
   height: 2px;
   border-radius: 1px;
-  background: var(--blue);
+  background: var(--accent);
 }
 
 .tab-title {
@@ -205,7 +208,7 @@ textarea:focus-visible,
   height: 6px;
   flex: 0 0 6px;
   border-radius: 50%;
-  background: var(--blue);
+  background: var(--accent);
 }
 
 .tab-state.ready_to_apply, .tab-state.applying { background: var(--amber); }
@@ -268,12 +271,12 @@ textarea:focus-visible,
 }
 
 .primary-button {
-  border: 1px solid var(--blue);
-  background: var(--blue);
+  border: 1px solid var(--accent);
+  background: var(--accent);
   color: #fff;
 }
 
-.primary-button:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
+.primary-button:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .primary-button:disabled, .secondary-button:disabled, .mode-button:disabled { opacity: .48; }
 .primary-button.large, .secondary-button.large { min-height: 42px; padding: 9px 18px; font-size: 14px; }
 .welcome-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
@@ -368,7 +371,7 @@ kbd {
 
 .segmented button.active {
   background: var(--surface);
-  color: var(--blue);
+  color: var(--accent);
   box-shadow: 0 1px 3px rgba(20, 30, 50, .09);
 }
 
@@ -408,11 +411,11 @@ kbd {
 }
 
 .outline-link:hover { background: var(--hover); }
-.outline-link.active { background: var(--blue-soft); color: var(--blue); font-weight: 600; }
+.outline-link.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .outline-link.h1 { margin-top: 4px; font-size: 14px; font-weight: 650; }
 .outline-link.h2 { padding-left: 27px; font-size: 13px; }
 .outline-link .outline-number { flex: 0 0 24px; color: var(--muted-2); }
-.outline-link.active .outline-number { color: var(--blue); }
+.outline-link.active .outline-number { color: var(--accent); }
 .outline-link .outline-text { overflow: hidden; text-overflow: ellipsis; }
 
 .open-file-button {
@@ -489,10 +492,10 @@ kbd {
   gap: 7px;
   min-height: 32px;
   padding: 5px 10px;
-  border: 1px solid var(--blue-line);
+  border: 1px solid var(--accent-line);
   border-radius: 7px;
-  background: var(--blue-bg);
-  color: var(--blue-text);
+  background: var(--accent-bg);
+  color: var(--accent-text);
   font-size: 12px;
   font-weight: 650;
 }
@@ -573,9 +576,11 @@ kbd {
   height: 54px;
   margin-bottom: 18px;
   border-radius: 15px;
-  background: var(--blue);
+  overflow: hidden;
+  background: var(--accent);
   color: #fff;
   font-size: 32px;
+  box-shadow: 0 10px 24px rgba(10, 80, 87, .28);
 }
 
 .welcome h1 { margin: 0; color: var(--text-strong); font-size: 25px; letter-spacing: -.02em; }
@@ -608,7 +613,7 @@ kbd {
 .markdown-body h3 { margin: 1.45em 0 .55em; font-size: 18px; }
 .markdown-body p { margin: .8em 0; }
 .markdown-body strong { color: var(--text-strong); font-weight: 700; }
-.markdown-body a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.markdown-body a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .markdown-body img { display: block; max-width: 100%; height: auto; margin: 1.35em auto; border-radius: 7px; }
 .markdown-body hr { height: 1px; margin: 2em 0; border: 0; background: var(--line); }
 .markdown-body blockquote { margin: 1.3em 0; padding: .25em 1em; border-left: 3px solid var(--quote-line); background: var(--quote-bg); color: var(--text-2); }
@@ -721,19 +726,19 @@ kbd {
   width: calc(100% - 20px);
   margin: 12px 10px 2px;
   padding: 11px 13px;
-  border: 1px solid var(--blue-line-2);
+  border: 1px solid var(--accent-line-2);
   border-radius: 9px;
-  background: var(--blue-soft);
-  color: var(--blue);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   text-align: left;
-  box-shadow: 0 1px 2px rgba(11, 109, 242, .08);
+  box-shadow: 0 1px 2px rgba(13, 128, 119, .08);
 }
 .doc-note-button i { font-size: 16px; }
-.doc-note-button:hover { border-color: var(--blue); background: var(--blue-bg-hover); }
-.doc-note-button .hint { margin-left: auto; color: var(--blue-muted); font-size: 10px; font-weight: 500; white-space: nowrap; }
+.doc-note-button:hover { border-color: var(--accent); background: var(--accent-bg-hover); }
+.doc-note-button .hint { margin-left: auto; color: var(--accent-muted); font-size: 10px; font-weight: 500; white-space: nowrap; }
 
 .note-quote.doc-scope { color: var(--amber-deep); font-weight: 700; }
 
@@ -792,7 +797,7 @@ kbd {
 .note-comment { margin: 0; color: var(--text-strong); font-size: 13px; line-height: 1.58; white-space: pre-wrap; }
 .note-location { margin-top: 9px; color: var(--muted-2); font-size: 10px; white-space: normal; }
 .note-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 9px; width: 100%; min-width: 0; margin-top: 9px; }
-.note-actions button { flex: 0 0 auto; padding: 2px 0; border: 0; background: transparent; color: var(--blue); font-size: 11px; font-weight: 650; white-space: nowrap; }
+.note-actions button { flex: 0 0 auto; padding: 2px 0; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 650; white-space: nowrap; }
 .note-actions button.danger { color: var(--red); }
 .note-actions button.resolve { color: var(--green); }
 .note-actions button.skip { color: var(--muted); }
@@ -938,11 +943,11 @@ details:not([open]) > #historyNotesList { display: none; }
 .annotation-dialog blockquote { max-height: 120px; margin: 16px 0; padding: 10px 12px; overflow: auto; border-left: 3px solid var(--amber); background: var(--amber-pale); color: #5a5144; font-size: 12px; line-height: 1.6; }
 .annotation-dialog label { display: block; margin-bottom: 7px; color: var(--text-2); font-size: 12px; font-weight: 700; }
 .annotation-dialog textarea { width: 100%; resize: vertical; padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 14px; line-height: 1.55; }
-.annotation-dialog textarea:focus { border-color: var(--blue); }
+.annotation-dialog textarea:focus { border-color: var(--accent); }
 .annotation-dialog footer, .confirm-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 .confirm-dialog { padding: 24px; text-align: center; }
-.confirm-icon { color: var(--blue); font-size: 34px; }
+.confirm-icon { color: var(--accent); font-size: 34px; }
 .confirm-dialog p { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
 .confirm-dialog footer { justify-content: center; margin-top: 20px; }
 
@@ -1020,15 +1025,15 @@ details:not([open]) > #historyNotesList { display: none; }
     --muted-2: #7c8594;
     --line: #363b45;
     --line-strong: #454b57;
-    --blue: #5b9dff;
-    --blue-soft: #1d2b44;
-    --blue-bg: #1c2a3f;
-    --blue-bg-hover: #243755;
-    --blue-line: #2f4a73;
-    --blue-line-2: #3c5f93;
-    --blue-text: #9cc3ff;
-    --blue-muted: #7aa6e6;
-    --blue-hover: #7cb0ff;
+    --accent: #3fc1b2;
+    --accent-soft: #163632;
+    --accent-bg: #15302d;
+    --accent-bg-hover: #1c403b;
+    --accent-line: #245a54;
+    --accent-line-2: #2f756d;
+    --accent-text: #8fe0d4;
+    --accent-muted: #5fb3a8;
+    --accent-hover: #63d2c4;
     --amber: #f0a43a;
     --amber-soft: #3d2f14;
     --amber-pale: #332a16;
@@ -1048,8 +1053,8 @@ details:not([open]) > #historyNotesList { display: none; }
     --red-line: #6a3030;
     --red-text: #f1a0a0;
     --code-bg: #2c3038;
-    --quote-bg: #1e2733;
-    --quote-line: #4f7ab8;
+    --quote-bg: #1b2a28;
+    --quote-line: #3f8f85;
     --editor-surface: #262a31;
     --shadow-color: rgba(0, 0, 0, .45);
   }
@@ -1075,8 +1080,8 @@ details:not([open]) > #historyNotesList { display: none; }
 ::highlight(mdturn-find-current) { background: rgba(245, 154, 35, .85); color: #1b1300; }
 
 /* 拖放提示 */
-.drop-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(11, 109, 242, .08); backdrop-filter: blur(2px); pointer-events: none; }
-.drop-card { display: flex; align-items: center; gap: 10px; padding: 18px 26px; border: 2px dashed var(--blue); border-radius: 14px; background: var(--surface); color: var(--blue); font-size: 15px; font-weight: 700; }
+.drop-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(13, 128, 119, .08); backdrop-filter: blur(2px); pointer-events: none; }
+.drop-card { display: flex; align-items: center; gap: 10px; padding: 18px 26px; border: 2px dashed var(--accent); border-radius: 14px; background: var(--surface); color: var(--accent); font-size: 15px; font-weight: 700; }
 .drop-card i { font-size: 24px; }
 
 /* 导出 PDF / 打印:只留正文,全宽,展开折叠块,去掉批注标记 */
@@ -1088,7 +1093,7 @@ details:not([open]) > #historyNotesList { display: none; }
     --text: #111; --text-strong: #000; --text-2: #333; --muted: #555; --muted-2: #777;
     --line: #d9dde3; --line-strong: #c5cad2;
     --code-bg: #f1f2f4; --quote-bg: #f5f7fa; --quote-line: #8ab5ef;
-    --blue: #0b4fb0; --amber: #b86b00;
+    --accent: #0b4fb0; --amber: #b86b00;
   }
   .markdown-body pre.hljs, .markdown-body .hljs { background: #f6f7f9; color: #24292e; }
   .hljs-comment, .hljs-quote { color: #6a737d; }

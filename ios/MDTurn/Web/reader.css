@@ -30,7 +30,8 @@ body { padding: 12px 18px calc(40px + env(safe-area-inset-bottom)); }
 .markdown-body h1 { font-size: 1.7em; } .markdown-body h2 { font-size: 1.4em; } .markdown-body h3 { font-size: 1.2em; }
 .markdown-body p { margin: .8em 0; }
 .markdown-body img { max-width: 100%; height: auto; border-radius: 6px; }
-.markdown-body a { color: #0b6df2; }
+.markdown-body a { color: #0d8077; }
+@media (prefers-color-scheme: dark) { .markdown-body a { color: #3fc1b2; } }
 .markdown-body blockquote { margin: 1em 0; padding: .3em 1em; border-left: 3px solid var(--quote-line); background: var(--quote-bg); color: var(--text); }
 .markdown-body pre { overflow: auto; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); font-size: 13px; line-height: 1.5; -webkit-overflow-scrolling: touch; }
 .markdown-body code:not(.hljs) { padding: .1em .3em; border-radius: 4px; background: var(--code-bg); font-size: .9em; }

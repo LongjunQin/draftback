@@ -9,6 +9,7 @@
   desktop/build/icon-source-fullbleed.png           原图备份
   desktop/build/icon.ico                            Windows:256/128/64/48/32/16 圆角版
   desktop/dock-icon.png                             运行时设给 Dock 的图标(绕过系统图标缓存)
+  static/brand/icon-256.png                         桌面端界面里的品牌标
 electron-builder 打包时自动把 icon.png 转成 icns。
 """
 import json
@@ -69,6 +70,9 @@ def main(source):
     mac.save(build / "icon.png", optimize=True)
     # 运行时 app.dock.setIcon 用:绕过 macOS 的图标缓存,保证 Dock 里立刻是新图标
     mac.resize((512, 512), Image.LANCZOS).save(ROOT / "desktop/dock-icon.png", optimize=True)
+    # 桌面端界面里的品牌标(标题栏、欢迎页),CSS 自己切圆角
+    brand = ROOT / "static/brand"; brand.mkdir(parents=True, exist_ok=True)
+    src.resize((256, 256), Image.LANCZOS).save(brand / "icon-256.png", optimize=True)
     win = rounded(src.resize((256, 256), Image.LANCZOS), 40)
     win.save(build / "icon.ico", sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
     print("已生成:", ios_dir / "icon-1024.png", build / "icon.png", build / "icon.ico", sep="\n  ")

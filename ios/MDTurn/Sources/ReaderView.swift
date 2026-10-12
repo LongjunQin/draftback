@@ -187,7 +187,7 @@ struct NotesSheet: View {
                             .onTapGesture { if !note.isDocumentScope { onFocus(note.id) } }
                             .swipeActions {
                                 Button(role: .destructive) { onDelete(note) } label: { Label("删除", systemImage: "trash") }
-                                Button { onEdit(note) } label: { Label("修改", systemImage: "pencil") }.tint(.blue)
+                                Button { onEdit(note) } label: { Label("修改", systemImage: "pencil") }.tint(.accentColor)
                             }
                     }
                 }
