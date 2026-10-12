@@ -83,12 +83,18 @@ async function main() {
         text: lum(getComputedStyle(document.querySelector('#documentContent p')).color),
         code: lum(getComputedStyle(document.querySelector('#documentContent pre')).backgroundColor),
         card: lum(getComputedStyle(document.querySelector('#openNotesList')).backgroundColor),
+        titlebar: lum(getComputedStyle(document.querySelector('.titlebar')).backgroundColor),
+        toolbar: lum(getComputedStyle(document.querySelector('#documentToolbar')).backgroundColor),
+        outlineFont: parseFloat(getComputedStyle(document.querySelector('#outlinePanel .outline-link')).fontSize),
       };
     })()`);
     assert.ok(dark.shell < 0.25, `深色下外壳背景应很暗,实际亮度 ${dark.shell}`);
     assert.ok(dark.paper < 0.25, `深色下正文背景应很暗,实际亮度 ${dark.paper}`);
     assert.ok(dark.text > 0.7, `深色下正文文字应很亮,实际亮度 ${dark.text}`);
     assert.ok(dark.code < 0.3, `深色下代码块背景应很暗,实际亮度 ${dark.code}`);
+    assert.ok(dark.titlebar < 0.25, `深色下标签栏不得仍是浅色,实际亮度 ${dark.titlebar}`);
+    assert.ok(dark.toolbar < 0.25, `深色下工具栏不得仍是浅色,实际亮度 ${dark.toolbar}`);
+    assert.ok(dark.outlineFont >= 13, `大纲字号应不小于 13px,实际 ${dark.outlineFont}`);
     await screenshot(chrome.cdp, 'dark-reading.png');
     await chrome.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
 

@@ -1364,6 +1364,15 @@
   // strict:图表文字经 Mermaid 自带的净化,不允许 HTML 标签与点击脚本进入 SVG。
   const prefersDark = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
   if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: prefersDark ? 'dark' : 'default' });
+  // 外观切换(系统或「显示 → 外观」菜单)后,样式随变量立刻变,Mermaid 图要按新主题重画一次
+  if (typeof matchMedia === 'function') {
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
+      if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: event.matches ? 'dark' : 'default' });
+      // 只有含 Mermaid 图的文档需要重画(其余全靠 CSS 变量),避免无谓的整页重渲染
+      const tab = activeTab();
+      if (tab && tab.mode === 'read' && nodes.content.querySelector('.mermaid')) { tab.renderedHash = null; renderReader(tab); }
+    });
+  }
 
   function posixDir(value) { const index = value.lastIndexOf('/'); return index < 0 ? '' : value.slice(0, index); }
   function posixJoin(base, relative) {

@@ -16,6 +16,25 @@ const { markdownPathsFromArguments, normalizeMarkdownPath } = require('./open-fi
 const { ensureService, stopOwnedService } = require('./service');
 const { exportDocx, findPandoc } = require('./export-docx');
 
+// 用户设置(外观等),存在 userData/settings.json;读写失败都不影响启动。
+const APPEARANCES = ['system', 'light', 'dark'];
+function settingsPath() { return path.join(app.getPath('userData'), 'settings.json'); }
+function readSettings() {
+  try { const data = JSON.parse(fs.readFileSync(settingsPath(), 'utf8')); return data && typeof data === 'object' ? data : {}; }
+  catch { return {}; }
+}
+function writeSettings(patch) {
+  const next = { ...readSettings(), ...patch };
+  try { fs.mkdirSync(path.dirname(settingsPath()), { recursive: true }); fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2)); } catch {}
+  return next;
+}
+function applyAppearance(value) {
+  const appearance = APPEARANCES.includes(value) ? value : 'system';
+  // themeSource 会同时改变渲染进程的 prefers-color-scheme,页面样式随之切换,不必重载
+  nativeTheme.themeSource = appearance;
+  return appearance;
+}
+
 const OPEN_FILES_CHANNEL = 'mdturn:open-files';
 const COMMAND_CHANNEL = 'mdturn:command';
 const ACTIVATE_REVIEW_CHANNEL = 'mdturn:activate-review';
@@ -332,6 +351,7 @@ function installIpc() {
 }
 
 function installMenu() {
+  const appearance = applyAppearance(readSettings().appearance);
   const template = [];
   if (process.platform === 'darwin') {
     template.push({
@@ -409,6 +429,15 @@ function installMenu() {
     }, {
       label: '显示',
       submenu: [
+        {
+          label: '外观',
+          submenu: [
+            { label: '跟随系统', type: 'radio', checked: appearance === 'system', click: () => { writeSettings({ appearance: applyAppearance('system') }); } },
+            { label: '浅色', type: 'radio', checked: appearance === 'light', click: () => { writeSettings({ appearance: applyAppearance('light') }); } },
+            { label: '深色', type: 'radio', checked: appearance === 'dark', click: () => { writeSettings({ appearance: applyAppearance('dark') }); } },
+          ],
+        },
+        { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
@@ -451,6 +480,11 @@ if (!hasSingleInstanceLock) {
     focusMainWindow();
   });
   app.whenReady().then(() => {
+    applyAppearance(readSettings().appearance);
+    // Dock 图标在运行时显式设置:macOS 会缓存旧图标,换图标后光靠包里的 icns 不一定立刻生效
+    if (process.platform === 'darwin' && app.dock) {
+      try { app.dock.setIcon(path.join(__dirname, 'dock-icon.png')); } catch {}
+    }
     installIpc();
     installMenu();
     createWindow();

@@ -201,6 +201,8 @@ xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContai
   --domain-identifier org.mdturn.ios.dev --source <本机文件> --destination Documents/<文件名>
 ```
 
+外观(0.6.1 起):菜单栏「显示 → 外观」可选跟随系统 / 浅色 / 深色,存在应用数据目录的 settings.json;大纲随 ⌘+ / ⌘- 一起缩放。
+
 新建与导出(0.6.0 起):
 
 - **新建 Markdown**(⌘N,或欢迎页/左栏「文件」里的按钮):先选位置和文件名,由本地服务创建文件(已存在绝不覆盖,而是直接打开它),建好即进入编辑。
