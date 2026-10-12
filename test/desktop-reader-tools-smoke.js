@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 阅读器小件的真实浏览器冒烟(路线图 v3 第一轮阅读器线):查找、深色模式、打印样式、拖放提示。
+// 阅读器小件的真实浏览器冒烟(路线图 v3 第一轮阅读器线):查找、深色模式、打印样式、拖放提示、拖入手机批次导入。
 // 另外把深色与打印两种外观截图到 --shots <目录>,供人工过目。
 //
 // 用法: node test/desktop-reader-tools-smoke.js [--shots /tmp/shots]
@@ -120,9 +120,32 @@ async function main() {
     })()`);
     await waitUntil('拖放遮罩消失', () => chrome.cdp.evaluate(`document.querySelector('#dropOverlay').hidden`));
 
+    // 5. 拖入手机批注批次:页面读出文件内容提交(不靠服务按路径读「下载」),会话收到批注进入待改稿;坏文件给提示。
+    const review = await store.getReviewByPath(source, { dataDir });
+    const batch = {
+      version: 1, batchId: 'smoke-batch-0001', documentName: '工具冒烟.md', baseVersion: review.sourceHash,
+      completedAt: new Date().toISOString(), device: '冒烟 iPhone',
+      annotations: [{ id: 'phone-note-1', comment: '手机上提的意见', quote: '第一段', anchorVersion: 3, lineStart: 3, lineEnd: 3, startTextOffset: 0, endTextOffset: 3 }],
+    };
+    const dropFile = (text, name) => chrome.cdp.evaluate(`(() => {
+      const file = new File([${JSON.stringify(text)}], ${JSON.stringify(name)}, { type: 'application/json' });
+      const drop = new DragEvent('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(drop, 'dataTransfer', { value: { types: ['Files'], files: [file] } });
+      window.dispatchEvent(drop);
+    })()`);
+    await dropFile(JSON.stringify(batch), '工具冒烟.smoke0001.mdturn-batch.json');
+    await waitUntil('拖入批次后会话进入待改稿', async () => {
+      const current = await store.getReviewById(review.id, { dataDir });
+      return current && current.status === 'ready_to_apply';
+    });
+    assert.equal(store.readAnnotations(source).annotations.filter((note) => note.receivedBatchId === 'smoke-batch-0001').length, 1);
+    await waitUntil('导入成功提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('已接收手机批注 1 条'))`));
+    await dropFile('不是 JSON', '坏的.mdturn-batch.json');
+    await waitUntil('坏批次提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('不是有效的批注批次文件'))`));
+
     const fatal = chrome.cdp.exceptions.filter((item) => !/favicon/i.test(item));
     assert.deepEqual(fatal, [], `页面不得抛出未处理异常:\n${fatal.join('\n')}`);
-    console.log('PASS: 查找(计数/上下/高亮/关闭)、深色模式、打印样式、拖放提示。');
+    console.log('PASS: 查找(计数/上下/高亮/关闭)、深色模式、打印样式、拖放提示、拖入手机批次导入。');
   } finally {
     if (chrome) { try { chrome.cdp.socket && chrome.cdp.socket.close(); } catch (_) {} await stopChild(chrome.child); }
     if (server) await stopChild(server.child);

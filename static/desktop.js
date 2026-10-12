@@ -962,10 +962,14 @@
   }
 
   // 手机导出的批注批次(.mdturn-batch.json)拖进窗口即导入;结果以提示显示,会话标签随事件流自动刷新。
+  // 批次文件由页面读出内容再提交:拖放即授权,服务不必按路径去读受保护的「下载」文件夹。
   async function importBatchFile(file) {
+    let batch;
+    try { batch = JSON.parse(await file.text()); }
+    catch (_) { toast(`《${file.name}》不是有效的批注批次文件。`, 'error'); return; }
     try {
       const result = await requestJson('/api/app/batch/import', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: file }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batch }),
       });
       const receipt = result.receipt || {};
       if (receipt.accepted) {
@@ -988,10 +992,11 @@
       if (!hasFiles(event)) return;
       event.preventDefault(); depth = 0; nodes.dropOverlay.hidden = true;
       const files = Array.from(event.dataTransfer.files || []);
-      const paths = bridge && typeof bridge.pathsForFiles === 'function' ? bridge.pathsForFiles(files) : files.map((file) => file.path).filter(Boolean);
-      const batchFiles = paths.filter((item) => /\.mdturn-batch\.json$/i.test(item));
-      const markdown = paths.filter((item) => /\.(md|markdown)$/i.test(item));
-      if (batchFiles.length) { batchFiles.forEach((file) => void importBatchFile(file)); }
+      const batchFiles = files.filter((file) => /\.mdturn-batch\.json$/i.test(file.name));
+      const docFiles = files.filter((file) => /\.(md|markdown)$/i.test(file.name));
+      const markdown = !docFiles.length ? []
+        : bridge && typeof bridge.pathsForFiles === 'function' ? bridge.pathsForFiles(docFiles) : docFiles.map((file) => file.path).filter(Boolean);
+      batchFiles.forEach((file) => void importBatchFile(file));
       if (!markdown.length && !batchFiles.length) { toast('只能打开 .md 文件或 .mdturn-batch.json 批注批次。', 'error'); return; }
       if (markdown.length) void openPaths(markdown);
     });

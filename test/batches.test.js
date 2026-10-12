@@ -7,7 +7,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const http = require('http');
+const { spawn, spawnSync } = require('child_process');
 
 const store = require('../lib/review-store');
 const batches = require('../lib/batches');
@@ -111,4 +112,75 @@ test('CLI:mdreview import-batch 接收文件并提示下一步;拒收时非零�
   const refused = run('import-batch', file);
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /session-advanced/);
+});
+
+function request(port, pathname, options = {}) {
+  return new Promise((resolve, reject) => {
+    const body = options.body === undefined ? null : JSON.stringify(options.body);
+    const req = http.request({
+      hostname: '127.0.0.1', port, path: pathname, method: options.method || 'GET',
+      headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {},
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let json = null;
+        try { json = JSON.parse(text); } catch {}
+        resolve({ status: res.statusCode, text, json });
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function startServer(t, dataDir) {
+  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  t.after(async () => {
+    child.kill('SIGTERM');
+    await Promise.race([new Promise((resolve) => child.once('exit', resolve)), new Promise((resolve) => setTimeout(resolve, 5000))]);
+  });
+  const portFile = store.getPaths({ dataDir }).port;
+  const deadline = Date.now() + 5000;
+  let port = 0;
+  while (Date.now() < deadline && !port) {
+    try { port = Number(fs.readFileSync(portFile, 'utf8').trim()); } catch {}
+    if (!port) await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(port > 0, stderr);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  return port;
+}
+
+test('服务接口:/api/app/batch/import 接受批次内容(拖放)或文件路径;坏内容与空请求 400', async (t) => {
+  const { dataDir, docDir, options } = setup(t);
+  const docA = path.join(docDir, '甲.md');
+  const docB = path.join(docDir, '乙.md');
+  fs.writeFileSync(docA, '# 甲\n正文\n');
+  fs.writeFileSync(docB, '# 乙\n正文\n');
+  const { review: reviewA } = await store.openReview(docA, options);
+  const { review: reviewB } = await store.openReview(docB, options);
+  const port = await startServer(t, dataDir);
+
+  const byContent = await request(port, '/api/app/batch/import', { method: 'POST', body: { batch: makeBatch(reviewA) } });
+  assert.equal(byContent.status, 200, byContent.text);
+  assert.equal(byContent.json.receipt.accepted, true);
+  assert.equal(byContent.json.review.status, 'ready_to_apply');
+  assert.equal(store.readAnnotations(docA).annotations.length, 2);
+
+  const file = path.join(docDir, '乙.mdturn-batch.json');
+  fs.writeFileSync(file, JSON.stringify(makeBatch(reviewB)));
+  const byPath = await request(port, '/api/app/batch/import', { method: 'POST', body: { path: file } });
+  assert.equal(byPath.status, 200, byPath.text);
+  assert.equal(byPath.json.receipt.accepted, true);
+  assert.equal(byPath.json.review.id, reviewB.id);
+
+  const bad = await request(port, '/api/app/batch/import', { method: 'POST', body: { batch: { version: 1 } } });
+  assert.equal(bad.status, 400, bad.text);
+  const empty = await request(port, '/api/app/batch/import', { method: 'POST', body: {} });
+  assert.equal(empty.status, 400, empty.text);
 });

@@ -552,10 +552,16 @@ async function handleAppApi(req, res, pathname, q) {
   if (pathname === '/api/app/batch/import') {
     if (!allowMethods(req, res, ['POST'])) return;
     const body = await readBody(req);
-    if (!body || typeof body.path !== 'string' || !body.path.trim()) {
-      return sendJson(res, 400, { error: 'bad_request', message: '请提供批次文件路径。' });
+    // 拖进窗口的批次由页面读出内容直接提交(隔空投送落在「下载」,那里受系统访问保护,
+    // 拖放本身就是用户授权,不必再让服务按路径去读);命令行和旧调用方仍可只给路径。
+    let result;
+    if (body && body.batch && typeof body.batch === 'object' && !Array.isArray(body.batch)) {
+      result = await batches.importBatch(body.batch);
+    } else if (body && typeof body.path === 'string' && body.path.trim()) {
+      result = await batches.importBatchFile(body.path);
+    } else {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供批次内容或批次文件路径。' });
     }
-    const result = await batches.importBatchFile(body.path);
     if (result.review) await publishReviewChangedSafe(result.review.id, 'batch-imported');
     return sendJson(res, 200, result);
   }
