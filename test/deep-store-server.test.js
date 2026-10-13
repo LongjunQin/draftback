@@ -407,7 +407,7 @@ test('GET 接口拒绝写方法，空 PATCH body 返回 400 而非 500', async (
   assert.equal(nullPatch.status, 400);
 });
 
-test('2 MB 以上请求体应返回 413，不应直接 ECONNRESET', async (t) => {
+test('32 MB 以上请求体应返回 413，不应直接 ECONNRESET', async (t) => {
   const f = fixture(t);
   const file = writeMd(f.docRoot, '大请求.md');
   const { review } = await store.openReview(file, { dataDir: f.dataDir });
@@ -416,7 +416,7 @@ test('2 MB 以上请求体应返回 413，不应直接 ECONNRESET', async (t) =>
   let requestError = null;
   try {
     response = await rawRequest(port, `/api/annotations?r=${review.id}`, {
-      method: 'POST', rawBody: JSON.stringify({ comment: 'x'.repeat(2_100_000) }),
+      method: 'POST', rawBody: JSON.stringify({ comment: 'x'.repeat(33 * 1024 * 1024) }),
     });
   } catch (error) {
     requestError = error;

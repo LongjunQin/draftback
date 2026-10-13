@@ -302,3 +302,46 @@ test('agent 改稿轮:批注全部处理后 mdreview complete 成功并记录 fi
   const review = Object.values(readReviews(f.dataDir).reviews).find((r) => r.status === 'complete');
   assert.ok(review && review.applyMode === 'agent' && typeof review.finalHash === 'string' && review.finalHash.length === 64);
 });
+
+// 2026-10-13 修复:wait 以前只等"下一次状态变化",用户在 wait 启动前就点了「完成本轮审阅」会白等到超时。
+test('mdreview wait 启动时批注已提交(ready_to_apply)立即以 0 返回并给出改稿指引', async () => {
+  const f = fixture('mdturn-wait-ready-');
+  const source = path.join(f.docs, '已提交.md');
+  fs.writeFileSync(source, '# 已提交\n');
+  const env = { MDREAD_DATA_DIR: f.dataDir, MDREAD_WAIT_POLL_MS: '300' };
+  assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
+  fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({ version: 1, file: '已提交.md', annotations: [{ id: 'n1', comment: '改', status: 'open' }] }));
+  assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);
+
+  const started = Date.now();
+  const result = await runNodeAsync(MDREVIEW, ['wait', source, '--timeout-minutes', '5'], env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /begin-apply/);
+  assert.ok(Date.now() - started < 4000, '不应等待超时');
+
+  // 此时再 open:不建新会话、不说"用户尚未提交",而是指引直接处理批注
+  const reopen = await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env);
+  assert.equal(reopen.status, 0, reopen.stderr);
+  assert.match(reopen.stdout, /已经提交了批注/);
+  assert.doesNotMatch(reopen.stdout, /用户尚未提交/);
+  assert.equal(Object.values(readReviews(f.dataDir).reviews).length, 1, '不得另起一轮');
+});
+
+test('mdreview open 在改稿阶段(begin-apply 后文件已变)复用本轮而不是标记冲突', async () => {
+  const f = fixture('mdturn-open-applying-');
+  const source = path.join(f.docs, '改稿中.md');
+  fs.writeFileSync(source, '# 改稿中\n');
+  const env = { MDREAD_DATA_DIR: f.dataDir };
+  assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
+  fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({ version: 1, file: '改稿中.md', annotations: [{ id: 'n1', comment: '改', status: 'open' }] }));
+  assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);
+  assert.equal((await runNodeAsync(MDREVIEW, ['begin-apply', source], env)).status, 0);
+  fs.writeFileSync(source, '# 改稿中\n\nAgent 已经改了一段。\n');
+
+  const reopen = await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env);
+  assert.equal(reopen.status, 0, reopen.stderr);
+  assert.match(reopen.stdout, /改稿阶段/);
+  const reviews = Object.values(readReviews(f.dataDir).reviews);
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].status, 'applying');
+});

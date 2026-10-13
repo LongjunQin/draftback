@@ -182,29 +182,55 @@
     }
     stats.deleted += O.blocks.filter((_, oi) => !used.has(oi)).length;
 
-    // 块之间的空白:相邻两块都来自原文且在原文里也相邻 → 沿用原文的空行数;否则一个空行。
-    // 块 A 的末行与块 B 的首行之间有 (B.start - A.end) 个空行,拼接文本为 '\n' × (1 + 空行数)。
-    const sep = (a, b) => '\n'.repeat(1 + Math.max(0, b.start - a.end));
+    // 块与块之间的"空当" = 空行 + markdown-it 不产 token 的行(链接引用定义 `[x]: url`、脚注定义 `[^1]: …`)。
+    // 定义行在编辑器里看不见,用户不可能有意删它,所以必须原样保留:
+    //   - 相邻两块都来自原文且在原文里也相邻 → 整个空当逐字节沿用(空行数、定义行都不变);
+    //   - 否则两块之间一个空行,但前一块后面空当里的非空行仍紧跟着它写回;
+    //   - 所在块被删掉、没机会写回的定义行,最后统一补在文末(位置变了但不丢)。
+    const lastIndex = O.blocks.length - 1;
+    const gapLines = (oi) => O.lines.slice(O.blocks[oi].end, oi < lastIndex ? O.blocks[oi + 1].start : O.lines.length);
+    const nonBlank = (lines) => lines.filter((line) => line.trim() !== '');
+    const emittedGaps = new Set();
     let out = '';
-    const firstO = O.blocks[0], lastO = O.blocks[O.blocks.length - 1];
-    if (pieces.length && pieces[0].from === 'O' && pieces[0].oi === 0 && firstO.start > 0) {
-      out += `${O.lines.slice(0, firstO.start).join('\n')}\n`;
+    const head = O.lines.slice(0, O.blocks[0].start);
+    if (pieces.length && pieces[0].from === 'O' && pieces[0].oi === 0 && head.length) {
+      out += `${head.join('\n')}\n`;
+    } else if (nonBlank(head).length) {
+      out += `${nonBlank(head).join('\n')}\n\n`;
     }
     for (let index = 0; index < pieces.length; index += 1) {
       const piece = pieces[index];
-      if (index > 0) {
-        const prev = pieces[index - 1];
-        if (prev.from === 'O' && piece.from === 'O' && piece.oi === prev.oi + 1) out += sep(O.blocks[prev.oi], O.blocks[piece.oi]);
-        else out += '\n\n';
+      const prev = index > 0 ? pieces[index - 1] : null;
+      if (prev) {
+        if (prev.from === 'O' && piece.from === 'O' && piece.oi === prev.oi + 1) {
+          out += `\n${gapLines(prev.oi).map((line) => `${line}\n`).join('')}`;
+          emittedGaps.add(prev.oi);
+        } else {
+          if (prev.from === 'O' && prev.oi < lastIndex && !emittedGaps.has(prev.oi)) {
+            const defs = nonBlank(gapLines(prev.oi));
+            if (defs.length) out += `\n\n${defs.join('\n')}`;
+            emittedGaps.add(prev.oi);
+          }
+          out += '\n\n';
+        }
       }
       out += piece.text;
     }
     const last = pieces[pieces.length - 1];
-    if (last && last.from === 'O' && last.oi === O.blocks.length - 1 && O.lines.length > lastO.end) {
-      out += `\n${O.lines.slice(lastO.end).join('\n')}`;
-    } else if (depth === 0 && /\n$/.test(oText) && !/\n$/.test(out)) {
-      out += '\n';
+    if (last && last.from === 'O' && last.oi === lastIndex && O.lines.length > O.blocks[lastIndex].end) {
+      out += `\n${O.lines.slice(O.blocks[lastIndex].end).join('\n')}`;
+      emittedGaps.add(lastIndex);
+    } else if (last && last.from === 'O' && last.oi < lastIndex && !emittedGaps.has(last.oi)) {
+      const defs = nonBlank(gapLines(last.oi));
+      if (defs.length) out += `\n\n${defs.join('\n')}`;
+      emittedGaps.add(last.oi);
     }
+    const leftovers = [];
+    for (let oi = 0; oi <= lastIndex; oi += 1) {
+      if (!emittedGaps.has(oi)) leftovers.push(...nonBlank(gapLines(oi)));
+    }
+    if (leftovers.length) out += `\n\n${leftovers.join('\n')}`;
+    if (depth === 0 && /\n$/.test(oText) && !/\n$/.test(out)) out += '\n';
     return out;
   }
 

@@ -309,3 +309,34 @@ test('并发源文档写入只有一个 expectedHash 能成功，文件与索引
   assert.equal(review.sourceRevision, 1);
   assert.equal(Object.values(review.sourceWriteRequests).filter((entry) => entry.status === 'complete').length, 1);
 });
+
+// 2026-10-13 修复:readBody 逐块 toString 会把跨块的多字节字符解码成 U+FFFD,>64 KB 的中文文档保存即写坏。
+test('保存大段中文文档后磁盘内容逐字节一致(请求体跨多个 socket 块)', async (t) => {
+  const f = await fixture(t);
+  const abs = writeMd(f.docRoot, '长文.md', '# 长文\n\n起始。\n');
+  const opened = await request(f.port, '/api/app/document/open', { method: 'POST', body: { path: abs } });
+  assert.equal(opened.status, 200, opened.text);
+  const sentence = '这是一段用来验证分块解码的中文正文,每个汉字占三个字节,块边界落在字符中间时以前会被写坏。';
+  const content = `# 长文\n\n${sentence.repeat(Math.ceil((900 * 1024) / Buffer.byteLength(sentence)))}\n`;
+  const saved = await request(f.port, '/api/app/document', {
+    method: 'PUT',
+    body: { path: abs, content, expectedHash: opened.json.source.hash, clientRequestId: 'big-cjk-1' },
+  });
+  assert.equal(saved.status, 200, saved.text);
+  const onDisk = fs.readFileSync(abs, 'utf8');
+  assert.equal(onDisk.includes('�'), false, '不得出现替换字符');
+  assert.equal(onDisk, content);
+});
+
+test('普通打开的文档也能取到旁边的图片(/api/app/file 按文档路径 d= 解析)', async (t) => {
+  const f = await fixture(t);
+  const abs = writeMd(f.docRoot, '带图/说明.md', '# 带图\n\n![示意](images/a.png)\n');
+  fs.mkdirSync(path.join(f.docRoot, '带图', 'images'), { recursive: true });
+  fs.writeFileSync(path.join(f.docRoot, '带图', 'images', 'a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const byDoc = await request(f.port, `/api/app/file?d=${encodeURIComponent(abs)}&path=${encodeURIComponent('images/a.png')}`);
+  assert.equal(byDoc.status, 200, byDoc.text);
+  const missing = await request(f.port, `/api/app/file?path=${encodeURIComponent('images/a.png')}`);
+  assert.equal(missing.status, 400, '既无会话 id 也无文档路径应报 400');
+  const notMd = await request(f.port, `/api/app/file?d=${encodeURIComponent(path.join(f.docRoot, '带图', 'images', 'a.png'))}&path=a.png`);
+  assert.notEqual(notMd.status, 200, 'd 必须是已存在的 .md');
+});

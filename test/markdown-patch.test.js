@@ -182,3 +182,36 @@ test('边界:CRLF 行尾、无结尾换行、删除块、首尾空行都按原�
   assert.equal(run(padded, '段一\n\n段二\n', '段一\n\n段二\n').changed, false);
   assert.equal(run(padded, '段一\n\n段二\n', '段一改\n\n段二\n').text, '\n\n段一改\n\n段二\n\n\n');
 });
+
+// 2026-10-13 修复:块与块之间 markdown-it 不产 token 的行(链接引用定义、脚注定义)以前在回写时被换成空行。
+// 这些行在编辑器里不可见,用户不可能有意删除,任何回写都必须保留它们。
+test('块级回写保留链接引用定义与脚注定义(编辑器丢弃或保留定义行两种情况)', () => {
+  const original = '看[文档][doc]。\n\n[doc]: https://example.com\n\n正文[^1]。\n\n[^1]: 参见《年报》第3章。\n\n结尾。\n';
+  const dropped = '看[文档][doc]。\n\n正文[^1]。\n\n结尾。\n';            // 模拟编辑器序列化时丢掉定义行
+  const onlyTail = run(original, dropped, '看[文档][doc]。\n\n正文[^1]。\n\n结尾(改)。\n');
+  assert.equal(onlyTail.text, '看[文档][doc]。\n\n[doc]: https://example.com\n\n正文[^1]。\n\n[^1]: 参见《年报》第3章。\n\n结尾(改)。\n');
+  assert.equal(onlyTail.stats.kept, 2);
+
+  const kept = '看[文档][doc]。\n\n[doc]: https://example.com\n\n正文[^1]。\n\n[^1]: 参见《年报》第3章。\n\n结尾。\n';
+  const editorKeeps = run(original, kept, kept.replace('结尾。', '结尾(改)。'));
+  assert.equal(editorKeeps.text, original.replace('结尾。', '结尾(改)。'));
+});
+
+test('块级回写:定义行在文首、文末、以及所在块被删除时都不丢', () => {
+  const head = run('[doc]: https://example.com\n\n看[文档][doc]。\n\n结尾。\n', '看[文档][doc]。\n\n结尾。\n', '看[文档][doc]。\n\n结尾(改)。\n');
+  assert.equal(head.text, '[doc]: https://example.com\n\n看[文档][doc]。\n\n结尾(改)。\n');
+
+  const tail = run('看[文档][doc]。\n\n结尾。\n\n[doc]: https://example.com\n', '看[文档][doc]。\n\n结尾。\n', '看[文档][doc]。\n\n结尾(改)。\n');
+  assert.equal(tail.text, '看[文档][doc]。\n\n结尾(改)。\n\n[doc]: https://example.com\n');
+
+  const deleted = run('看[文档][doc]。\n\n[doc]: https://example.com\n\n结尾。\n', '看[文档][doc]。\n\n结尾。\n', '结尾(改)。\n');
+  assert.match(deleted.text, /\[doc\]: https:\/\/example\.com/, '前一块被删掉,定义行补在文末也不能丢');
+  assert.ok(deleted.stats.deleted >= 1);
+});
+
+test('块级回写:相邻原文块之间的多个空行与定义行逐字节沿用', () => {
+  const original = '# 标题\n\n\n[a]: /a\n[b]: /b\n\n\n段落一。\n\n段落二。\n';
+  const normalized = '# 标题\n\n段落一。\n\n段落二。\n';
+  const result = run(original, normalized, '# 标题\n\n段落一。\n\n段落二(改)。\n');
+  assert.equal(result.text, '# 标题\n\n\n[a]: /a\n[b]: /b\n\n\n段落一。\n\n段落二(改)。\n');
+});

@@ -184,3 +184,24 @@ test('服务接口:/api/app/batch/import 接受批次内容(拖放)或文件路�
   const empty = await request(port, '/api/app/batch/import', { method: 'POST', body: {} });
   assert.equal(empty.status, 400, empty.text);
 });
+
+// 2026-10-13 修复:no-session 拒收以前也写回执,会话建好后再导同一批次仍被缓存的回执挡住,批注永远进不来。
+test('批次早于会话到达:先拒收 no-session,会话建好后再导入同一批次被采用', async (t) => {
+  const { docDir, options } = setup(t);
+  const doc = path.join(docDir, '先到.md');
+  fs.writeFileSync(doc, '# 先到\n正文\n');
+  const crypto = require('crypto');
+  const fingerprint = crypto.createHash('sha256').update(fs.readFileSync(doc)).digest('hex');
+  const batch = makeBatch({ file: '先到.md', sourceHash: fingerprint }, { batchId: 'early-batch-0001' });
+
+  const early = await batches.importBatch(batch, options);
+  assert.equal(early.receipt.accepted, false);
+  assert.equal(early.receipt.reason, 'no-session');
+  assert.equal(batches.readReceipt(batch.batchId, options), null, 'no-session 不落盘');
+
+  const { review } = await store.openReview(doc, options);
+  const later = await batches.importBatch(batch, options);
+  assert.equal(later.receipt.accepted, true, later.receipt.message);
+  assert.equal(later.review.id, review.id);
+  assert.equal(store.readAnnotations(doc).annotations.length, 2);
+});

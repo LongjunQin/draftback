@@ -113,26 +113,31 @@ function resolveDocumentAsset(reviewAbsPath, candidate) {
   }
   return null;
 }
+// 请求体上限 32 MB(内嵌 base64 截图的讲稿动辄几 MB;超限后边读边丢,内存有界)。
+// 必须把所有 Buffer 拼完再按 UTF-8 解码:逐块 toString 会把跨块的多字节字符(汉字 3 字节)
+// 解码成 U+FFFD,0.6.3 及之前保存超过 64 KB 的中文文档会因此写坏字符。
+const BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let body = '';
+    const chunks = [];
     let bytes = 0;
     let tooLarge = false;
     let settled = false;
     const fail = (error) => { if (!settled) { settled = true; reject(error); } };
     req.on('data', (chunk) => {
       bytes += chunk.length;
-      if (bytes > 2_000_000) { tooLarge = true; return; }
-      body += chunk;
+      if (tooLarge) return;
+      if (bytes > BODY_LIMIT_BYTES) { tooLarge = true; chunks.length = 0; return; }
+      chunks.push(chunk);
     });
     req.on('error', fail);
     req.on('end', () => {
       if (settled) return;
       if (tooLarge) {
-        return fail(new store.ReviewStoreError('BODY_TOO_LARGE', '请求体不能超过 2 MB。', { httpStatus: 413 }));
+        return fail(new store.ReviewStoreError('BODY_TOO_LARGE', '内容超过 32 MB，MDTurn 暂不支持这么大的文档。', { httpStatus: 413 }));
       }
       try {
-        const parsed = JSON.parse(body || '{}');
+        const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
         settled = true;
         resolve(parsed);
       } catch {
@@ -579,7 +584,8 @@ async function handleAppApi(req, res, pathname, q) {
   }
 
   const ref = q.get('r');
-  if (!ref) return sendJson(res, 400, { error: 'bad_request', message: '缺少审阅会话 r。' });
+  // /api/app/file 可以不带会话:普通打开的文档按 d=<文档路径> 取旁边的图片与附件
+  if (!ref && pathname !== '/api/app/file') return sendJson(res, 400, { error: 'bad_request', message: '缺少审阅会话 r。' });
 
   if (pathname === '/api/app/bundle') {
     if (!allowMethods(req, res, ['GET'])) return;
@@ -587,10 +593,14 @@ async function handleAppApi(req, res, pathname, q) {
   }
   if (pathname === '/api/app/file') {
     if (!allowMethods(req, res, ['GET'])) return;
-    const review = await documents.requireReview(ref);
+    // 审阅标签用 r=<会话 id>;普通打开的文档没有会话,用 d=<文档绝对路径>(必须是已存在的 .md)
+    const documentPath = q.get('d');
+    const baseAbsPath = ref ? (await documents.requireReview(ref)).absPath
+      : documentPath ? store.normalizeMdPath(documentPath) : null;
+    if (!baseAbsPath) return sendJson(res, 400, { error: 'bad_request', message: '缺少 r 或 d。' });
     let candidate = String(q.get('path') || '');
     try { candidate = decodeURIComponent(candidate); } catch {}
-    const abs = resolveDocumentAsset(review.absPath, candidate);
+    const abs = resolveDocumentAsset(baseAbsPath, candidate);
     if (!abs) return send(res, 404, 'Not found');
     return sendFile(res, abs, 'private, no-store');
   }
@@ -725,6 +735,17 @@ function cleanupProcessState() {
 process.once('exit', cleanupProcessState);
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, () => { cleanupProcessState(); process.exit(0); });
+}
+// 作为 App 内置服务运行时:主进程崩溃或被强退不会给我们发 SIGTERM,这里自己盯着父进程,
+// 它消失就收摊;否则孤儿服务继续占着端口文件,下次启动的新 App 会复用它,看到的还是旧版代码。
+const parentPid = Number(process.env.MDTURN_PARENT_PID);
+if (Number.isInteger(parentPid) && parentPid > 0) {
+  const watchdog = setInterval(() => {
+    try { process.kill(parentPid, 0); } catch (error) {
+      if (error && error.code === 'ESRCH') { clearInterval(watchdog); cleanupProcessState(); process.exit(0); }
+    }
+  }, 5000);
+  watchdog.unref();
 }
 
 (function start(port, tries) {

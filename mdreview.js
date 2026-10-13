@@ -194,6 +194,16 @@ async function commandOpen(args) {
     console.log(`→ Agent 下一步: 不要改这个文件。以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交修改后返回;届时若还需要用户审阅,再重新 mdreview open。`);
     return;
   }
+  if (review.status === 'applying') {
+    console.log('本轮已在改稿阶段(begin-apply 已运行),未创建新一轮。');
+    console.log(`→ Agent 下一步: 不要挂 wait。处理 ${review.absPath}.annotations.json 中 status=open 的批注,逐条标 applied/wontfix,全部清零后运行 mdreview complete "${review.absPath}";需要用户再审时才重新 mdreview open。`);
+    return;
+  }
+  if (review.status === 'ready_to_apply') {
+    console.log('已复用现有审阅会话:用户已经提交了批注,正等待处理。');
+    console.log(`→ Agent 下一步: 不要挂 wait。先读 ${review.absPath}.annotations.json 中 status=open 的批注(有歧义先向用户逐条确认,一次一个问题);修改源文件前必须先运行 mdreview begin-apply "${review.absPath}",否则触发版本冲突。`);
+    return;
+  }
   // 兜底通道:通过本地服务事件流让运行中的 App 直接打开该标签(与下面的 open -a 并行,任一条通即可)
   const notified = await notifyReviewChangedBestEffort(review, 'cli-open');
   console.log(reused ? '已复用现有审阅会话(用户尚未提交)。' : '已冻结文档并创建审阅会话。');
@@ -258,7 +268,25 @@ async function commandWait(args) {
   }
   console.log(`等待用户的下一个动作: ${absPath}`);
   console.log(`会话: ${initial.id}(当前状态 ${initial.status}${initial.applyMode ? '/' + initial.applyMode : ''})`);
-  if (initial.status === 'complete' && !['approved', 'finalized'].includes(initial.outcome || '')) {
+  // 启动时用户的动作已经发生(批注已提交 / 已在改稿 / 已定稿):不能再等"下一次变化",否则会白等到超时。
+  if (initial.status === 'ready_to_apply') {
+    printReview(initial);
+    console.log(`→ 用户已完成批注(在 wait 启动之前)。先读 ${absPath}.annotations.json 中 status=open 的批注(有歧义先向用户逐条确认,一次一个问题);修改源文件前必须先运行 mdreview begin-apply "${absPath}",否则触发版本冲突。`);
+    return;
+  }
+  if (initial.status === 'applying' && initial.applyMode !== 'manual') {
+    printReview(initial);
+    console.log(`→ 本轮已进入改稿阶段(begin-apply 已在别处运行)。处理 ${absPath}.annotations.json 中 status=open 的批注,逐条标 applied/wontfix,全部清零后运行 mdreview complete "${absPath}"。`);
+    return;
+  }
+  if (initial.status === 'complete' && initial.outcome === 'finalized') {
+    printReview(initial);
+    console.log('→ 用户已定稿并关闭文档,审阅结束。不要再挂 wait,也不要再改这个文件;向用户汇报即可。');
+    return;
+  }
+  if (initial.status === 'complete' && initial.outcome === 'approved') {
+    console.log('本轮用户已全文通过(无批注),继续等待:用户可能在 MDTurn 里开始新一轮审阅,也可能定稿并关闭。');
+  } else if (initial.status === 'complete') {
     console.log('本轮已闭环,继续等待:用户可能在 MDTurn 里开始新一轮审阅,也可能定稿并关闭。');
   }
   let announced = initial.id;

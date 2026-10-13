@@ -197,3 +197,29 @@ test('人工解锁在源文件被删除后仍可恢复，私有权限会迁移',
     assert.equal(fs.statSync(paths.reviews).mode & 0o777, 0o600);
   }
 });
+
+// 2026-10-13 修复:改稿阶段(用户手工修改 / Agent 已 begin-apply)文件内容变化是预期行为,
+// 再次 openReview 以前会按哈希不符判冲突,批注清零时甚至自动结束用户那一轮并重新冻结。
+test('改稿阶段再次 openReview 复用本轮,不冲突、不自动结束、不开新一轮', async (t) => {
+  const f = fixture(t);
+  const file = writeMd(f.root, '手工修改.md', '# 手工\n\n原文。\n');
+  const { review } = await store.openReview(file, f.options);
+  fs.writeFileSync(`${file}.annotations.json`, JSON.stringify({ version: 1, file: '手工修改.md', annotations: [] }));
+  await store.submitReview(review.id, f.options);
+  const manual = await store.beginManualEdit(file, f.options);
+  assert.equal(manual.status, 'applying');
+  assert.equal(manual.applyMode, 'manual');
+  fs.writeFileSync(file, '# 手工\n\n用户已经改了一句。\n');
+
+  // 手工修改轮是一个新会话(上一轮已因"无批注"闭环);再次 open 必须复用它
+  const reopened = await store.openReview(file, f.options);
+  assert.equal(reopened.reused, true);
+  assert.equal(reopened.review.id, manual.id);
+  assert.equal(reopened.review.status, 'applying');
+  assert.equal(reopened.review.applyMode, 'manual');
+  const stored = await store.getReviewById(manual.id, f.options);
+  assert.equal(stored.status, 'applying', '用户的手工修改轮不能被结束');
+  const all = Object.values(JSON.parse(fs.readFileSync(path.join(f.dataDir, 'reviews.json'), 'utf8')).reviews);
+  assert.equal(all.filter((item) => item.status === 'applying').length, 1, '不得另起一轮');
+  assert.equal(all.length, 2, '只有闭环的第一轮和手工修改轮');
+});

@@ -45,6 +45,7 @@ let rendererReady = false;
 let pendingOpenFiles = [];
 let connecting = null;
 let activeService = null;
+let pendingOwnedProcess = null; // 已 spawn、尚未通过健康检查的内置服务子进程
 
 app.setName('MDTurn');
 if (process.platform === 'win32') app.setAppUserModelId('org.mdturn.desktop');
@@ -54,6 +55,10 @@ function queueOpenFiles(paths) {
     .map((candidate) => normalizeMarkdownPath(candidate))
     .filter(Boolean);
   pendingOpenFiles = [...new Set([...pendingOpenFiles, ...validPaths])];
+  // 窗口已被关掉(macOS 上 App 仍在 Dock)时,Finder 双击 / 菜单打开 / 第二实例都不会触发 activate,
+  // 这里自己把窗口建回来;排队的文件在页面加载完后送出。
+  if (pendingOpenFiles.length && (!mainWindow || mainWindow.isDestroyed()) && app.isReady()) createWindow();
+  else focusMainWindow();
   flushOpenFiles();
 }
 
@@ -146,16 +151,20 @@ async function connectAndLoad() {
         isPackaged: app.isPackaged,
         resourcesPath: process.resourcesPath,
         executablePath: process.execPath,
+        onSpawn: (child) => { pendingOwnedProcess = child; },
       });
       if (!service.ownedProcess && activeService && activeService.ownedProcess && activeService.port === service.port) {
         service.ownedProcess = activeService.ownedProcess;
       }
       activeService = service;
+      pendingOwnedProcess = null;
       serviceOrigin = `http://127.0.0.1:${service.port}`;
       rendererReady = false;
+      // 等服务就绪可能要几秒,期间用户可能已把窗口关了
+      if (!mainWindow || mainWindow.isDestroyed()) return;
       await mainWindow.loadURL(`${serviceOrigin}/desktop`);
     } catch (error) {
-      await showServiceError(error);
+      if (mainWindow && !mainWindow.isDestroyed()) await showServiceError(error);
     } finally {
       connecting = null;
     }
@@ -201,6 +210,19 @@ function createWindow() {
   }
   mainWindow = new BrowserWindow(windowOptions);
   installNavigationGuards(mainWindow);
+  // 渲染层在有未保存修改时用 beforeunload 拦住关闭;Electron 默认不弹任何提示,只是静默不关(⌘Q/关窗/刷新都像没反应)。
+  // 这里替用户问一句,选"放弃"才真正关闭(preventDefault = 忽略 beforeunload 继续卸载)。
+  mainWindow.webContents.on('will-prevent-unload', (event) => {
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning',
+      buttons: ['取消', '放弃修改并关闭'],
+      defaultId: 0,
+      cancelId: 0,
+      message: '有尚未保存的 Markdown 修改',
+      detail: '关闭后这些修改会丢失(下次启动可能从草稿恢复)。先回到 MDTurn 按 ⌘S 保存,或放弃修改。',
+    });
+    if (choice === 1) event.preventDefault();
+  });
   mainWindow.once('ready-to-show', () => mainWindow && mainWindow.show());
   mainWindow.webContents.on('did-start-loading', () => { rendererReady = false; });
   mainWindow.webContents.on('did-finish-load', () => {
@@ -496,8 +518,12 @@ if (!hasSingleInstanceLock) {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
-  app.on('before-quit', () => {
+  // 用 will-quit 而不是 before-quit:后者在窗口关闭之前触发,若用户在"未保存修改"提示里选了取消,
+  // 服务已被杀、窗口却还在,之后保存只会报"服务不可达"。will-quit 只在所有窗口都已关闭后触发。
+  app.on('will-quit', () => {
     stopOwnedService(activeService);
+    if (pendingOwnedProcess) stopOwnedService({ ownedProcess: pendingOwnedProcess });
     activeService = null;
+    pendingOwnedProcess = null;
   });
 }

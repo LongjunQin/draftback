@@ -15,10 +15,15 @@ const { execFile } = require('child_process');
 const INPUT_FORMAT = 'gfm+tex_math_dollars+east_asian_line_breaks+yaml_metadata_block+footnotes';
 
 function findPandoc() {
+  // 从 Finder 启动的 App 只有极简 PATH,常见安装位置要自己列全:Homebrew(Apple 芯片 / Intel)、MacPorts、pip/cabal 用户目录
+  const home = require('os').homedir();
   const candidates = [
     process.env.MDTURN_PANDOC,
     '/opt/homebrew/bin/pandoc',
     '/usr/local/bin/pandoc',
+    '/opt/local/bin/pandoc',
+    path.join(home, '.local', 'bin', 'pandoc'),
+    path.join(home, '.cabal', 'bin', 'pandoc'),
     '/usr/bin/pandoc',
   ].filter(Boolean);
   for (const candidate of candidates) {

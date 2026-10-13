@@ -115,8 +115,12 @@
 
   function friendlyError(error, action = '操作') {
     if (!(error instanceof ApiError)) return `${action}失败：${error && error.message ? error.message : String(error)}`;
-    if (error.code === 'source_conflict' || error.code === 'source_changed' || error.status === 409) {
+    if (error.code === 'source_conflict' || error.code === 'source_changed') {
       return `${action}未完成：文档版本已经变化。你的输入仍保留，请先处理版本冲突。`;
+    }
+    if (error.status === 409) {
+      // 其余 409(普通编辑中被冻结、上一次写入未完成、幂等键冲突……)服务端的说明更准确,原样转达
+      return `${action}未完成：${error.message || '与当前状态冲突。'}`;
     }
     if (error.code === 'review_read_only' || error.code === 'source_write_not_allowed' || error.status === 423) {
       return `${action}未完成：文档已被重新冻结（通常是智能体开启了新一轮审阅）。你的修改仍保留在编辑器里，没有丢失；可复制留用，或等这一轮结束后再改。`;
@@ -228,6 +232,11 @@
 
   function draftKey(tabId) { return `mdturn.draft.${tabId}`; }
 
+  // localStorage 配额被大草稿占满时 setItem 会抛错;界面偏好这类小东西写不进去也不能让打开/关闭标签中断
+  function storeLocal(key, value) {
+    try { localStorage.setItem(key, value); } catch (_) {}
+  }
+
   function readDraft(tabId, sourceHash) {
     try {
       const draft = JSON.parse(localStorage.getItem(draftKey(tabId)) || 'null');
@@ -274,7 +283,7 @@
       activeId: state.activeId,
       tabs: state.tabs.map((tab) => ({ id: tab.id, path: tab.review.sourceFile, kind: tab.kind })),
     };
-    localStorage.setItem('mdturn.tabs', JSON.stringify(payload));
+    storeLocal('mdturn.tabs', JSON.stringify(payload));
   }
 
   async function restoreTabs() {
@@ -469,6 +478,7 @@
       if (existing.id === next.id) {
         next.mode = existing.mode;
         next.scrollTop = existing.scrollTop;
+        next.editingRegistered = existing.editingRegistered; // 否则关标签时不会注销编辑登记,智能体一直被 USER_EDITING 挡住
       }
       state.tabs.splice(index, 1, next);
     } else {
@@ -490,10 +500,20 @@
       tab.source = normalized.source.content;
       tab.sourceHash = normalized.source.hash;
       tab.renderedHash = null;
+      // 编辑器正开着这篇(且没有未保存修改)时,把新正文灌进去;否则编辑器里还是旧文,
+      // 下次保存会把别处(智能体、VS Code)的改动当成"用户修改"覆盖回去。
+      if (changed && state.editorTabId === tab.id && !tab.dirty) syncEditorToSource(tab);
     }
     tab.remotePending = null;
     if (tab.id === state.activeId) renderApp(); else renderTabs();
     return { tab, normalized, changed };
+  }
+
+  function syncEditorToSource(tab) {
+    if (state.editorView && window.MDTurnEditor && state.editorView.__mdturnFallback !== true) {
+      try { window.MDTurnEditor.setValue(state.editorView, editorBody(tab.source)); return; } catch (_) {}
+    }
+    destroyEditor(); // 退化编辑器或灌入失败:销毁后由 renderEditor 按新正文重建
   }
 
   async function refreshTab(tab, options = {}) {
@@ -812,7 +832,7 @@
     const zoom = Math.min(2.2, Math.max(0.6, next));
     if (zoom === state.readerZoom) return;
     state.readerZoom = zoom;
-    localStorage.setItem('mdturn.readerZoom', String(zoom));
+    storeLocal('mdturn.readerZoom', String(zoom));
     applyReaderZoom();
   }
 
@@ -1145,7 +1165,7 @@
       event.preventDefault(); depth = 0; nodes.dropOverlay.hidden = true;
       const files = Array.from(event.dataTransfer.files || []);
       const batchFiles = files.filter((file) => /\.mdturn-batch\.json$/i.test(file.name));
-      const docFiles = files.filter((file) => /\.(md|markdown)$/i.test(file.name));
+      const docFiles = files.filter((file) => /\.md$/i.test(file.name)); // 服务端只认 .md,别的后缀要给提示而不是静默吞掉
       const markdown = !docFiles.length ? []
         : bridge && typeof bridge.pathsForFiles === 'function' ? bridge.pathsForFiles(docFiles) : docFiles.map((file) => file.path).filter(Boolean);
       batchFiles.forEach((file) => void importBatchFile(file));
@@ -1220,21 +1240,21 @@
   function setLeftMode(mode) {
     state.leftMode = mode === 'files' ? 'files' : 'outline';
     state.leftCollapsed = false;
-    localStorage.setItem('mdturn.leftMode', state.leftMode);
-    localStorage.setItem('mdturn.leftCollapsed', '0');
+    storeLocal('mdturn.leftMode', state.leftMode);
+    storeLocal('mdturn.leftCollapsed', '0');
     renderLayoutState();
   }
 
   function toggleLeft(force) {
     state.leftCollapsed = typeof force === 'boolean' ? force : !state.leftCollapsed;
-    localStorage.setItem('mdturn.leftCollapsed', state.leftCollapsed ? '1' : '0');
+    storeLocal('mdturn.leftCollapsed', state.leftCollapsed ? '1' : '0');
     renderLayoutState();
     requestAnimationFrame(scheduleMarkerPositions);
   }
 
   function toggleRight(force) {
     state.rightCollapsed = typeof force === 'boolean' ? force : !state.rightCollapsed;
-    localStorage.setItem('mdturn.rightCollapsed', state.rightCollapsed ? '1' : '0');
+    storeLocal('mdturn.rightCollapsed', state.rightCollapsed ? '1' : '0');
     renderLayoutState();
     requestAnimationFrame(scheduleMarkerPositions);
   }
@@ -1444,6 +1464,10 @@
     const lines = match[0].split('\n').length - 1;
     return '\n'.repeat(lines) + text.slice(match[0].length);
   }
+  // 文档旁资源(图片、附件)的归属:审阅标签按会话 id 取,普通打开的文档没有会话,按文档路径取
+  function assetOwnerQuery(tab) {
+    return isPlain(tab) ? `d=${encodeURIComponent(tab.review.sourceFile)}` : `r=${encodeURIComponent(tab.id)}`;
+  }
   async function renderMarkdown(root, source, tab, options = {}) {
     const renderToken = Symbol('mdturn-render');
     root.__mdturnRenderToken = renderToken;
@@ -1455,7 +1479,7 @@
       if (/^(https?:|data:)/i.test(src)) return;
       const localPath = localAssetPath(src);
       image.dataset.sourceSrc = src;
-      image.src = `/api/app/file?r=${encodeURIComponent(tab.id)}&path=${encodeURIComponent(localPath)}`;
+      image.src = `/api/app/file?${assetOwnerQuery(tab)}&path=${encodeURIComponent(localPath)}`;
       image.loading = 'lazy';
     });
     target.querySelectorAll('a[href]').forEach((link) => {
@@ -1471,11 +1495,12 @@
         link.addEventListener('click', (event) => {
           event.preventDefault();
           const clean = href.replace(/[?#].*$/, '');
-          void openReviewPath(resolveDocumentPath(tab.review.sourceFile, clean));
+          // 普通打开,不冻结目标文档;它若已有审阅会话,openDocumentPath 会自动进入那个会话
+          void openDocumentPath(resolveDocumentPath(tab.review.sourceFile, clean));
         });
       } else {
         link.dataset.sourceHref = href;
-        link.href = `/api/app/file?r=${encodeURIComponent(tab.id)}&path=${encodeURIComponent(localAssetPath(href))}`;
+        link.href = `/api/app/file?${assetOwnerQuery(tab)}&path=${encodeURIComponent(localAssetPath(href))}`;
         link.target = '_blank'; link.rel = 'noopener';
       }
     });
@@ -1991,12 +2016,23 @@
       ? '对整篇文档的意见：整体结构、方向、要不要重写、想先讨论什么……'
       : '这段内容哪里需要修改？希望补充什么？';
     nodes.annotationText.value = note ? note.comment || '' : '';
+    nodes.annotationText.dataset.initial = nodes.annotationText.value;
     nodes.annotationSave.textContent = note ? '保存修改' : '保存批注';
     nodes.annotationDialog.hidden = false;
     requestAnimationFrame(() => {
       restoreAnnotationDialogPosition();
       setTimeout(() => nodes.annotationText.focus(), 30);
     });
+  }
+
+  // Esc / 点遮罩:有没保存的文字时不直接扔掉,提醒用「取消」按钮明确放弃
+  function dismissAnnotationDialog() {
+    const current = nodes.annotationText.value;
+    if (current.trim() && current !== (nodes.annotationText.dataset.initial || '')) {
+      toast('批注还没有保存：点「保存批注」保留，或点「取消」放弃。', 'error');
+      return;
+    }
+    closeAnnotationDialog();
   }
 
   function closeAnnotationDialog(options = {}) {
@@ -2496,7 +2532,7 @@
     nodes.docNoteButton.addEventListener('click', () => openAnnotationDialog({ scope: 'document' }));
     nodes.annotationCancel.addEventListener('click', () => closeAnnotationDialog());
     nodes.annotationClose.addEventListener('click', () => closeAnnotationDialog());
-    nodes.annotationDialog.addEventListener('pointerdown', (event) => { if (event.target === nodes.annotationDialog) closeAnnotationDialog(); });
+    nodes.annotationDialog.addEventListener('pointerdown', (event) => { if (event.target === nodes.annotationDialog) dismissAnnotationDialog(); });
     nodes.annotationDialogHandle.addEventListener('pointerdown', beginAnnotationDialogDrag);
     nodes.annotationDialogHandle.addEventListener('pointermove', moveAnnotationDialog);
     nodes.annotationDialogHandle.addEventListener('pointerup', endAnnotationDialogDrag);
@@ -2563,8 +2599,10 @@
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); handleDesktopCommand('find'); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g') { event.preventDefault(); handleDesktopCommand(event.shiftKey ? 'find-prev' : 'find-next'); }
       if (event.key === 'Escape') {
-        if (!nodes.annotationDialog.hidden) closeAnnotationDialog();
+        if (event.isComposing || event.keyCode === 229) return; // 输入法在取消候选词,不是要关东西
+        if (!nodes.annotationDialog.hidden) dismissAnnotationDialog();
         else if (!nodes.findBar.hidden) closeFind();
+        else if (activeTab() && activeTab().mode === 'edit') { /* 交给编辑器:这里清空选区会让光标消失 */ }
         else { nodes.annotate.hidden = true; window.getSelection()?.removeAllRanges(); }
       }
     });

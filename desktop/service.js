@@ -114,6 +114,8 @@ function startOwnedService(options = {}) {
       MDREAD_DATA_DIR: dataDir,
       MDREAD_HOST: '127.0.0.1',
       MDREAD_PORT: '0',
+      // 服务自己盯着主进程:主进程崩溃/被强退时服务随之退出,不留孤儿
+      MDTURN_PARENT_PID: String(process.pid),
     },
     detached: false,
     stdio: 'ignore',
@@ -141,6 +143,8 @@ async function ensureService(options = {}) {
 
   const started = (options.startService || startOwnedService)(options);
   const ownedProcess = started.child;
+  // 健康检查通过之前子进程只存在于这里;调用方可借此记下它,以便此时退出也能把它杀掉
+  if (ownedProcess && typeof options.onSpawn === 'function') options.onSpawn(ownedProcess);
   const discoveryOptions = {
     ...options,
     portFiles: [started.portFile],

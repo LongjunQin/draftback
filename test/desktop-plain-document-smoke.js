@@ -47,6 +47,7 @@ async function main() {
     const ORIGINAL = [
       '---', 'title: 普通文档', 'tags: [a, b]', '---',
       '# 普通文档', '',
+      '![示意图](images/示意.png)', '',
       '<p id="plain-para">这一段用来验证普通阅读时不能划词批注。</p>', '',
       '行内公式 $E=mc^2$ 与*强调*,还有尾随两空格硬换行  ', '续行。', '',
       '* 第一项', '* 第二项', '    * 子项甲', '    * 子项乙', '* 第三项', '',
@@ -54,6 +55,10 @@ async function main() {
       '第二节正文。', '',
     ].join('\n');
     fs.writeFileSync(source, ORIGINAL, 'utf8');
+    // 文档旁的本地图片:普通打开(没有审阅会话)也必须显示(2026-10-13 修复前一律 404)
+    fs.mkdirSync(path.join(path.dirname(source), 'images'), { recursive: true });
+    fs.writeFileSync(path.join(path.dirname(source), 'images', '示意.png'),
+      Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
     store.ensureDataDir({ dataDir });
 
     server = await startServer(dataDir);
@@ -90,6 +95,10 @@ async function main() {
     assert.equal(await store.getReviewByPath(source, { dataDir, activeOnly: true }), null, '普通打开不得创建审阅会话');
     assert.equal(fs.existsSync(store.sidecarFor(source)), false, '普通打开不得创建 sidecar');
     assert.equal(fs.existsSync(`${source}.lock`), false, '普通打开不得留下锁目录');
+    await waitUntil('普通打开的文档本地图片能取到', () => chrome.cdp.evaluate(`(() => {
+      const img = document.querySelector('#documentContent img');
+      return !!img && img.src.includes('d=') && img.complete && img.naturalWidth > 0;
+    })()`));
 
     const selected = await selectParagraph(chrome.cdp, '#plain-para');
     assert.match(selected, /普通阅读/);
