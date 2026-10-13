@@ -46,12 +46,31 @@ struct ReaderView: View {
                         Label("写总体意见", systemImage: "text.badge.plus")
                     }
                     Button { exportPDF() } label: { Label("导出 PDF", systemImage: "doc.richtext") }
-                    Button { store.submitBatch(for: document) } label: { Label("完成本轮:导出批注批次", systemImage: "paperplane") }
-                        .disabled(document.openNotes.isEmpty)
-                    if !document.submittedNotes.isEmpty {
-                        Button { store.resubmitBatch(for: document) } label: { Label("重新导出已提交的批次", systemImage: "arrow.clockwise") }
+                    if let sync = document.sync {
+                        Button { store.submitBatch(for: document) } label: { Label("完成本轮:把批注交给 Mac", systemImage: "paperplane") }
+                            .disabled(document.openNotes.isEmpty || !sync.canAnnotate)
+                        if !document.submittedNotes.isEmpty {
+                            Button { store.resubmitBatch(for: document) } label: { Label("重新发送已提交的批次", systemImage: "arrow.clockwise") }
+                        }
+                        if !sync.summary.isEmpty {
+                            Button { message = sync.summary } label: { Label("查看改稿摘要", systemImage: "text.quote") }
+                        }
+                    } else {
+                        Button { store.submitBatch(for: document) } label: { Label("完成本轮:导出批注批次", systemImage: "paperplane") }
+                            .disabled(document.openNotes.isEmpty)
+                        if !document.submittedNotes.isEmpty {
+                            Button { store.resubmitBatch(for: document) } label: { Label("重新导出已提交的批次", systemImage: "arrow.clockwise") }
+                        }
                     }
                 } label: { Image(systemName: "ellipsis.circle") }
+            }
+            if document.newerVersionAvailable, let sync = document.sync {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        if let latest = store.synced.first(where: { $0.docId == sync.docId }) { store.openSynced(latest) }
+                    } label: { Label("新版", systemImage: "arrow.down.doc") }
+                    .tint(.orange)
+                }
             }
         }
         .sheet(isPresented: $showOutline) { OutlineSheet(items: document.outline) { id in bridge?.scrollToHeading(id); showOutline = false } }
@@ -114,9 +133,23 @@ struct ReaderView: View {
         .background(.bar)
     }
 
-    /// 跨端规则第 7 节的手机状态链,文件传递阶段只有"本地已保存"和"已导出,等待 Mac 接收"两档。
+    /// 跨端规则第 7 节的手机状态链。Mac 推来的文档:本地已保存 → 等待同步 → Mac 已接收 → 等待智能体 → 修改中 → 新版可复核;
+    /// 手机独立打开的文件(文件传递)只有"本地已保存"和"已导出,等待 Mac 接收"两档。
     private var statusText: String {
         let open = document.openNotes.count, sent = document.submittedNotes.count
+        if let sync = document.sync {
+            if document.newerVersionAvailable { return "Mac 已推来新版 · 点左上角「新版」" }
+            let received = document.receivedNotes.count, rejected = document.rejectedNotes.count
+            if sent > 0 {
+                if store.pendingUploads > 0 { return "等待同步 \(sent) 条(联网后自动上传)" }
+                let waitedLong = document.submittedNotes.compactMap { $0.raw["submittedAt"] as? String }.compactMap(ISO8601DateFormatter().date(from:)).min()
+                    .map { Date().timeIntervalSince($0) > 180 } ?? false
+                return waitedLong ? "已提交 \(sent) 条 · 等待 Mac 在线" : "已提交 \(sent) 条 · 等待 Mac 接收"
+            }
+            if received > 0 && open == 0 { return "Mac 已接收 \(received) 条 · \(sync.stateLabel)" }
+            if rejected > 0 && open == 0 { return "\(rejected) 条未被采用 · \(sync.stateLabel)" }
+            return sync.canAnnotate ? "\(sync.stateLabel) · 本地已保存 \(open) 条" : sync.stateLabel
+        }
         if sent > 0 && open == 0 { return "已导出 \(sent) 条 · 等待 Mac 接收" }
         if sent > 0 { return "本地已保存 \(open) 条 · 已导出 \(sent) 条" }
         return "手机批注 · 本地已保存 \(open) 条"
@@ -199,9 +232,32 @@ struct NotesSheet: View {
                                 .onTapGesture { if !note.isDocumentScope { onFocus(note.id) } }
                         }
                     } header: {
-                        Text("已导出,等待 Mac 接收 \(document.submittedNotes.count)")
+                        Text("\(document.sync == nil ? "已导出" : "已提交"),等待 Mac 接收 \(document.submittedNotes.count)")
                     } footer: {
-                        Text("已导出的批注锁定,不能再改;要补充就写新批注,下一批再交。")
+                        Text("已提交的批注锁定,不能再改;要补充就写新批注,下一批再交。")
+                    }
+                }
+                if !document.receivedNotes.isEmpty {
+                    Section("Mac 已接收 \(document.receivedNotes.count)") {
+                        ForEach(document.receivedNotes) { note in
+                            NoteRow(note: note)
+                                .contentShape(Rectangle())
+                                .onTapGesture { if !note.isDocumentScope { onFocus(note.id) } }
+                        }
+                    }
+                }
+                if !document.rejectedNotes.isEmpty {
+                    Section {
+                        ForEach(document.rejectedNotes) { note in
+                            VStack(alignment: .leading, spacing: 4) {
+                                NoteRow(note: note)
+                                Text(note.rejectedReason ?? "未被采用").font(.caption).foregroundStyle(.red)
+                            }
+                        }
+                    } header: {
+                        Text("未被采用 \(document.rejectedNotes.count)")
+                    } footer: {
+                        Text("Mac 没有采用这批批注(原因见每条下方);它们仍保留在手机上,需要时在新一轮重新写。")
                     }
                 }
                 let older = document.olderVersionNotes

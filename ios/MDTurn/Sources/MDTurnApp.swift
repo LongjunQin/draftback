@@ -1,11 +1,14 @@
 import SwiftUI
+import UIKit
 
 /// MDTurn iOS:SwiftUI 外壳 + WKWebView 内核(与 Mac 共用同一套渲染与批注锚点代码)。
-/// 首版范围(路线图 v3 第一轮样例):打开本地 Markdown、阅读、划词批注、批注本地持久保存、
-/// 导出批注批次(与 Mac sidecar 同格式)与 PDF。同步传输层是可替换接口,CloudKit 接入等开发者账户激活后进行。
+/// 范围:打开本地 Markdown、阅读、划词批注、批注本地持久保存、导出批注批次与 PDF;
+/// 以及跨端规则第 12 节的 CloudKit 同步:接收 Mac 推来的审阅文档,把批注批次交回 Mac,收回执与新版。
 @main
 struct MDTurnApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = DocumentStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -19,7 +22,32 @@ struct MDTurnApp: App {
                     if let index = args.firstIndex(of: "--open-local"), index + 1 < args.count {
                         store.openLocal(named: args[index + 1])
                     }
+                    store.refreshSync()
                 }
+                .onChange(of: scenePhase) { _, phase in if phase == .active { store.refreshSync() } }
+                .onReceive(NotificationCenter.default.publisher(for: AppDelegate.cloudPushNotification)) { _ in store.refreshSync() }
         }
+    }
+}
+
+/// 只做一件事:注册静默推送,CloudKit 的区变更通知到达时让文档库去拉取。
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    static let cloudPushNotification = Notification.Name("mdturn.cloud.push")
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        application.registerForRemoteNotifications()
+        return true
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // 模拟器或未签推送权限时会走到这里:不影响使用,回到前台时照样拉取
+    }
+
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard CloudSyncEngine.isCloudKitPush(userInfo) else { completionHandler(.noData); return }
+        NotificationCenter.default.post(name: Self.cloudPushNotification, object: nil)
+        // 给拉取留几秒;真正的结果由 DocumentStore 落盘,这里只需告诉系统有新数据
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { completionHandler(.newData) }
     }
 }

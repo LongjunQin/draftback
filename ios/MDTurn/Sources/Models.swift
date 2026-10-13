@@ -12,8 +12,13 @@ struct Note: Identifiable, Equatable {
     var status: String { (raw["status"] as? String ?? "open").lowercased() }
     var createdAt: String { raw["createdAt"] as? String ?? "" }
     var isOpen: Bool { status == "open" }
-    /// 已打包导出、等 Mac 接收(跨端规则 6.2:导出即锁定,不能再改)。
+    /// 已打包导出 / 已上传、等 Mac 接收(跨端规则 6.2:提交即锁定,不能再改)。
     var isSubmitted: Bool { status == "submitted" }
+    /// Mac 已接收(回执到达,批注已进 sidecar)。
+    var isReceived: Bool { status == "received" }
+    /// Mac 拒收(会话已推进 / 版本不一致),保留在手机上,由用户决定下一轮是否重提(跨端规则 6.6)。
+    var isRejected: Bool { status == "rejected" }
+    var rejectedReason: String? { raw["rejectedReason"] as? String }
     var submittedBatchId: String? { raw["submittedBatchId"] as? String }
     var baseVersion: String? { raw["baseVersion"] as? String }
     /// 批注是否写在这个版本上;没有版本指纹的旧数据按当前版本对待。
@@ -76,12 +81,16 @@ struct AnnotationBatch: Codable {
     var completedAt: String
     var device: String
     var annotationsJSON: String  // 批注数组的 JSON 原文(保留全部字段)
+    var docId: String? = nil     // Mac 推来的文档才有(跨端规则第 3 节:手机只认文档标识,不认路径)
+    var reviewId: String? = nil
 
     func asJSONData() throws -> Data {
         var object: [String: Any] = [
             "version": version, "batchId": batchId, "documentName": documentName,
             "baseVersion": baseVersion, "completedAt": completedAt, "device": device,
         ]
+        if let docId { object["docId"] = docId }
+        if let reviewId { object["reviewId"] = reviewId }
         if let data = annotationsJSON.data(using: .utf8), let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             object["annotations"] = array
         } else {

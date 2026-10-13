@@ -13,7 +13,8 @@ const {
   shell,
 } = require('electron');
 const { markdownPathsFromArguments, normalizeMarkdownPath } = require('./open-files');
-const { ensureService, stopOwnedService } = require('./service');
+const { ensureService, stopOwnedService, ownedDataDirectory } = require('./service');
+const { spawn } = require('child_process');
 const { exportDocx, findPandoc } = require('./export-docx');
 
 // 用户设置(外观等),存在 userData/settings.json;读写失败都不影响启动。
@@ -46,6 +47,46 @@ let pendingOpenFiles = [];
 let connecting = null;
 let activeService = null;
 let pendingOwnedProcess = null; // 已 spawn、尚未通过健康检查的内置服务子进程
+let syncHelper = null; // MDTurn Sync.app(原生辅助程序,负责与 iCloud 同步;跨端规则第 12 节)
+
+// 打包后在 MDTurn.app/Contents/Helpers/ 里;开发时用 mac-sync/scripts/build.sh 的产物;也可用环境变量指定
+function syncHelperExecutable() {
+  if (process.platform !== 'darwin') return null;
+  const relative = path.join('MDTurn Sync.app', 'Contents', 'MacOS', 'MDTurn Sync');
+  const candidates = [
+    process.env.MDTURN_SYNC_HELPER,
+    app.isPackaged ? path.join(process.resourcesPath, '..', 'Helpers', relative) : null,
+    path.join(__dirname, '..', 'mac-sync', 'build', relative),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch {}
+  }
+  return null;
+}
+
+function startSyncHelper() {
+  if (syncHelper || process.env.MDTURN_SYNC_DISABLED === '1') return;
+  const executable = syncHelperExecutable();
+  if (!executable) return;
+  try {
+    syncHelper = spawn(executable, [], {
+      env: { ...process.env, MDREAD_DATA_DIR: ownedDataDirectory(), MDTURN_PARENT_PID: String(process.pid) },
+      stdio: 'ignore',
+      detached: false,
+    });
+    syncHelper.on('exit', () => { syncHelper = null; });
+    syncHelper.on('error', () => { syncHelper = null; });
+  } catch {
+    syncHelper = null;
+  }
+}
+
+function stopSyncHelper() {
+  if (syncHelper && syncHelper.exitCode === null) {
+    try { syncHelper.kill(); } catch {}
+  }
+  syncHelper = null;
+}
 
 app.setName('MDTurn');
 if (process.platform === 'win32') app.setAppUserModelId('org.mdturn.desktop');
@@ -158,6 +199,7 @@ async function connectAndLoad() {
       }
       activeService = service;
       pendingOwnedProcess = null;
+      startSyncHelper();
       serviceOrigin = `http://127.0.0.1:${service.port}`;
       rendererReady = false;
       // 等服务就绪可能要几秒,期间用户可能已把窗口关了
@@ -521,6 +563,7 @@ if (!hasSingleInstanceLock) {
   // 用 will-quit 而不是 before-quit:后者在窗口关闭之前触发,若用户在"未保存修改"提示里选了取消,
   // 服务已被杀、窗口却还在,之后保存只会报"服务不可达"。will-quit 只在所有窗口都已关闭后触发。
   app.on('will-quit', () => {
+    stopSyncHelper();
     stopOwnedService(activeService);
     if (pendingOwnedProcess) stopOwnedService({ ownedProcess: pendingOwnedProcess });
     activeService = null;

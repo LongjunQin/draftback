@@ -26,6 +26,27 @@ struct LibraryView: View {
                     Button { importing = true } label: { Label("打开 Markdown…", systemImage: "folder") }
                     Button { store.openSample() } label: { Label("打开示例文档", systemImage: "doc.text") }
                 }
+                if !store.synced.isEmpty || store.syncError != nil {
+                    Section {
+                        if let error = store.syncError {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+                        ForEach(store.synced) { doc in
+                            Button { store.openSynced(doc) } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(doc.title).foregroundStyle(.primary)
+                                    Text("第 \(doc.round) 轮 · \(doc.stateLabel)" + (doc.pushedAt.map { " · \($0.formatted(date: .abbreviated, time: .shortened))" } ?? ""))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .disabled(!doc.contentAvailable)
+                        }
+                    } header: {
+                        Text("来自 Mac")
+                    } footer: {
+                        Text("Mac 上发起审阅的文档会自动出现在这里;点「完成本轮」后批注直接交回 Mac。")
+                    }
+                }
                 if !store.localFiles.isEmpty {
                     Section {
                         ForEach(store.localFiles, id: \.self) { url in
@@ -56,6 +77,7 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("MDTurn")
+            .refreshable { store.refreshSync() }
             .onAppear { store.refreshLocalFiles() }
             .onChange(of: scenePhase) { _, phase in if phase == .active { store.refreshLocalFiles() } }
             .navigationDestination(item: $store.current) { document in ReaderView(document: document) }

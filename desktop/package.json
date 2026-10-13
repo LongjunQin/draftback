@@ -11,11 +11,12 @@
     "dev": "electron .",
     "test": "node --test test/*.test.js",
     "build:vendor": "node scripts/build-vendor.mjs",
-    "dist:app": "npm run build:vendor && electron-builder --mac --arm64 --dir",
-    "dist:dmg": "npm run build:vendor && electron-builder --mac dmg --arm64",
-    "dist:zip": "npm run build:vendor && electron-builder --mac zip --arm64",
-    "dist:beta": "npm run build:vendor && electron-builder --mac --arm64 --dir && electron-builder --mac dmg zip --arm64",
-    "dist:win": "npm run build:vendor && electron-builder --win nsis --x64"
+    "dist:app": "npm run build:vendor && npm run build:helper && electron-builder --mac --arm64 --dir",
+    "dist:dmg": "npm run build:vendor && npm run build:helper && electron-builder --mac dmg --arm64",
+    "dist:zip": "npm run build:vendor && npm run build:helper && electron-builder --mac zip --arm64",
+    "dist:beta": "npm run build:vendor && npm run build:helper && electron-builder --mac --arm64 --dir && electron-builder --mac dmg zip --arm64",
+    "dist:win": "npm run build:vendor && electron-builder --win nsis --x64",
+    "build:helper": "bash ../mac-sync/scripts/build.sh Release || echo '同步辅助程序未构建(需要 Xcode 登录开发者账号),安装包里将不带同步'"
   },
   "devDependencies": {
     "@milkdown/crepe": "7.22.1",
@@ -103,6 +104,9 @@
             "arm64"
           ]
         }
+      ],
+      "signIgnore": [
+        "Helpers/MDTurn Sync\\.app"
       ]
     },
     "win": {
@@ -125,6 +129,15 @@
     },
     "dmg": {
       "sign": false
-    }
+    },
+    "extraFiles": [
+      {
+        "from": "../mac-sync/build/MDTurn Sync.app",
+        "to": "Helpers/MDTurn Sync.app",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import SwiftUI
+import Combine
 import UniformTypeIdentifiers
 
 /// 当前打开的文档(内存态)。
@@ -12,30 +13,43 @@ final class OpenedDocument: ObservableObject, Identifiable {
     let hash: String
     let assets: [String: String]      // 相对路径 → data: URL(能读到的同目录图片)
     let securityScoped: Bool
+    /// 批注文件的稳定键(本地文件按路径;Mac 推来的文档按文档标识)
+    let storageKey: String
+    /// Mac 推来的文档才有(跨端规则 2.1 节主线);nil 表示手机独立打开的文件(2.2 节副线)
+    @Published var sync: SyncedDocument?
+    /// Mac 已推来更新的版本,当前显示的还是旧版
+    @Published var newerVersionAvailable = false
     @Published var notes: [Note]
     @Published var outline: [OutlineItem] = []
 
-    init(url: URL, markdown: String, assets: [String: String], notes: [Note], securityScoped: Bool) {
+    init(url: URL, markdown: String, assets: [String: String], notes: [Note], securityScoped: Bool, storageKey: String, sync: SyncedDocument? = nil) {
         self.url = url
-        self.name = url.lastPathComponent
+        self.name = sync?.title ?? url.lastPathComponent
         self.markdown = markdown
-        self.hash = Hashing.sha256(markdown)
+        // Mac 推来的文档以 Mac 算的指纹为准(批次要对上 Mac 的版本);本地文件自己算
+        self.hash = (sync?.contentHash).flatMap { $0.isEmpty ? nil : $0 } ?? Hashing.sha256(markdown)
         self.assets = assets
         self.notes = notes
         self.securityScoped = securityScoped
+        self.storageKey = storageKey
+        self.sync = sync
     }
 
     deinit { if securityScoped { url.stopAccessingSecurityScopedResource() } }
 
     /// 当前版本上还没导出的批注:可改可删,"完成本轮"时打包。
     var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash) } }
-    /// 当前版本上已导出的批注:锁定,等 Mac 接收。
+    /// 当前版本上已提交(导出 / 上传)的批注:锁定,等 Mac 接收。
     var submittedNotes: [Note] { notes.filter { $0.isSubmitted && $0.belongs(toVersion: hash) } }
+    /// Mac 已接收的批注(回执到达)。
+    var receivedNotes: [Note] { notes.filter { $0.isReceived && $0.belongs(toVersion: hash) } }
+    /// Mac 拒收的批注:保留,由用户决定下一轮是否重提(跨端规则 6.6)。
+    var rejectedNotes: [Note] { notes.filter { $0.isRejected && $0.belongs(toVersion: hash) } }
     /// 写在旧版本上的批注:只读保留,不高亮、不再导出(跨端规则 6.6、6.7:不静默丢弃)。
     var olderVersionNotes: [Note] { notes.filter { !$0.belongs(toVersion: hash) } }
-    /// 交给正文高亮的批注:只画当前版本的(旧版本锚点对不上新正文);已导出的照样画出来。
+    /// 交给正文高亮的批注:只画当前版本的(旧版本锚点对不上新正文);已提交、已接收的照样画出来。
     var highlightPayload: [[String: Any]] {
-        notes.filter { $0.belongs(toVersion: hash) && ($0.isOpen || $0.isSubmitted) }.map { note in
+        notes.filter { $0.belongs(toVersion: hash) && ($0.isOpen || $0.isSubmitted || $0.isReceived) }.map { note in
             var raw = note.raw
             raw["status"] = "open"
             return raw
@@ -53,13 +67,28 @@ final class DocumentStore: ObservableObject {
     /// App 自己文件夹里的 Markdown(「文件」→ 我的 iPhone → MDTurn),首页直接列出,不必再走文件选择器。
     @Published var localFiles: [URL] = []
 
+    /// Mac 推来的文档(跨端规则第 12 节),按最近更新排序
+    @Published var synced: [SyncedDocument] = []
+    @Published var syncError: String?
+    @Published var pendingUploads = 0
+
     private let fileManager = FileManager.default
     private var transport: SyncTransport = ExportTransport()
+    let cloud: CloudSyncEngine
+    private var cancellables: [AnyCancellable] = []
 
     init() {
+        cloud = CloudSyncEngine(dataDirectory: Self.appDataDirectory())
         loadRecents()
         refreshLocalFiles()
+        cloud.onReceipt = { [weak self] receipt in self?.apply(receipt: receipt) }
+        cloud.$documents.receive(on: RunLoop.main).sink { [weak self] docs in self?.syncedDocumentsChanged(docs) }.store(in: &cancellables)
+        cloud.$lastError.receive(on: RunLoop.main).sink { [weak self] error in self?.syncError = error }.store(in: &cancellables)
+        cloud.$pendingUploads.receive(on: RunLoop.main).sink { [weak self] count in self?.pendingUploads = count }.store(in: &cancellables)
     }
+
+    /// 启动、回到前台、收到静默推送时:拉取 Mac 推来的文档与回执,重试待上传的批次
+    func refreshSync() { Task { await cloud.refresh() } }
 
     // MARK: 目录
 
@@ -69,12 +98,13 @@ final class DocumentStore: ObservableObject {
     }
     /// App 内部数据(批注、最近文件)放在 Application Support:随 iCloud 备份,但不出现在「文件」App 里,
     /// 免得被当成普通文件误删误改。
-    private var dataDirectory: URL {
-        let url = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    static func appDataDirectory() -> URL {
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MDTurn", isDirectory: true)
-        try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
+    private var dataDirectory: URL { Self.appDataDirectory() }
     private var annotationsDirectory: URL {
         let url = dataDirectory.appendingPathComponent("annotations", isDirectory: true)
         try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
@@ -95,8 +125,8 @@ final class DocumentStore: ObservableObject {
     }
 
     /// 批注文件按"文档稳定键的 SHA-256"命名,与文档内容版本无关;每条批注自带它所依据的版本指纹。
-    private func annotationsFile(for url: URL) -> URL {
-        annotationsDirectory.appendingPathComponent("\(Hashing.sha256(documentKey(for: url))).annotations.json")
+    private func annotationsFile(forKey key: String) -> URL {
+        annotationsDirectory.appendingPathComponent("\(Hashing.sha256(key)).annotations.json")
     }
 
     // MARK: App 文件夹
@@ -174,8 +204,8 @@ final class DocumentStore: ObservableObject {
                 throw NSError(domain: "MDTurn", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件不是 UTF-8 文本。"])
             }
             let assets = Self.collectAssets(markdown: markdown, around: url)
-            let notes = loadNotes(for: url)
-            let document = OpenedDocument(url: url, markdown: markdown, assets: assets, notes: notes, securityScoped: scoped)
+            let key = documentKey(for: url)
+            let document = OpenedDocument(url: url, markdown: markdown, assets: assets, notes: loadNotes(forKey: key), securityScoped: scoped, storageKey: key)
             if fromExternal { remember(url: url) }
             current = document
         } catch {
@@ -216,8 +246,8 @@ final class DocumentStore: ObservableObject {
 
     // MARK: 批注持久化
 
-    private func loadNotes(for url: URL) -> [Note] {
-        guard let data = try? Data(contentsOf: annotationsFile(for: url)),
+    private func loadNotes(forKey key: String) -> [Note] {
+        guard let data = try? Data(contentsOf: annotationsFile(forKey: key)),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let list = object["annotations"] as? [[String: Any]] else { return [] }
         return list.map { Note(raw: $0) }
@@ -230,7 +260,7 @@ final class DocumentStore: ObservableObject {
             "annotations": document.notes.map { $0.raw },
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) else { return }
-        try? data.write(to: annotationsFile(for: document.url), options: .atomic)
+        try? data.write(to: annotationsFile(forKey: document.storageKey), options: .atomic)
     }
 
     func add(note: Note, to document: OpenedDocument) {
@@ -262,11 +292,16 @@ final class DocumentStore: ObservableObject {
         let batchId = UUID().uuidString.lowercased()
         let completedAt = ISO8601DateFormatter().string(from: Date())
         guard let batch = makeBatch(open, id: batchId, completedAt: completedAt, document: document) else { return }
-        do {
-            pendingShare = try transport.submit(batch: batch)
-        } catch {
-            lastError = "打包批注失败:\(error.localizedDescription)"
-            return
+        if document.sync != nil {
+            // Mac 推来的文档:批次走 iCloud(失败进待上传队列,联网后自动重试),不走分享面板
+            Task { if !(await cloud.submit(batch: batch)) { lastError = cloud.lastError ?? "批注已存入待上传队列,联网后自动上传。" } }
+        } else {
+            do {
+                pendingShare = try transport.submit(batch: batch)
+            } catch {
+                lastError = "打包批注失败:\(error.localizedDescription)"
+                return
+            }
         }
         let ids = Set(open.map { $0.id })
         for index in document.notes.indices where ids.contains(document.notes[index].id) {
@@ -292,6 +327,10 @@ final class DocumentStore: ObservableObject {
             return Note(raw: raw)
         }
         guard let batch = makeBatch(notes, id: last.0, completedAt: last.1, document: document) else { return }
+        if document.sync != nil {
+            Task { if !(await cloud.submit(batch: batch)) { lastError = cloud.lastError ?? "批注已存入待上传队列,联网后自动上传。" } }
+            return
+        }
         do { pendingShare = try transport.submit(batch: batch) }
         catch { lastError = "打包批注失败:\(error.localizedDescription)" }
     }
@@ -300,7 +339,62 @@ final class DocumentStore: ObservableObject {
         guard let data = try? JSONSerialization.data(withJSONObject: notes.map { $0.raw }),
               let json = String(data: data, encoding: .utf8) else { lastError = "打包批注失败。"; return nil }
         return AnnotationBatch(batchId: id, documentName: document.name, baseVersion: document.hash,
-                               completedAt: completedAt, device: UIDevice.current.name, annotationsJSON: json)
+                               completedAt: completedAt, device: UIDevice.current.name, annotationsJSON: json,
+                               docId: document.sync?.docId, reviewId: document.sync?.reviewId)
+    }
+
+    // MARK: Mac 推来的文档(跨端规则第 12 节)
+
+    func openSynced(_ doc: SyncedDocument) {
+        let url = cloud.contentURL(for: doc.docId)
+        guard let data = try? Data(contentsOf: url), let markdown = String(data: data, encoding: .utf8) else {
+            lastError = "《\(doc.title)》的正文还没有同步下来,稍后再试。"
+            return
+        }
+        let key = "synced:\(doc.docId)"
+        let document = OpenedDocument(url: url, markdown: markdown, assets: Self.collectAssets(markdown: markdown, around: url),
+                                      notes: loadNotes(forKey: key), securityScoped: false, storageKey: key, sync: doc)
+        current = document
+    }
+
+    private func syncedDocumentsChanged(_ docs: [SyncedDocument]) {
+        synced = docs
+        guard let document = current, let sync = document.sync, let latest = docs.first(where: { $0.docId == sync.docId }) else { return }
+        if latest.contentHash != sync.contentHash && latest.contentAvailable {
+            document.newerVersionAvailable = true
+        } else {
+            document.sync = latest // 状态变了(等待智能体 / 修改中 …)而正文没变:就地更新
+        }
+    }
+
+    /// Mac 的回执到了:对应批次的批注标为"Mac 已接收"或"未被采用(原因)"(跨端规则 6.5、6.6)
+    private func apply(receipt: SyncReceipt) {
+        let key = "synced:\(receipt.docId)"
+        let mutate: (inout [Note]) -> Void = { notes in
+            for index in notes.indices where notes[index].submittedBatchId == receipt.batchId && (notes[index].isSubmitted || notes[index].isRejected) {
+                if receipt.accepted && receipt.acceptedIds.contains(notes[index].id) {
+                    notes[index].raw["status"] = "received"
+                    notes[index].raw.removeValue(forKey: "rejectedReason")
+                } else {
+                    notes[index].raw["status"] = "rejected"
+                    notes[index].raw["rejectedReason"] = receipt.accepted ? "Mac 已有同编号批注,未重复写入" : "\(receipt.reason):\(receipt.message)"
+                }
+                notes[index].raw["receiptAt"] = ISO8601DateFormatter().string(from: receipt.receivedAt ?? Date())
+            }
+        }
+        if let document = current, document.storageKey == key {
+            var notes = document.notes
+            mutate(&notes)
+            document.notes = notes
+            persistNotes(document)
+        } else {
+            var notes = loadNotes(forKey: key)
+            mutate(&notes)
+            let object: [String: Any] = ["version": 1, "annotations": notes.map { $0.raw }]
+            if let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: annotationsFile(forKey: key), options: .atomic)
+            }
+        }
     }
 
     func sharePDF(_ data: Data, name: String) {

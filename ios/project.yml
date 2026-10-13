@@ -34,6 +34,13 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         TARGETED_DEVICE_FAMILY: "1,2"
+    # iCloud(CloudKit)同步 + 静默推送(跨端规则第 12 节);容器 iCloud.org.mdturn 需先在开发者网站创建
+    entitlements:
+      path: MDTurn/MDTurn.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers: [iCloud.org.mdturn]
+        com.apple.developer.icloud-services: [CloudKit]
+        aps-environment: development
     info:
       path: MDTurn/Info.plist
       properties:
@@ -41,6 +48,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        UIBackgroundModes: [remote-notification]
         # 用自己的 Info.plist 时 INFOPLIST_KEY_* 构建设置不生效,方向必须写在这里
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
