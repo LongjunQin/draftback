@@ -11,6 +11,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const store = require('./lib/review-store');
+const sync = require('./lib/sync');
 const documents = require('./lib/document-service');
 const snapshot = require('./lib/snapshot');
 const plainDocuments = require('./lib/documents');
@@ -430,6 +431,54 @@ async function handleReviewAnnotations(req, res, q, review) {
   return sendJson(res, 405, { error: 'method_not_allowed', message: 'Method not allowed' });
 }
 
+// 跨端同步(跨端规则第 12 节):随 App 打包的原生辅助程序 MDTurn Sync.app 通过这些接口取待推送项、
+// 报推送结果、送来手机批次、报回执已发;云端(CloudKit)的读写都在辅助程序里,这里只管会话上的同步状态。
+async function handleSyncApi(req, res, pathname, q) {
+  if (pathname === '/api/app/sync/outbox') {
+    if (!allowMethods(req, res, ['GET'])) return;
+    return sendJson(res, 200, { items: await sync.listOutbox(), helper: sync.readHelperState() });
+  }
+  if (pathname === '/api/app/sync/status') {
+    if (!allowMethods(req, res, ['GET'])) return;
+    return sendJson(res, 200, { helper: sync.readHelperState(), reviews: await sync.listSyncStatus() });
+  }
+  if (pathname === '/api/app/sync/document') {
+    if (!allowMethods(req, res, ['GET'])) return;
+    return sendJson(res, 200, await sync.readPushPayload(q.get('r')));
+  }
+  if (!allowMethods(req, res, ['POST'])) return;
+  const body = await readBody(req);
+  if (pathname === '/api/app/sync/pushed') {
+    const review = await sync.markPushed(body.reviewId, body);
+    await publishReviewChangedSafe(review.id, 'sync-pushed');
+    return sendJson(res, 200, { ok: true, sync: review.sync });
+  }
+  if (pathname === '/api/app/sync/error') {
+    const review = await sync.markPushError(body.reviewId, body.error);
+    return sendJson(res, 200, { ok: true, sync: review.sync });
+  }
+  if (pathname === '/api/app/sync/heartbeat') {
+    return sendJson(res, 200, { ok: true, helper: await sync.writeHelperState(body || {}) });
+  }
+  if (pathname === '/api/app/sync/batch') {
+    if (!body || typeof body.batch !== 'object' || !body.batch) {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供批次内容。' });
+    }
+    const result = await batches.importBatch(body.batch);
+    if (result.review) {
+      await sync.markBatchReceived(result.review.id, result.receipt);
+      await publishReviewChangedSafe(result.review.id, 'batch-imported');
+    }
+    return sendJson(res, 200, result);
+  }
+  if (pathname === '/api/app/sync/receipt-sent') {
+    if (!body.reviewId) return sendJson(res, 400, { error: 'bad_request', message: '缺少 reviewId。' });
+    const review = await sync.markReceiptSent(body.reviewId, body.batchId);
+    return sendJson(res, 200, { ok: true, sync: review.sync });
+  }
+  return sendJson(res, 404, { error: 'not_found', message: 'Not found' });
+}
+
 async function handleLocalReviewApi(req, res, pathname, q) {
   if (pathname === '/api/health') {
     if (!allowMethods(req, res, ['GET'])) return;
@@ -582,6 +631,7 @@ async function handleAppApi(req, res, pathname, q) {
     if (!allowMethods(req, res, ['GET'])) return;
     return sendJson(res, 200, { items: await plainDocuments.listRecent() });
   }
+  if (pathname.startsWith('/api/app/sync/')) return handleSyncApi(req, res, pathname, q);
 
   const ref = q.get('r');
   // /api/app/file 可以不带会话:普通打开的文档按 d=<文档路径> 取旁边的图片与附件

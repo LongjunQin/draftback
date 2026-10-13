@@ -16,6 +16,7 @@ const {
 } = require('./lib/review-store');
 const snapshot = require('./lib/snapshot');
 const batches = require('./lib/batches');
+const sync = require('./lib/sync');
 
 function usage() {
   return [
@@ -24,7 +25,9 @@ function usage() {
     '  mdreview status <绝对路径.md> [--json]',
     '  mdreview wait <绝对路径.md> [--timeout-minutes <n>]  # 阻塞等待用户下一个动作(提交批注/定稿/手工改完),可跨轮',
     '  mdreview begin-apply <绝对路径.md>',
-    '  mdreview complete <绝对路径.md>',
+    '  mdreview complete <绝对路径.md> [--summary "<本轮改了什么、哪些没采纳及原因>"]  # 摘要会随新版推到手机',
+    '  mdreview push <绝对路径.md>                        # 重新推到手机(open / complete 已自动推,手机没看到时用)',
+    '  mdreview sync-status [--json]                      # 同步辅助程序是否在跑、各文档推送/接收状态',
     '  mdreview unlock <绝对路径.md> --reason "<原因>"',
     '  mdreview snapshot [--reason "<原因>"]              # 整体备份审阅索引与全部批注文件(手动快照不自动清理)',
     '  mdreview snapshots [--json]                        # 列出快照',
@@ -39,12 +42,13 @@ function fail(message, exitCode = 1) {
 }
 
 function parseArgs(argv) {
-  const result = { command: argv[0], file: null, json: false, noOpen: false, reason: null, timeoutMinutes: null, yes: false, dryRun: false };
+  const result = { command: argv[0], file: null, json: false, noOpen: false, reason: null, summary: null, timeoutMinutes: null, yes: false, dryRun: false };
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === '--json') result.json = true;
     else if (value === '--no-open') result.noOpen = true;
     else if (value === '--reason') result.reason = argv[++index];
+    else if (value === '--summary') result.summary = argv[++index];
     else if (value === '--yes') result.yes = true;
     else if (value === '--dry-run') result.dryRun = true;
     else if (value === '--timeout-minutes') {
@@ -180,8 +184,9 @@ function resolveMDTurnApp() {
 
 function printReview(review) {
   console.log(`文档: ${review.absPath}`);
-  console.log(`会话: ${review.id}`);
+  console.log(`会话: ${review.id}${review.round ? `(第 ${review.round} 轮)` : ''}`);
   console.log(`状态: ${review.status}`);
+  if (review.docId) console.log(`同步: ${sync.describeSync(review)}`);
 }
 
 async function commandOpen(args) {
@@ -370,10 +375,30 @@ async function main() {
       // delivery failure into a failed completion command.
       // 这里是智能体入口,只允许结束 agent 改稿轮:用户在 App 里手工修改
       // (applying/manual)期间,误调/重试 complete 不得替用户结束其编辑轮。
-      const review = await completeReview(args.file, { expectedApplyMode: 'agent' });
+      const review = await completeReview(args.file, { expectedApplyMode: 'agent', summary: args.summary });
       printReview(review);
-      console.log(`→ 闭环完成(本轮): 批注已全部处理,MDTurn 会自动加载最新版并通知用户。用户接下来可能再审一轮或定稿——立即再以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交新批注或定稿时返回;不要主动去关 MDTurn 里的标签或移动 .annotations.json。`);
+      if (!args.summary) console.log('提示: 下次可加 --summary "<本轮改了什么、哪些没采纳及原因>",它会随新版一起推到用户手机上。');
+      console.log(`→ 闭环完成(本轮): 批注已全部处理,MDTurn 会自动加载最新版并通知用户(手机也会收到新版)。用户接下来可能再审一轮或定稿——立即再以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交新批注或定稿时返回;不要主动去关 MDTurn 里的标签或移动 .annotations.json。`);
       await notifyReviewChangedBestEffort(review, 'agent-complete');
+      return;
+    }
+    if (args.command === 'push') {
+      if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
+      const review = await sync.requestPush(args.file);
+      printReview(review);
+      console.log('已登记重新推送;MDTurn 运行中时同步辅助程序会在 15 秒内上传。用 mdreview sync-status 查看进度。');
+      return;
+    }
+    if (args.command === 'sync-status') {
+      const helper = sync.readHelperState();
+      const reviews = await sync.listSyncStatus();
+      if (args.json) { console.log(JSON.stringify({ helper, reviews }, null, 2)); return; }
+      if (!helper) console.log('同步辅助程序: 从未运行(MDTurn 0.7 起随 App 启动)。');
+      else console.log(`同步辅助程序: ${helper.error ? `异常(${helper.error})` : '正常'};上次轮询 ${helper.lastPollAt};账号 ${helper.account || '未知'}(${helper.accountStatus || '?'});环境 ${helper.environment || '?'}`);
+      if (!reviews.length) console.log('没有参与同步的文档。');
+      for (const item of reviews) {
+        console.log(`- ${item.title}(第 ${item.round} 轮,${item.status}${item.applyMode ? '/' + item.applyMode : ''}):${sync.describeSync({ ...item, docId: item.docId, sync: item.sync })}`);
+      }
       return;
     }
     if (args.command === 'import-batch') {
