@@ -71,13 +71,22 @@
    - Mac 上:把收到的 `.mdturn-batch.json` 拖进 MDTurn 窗口(或告诉我,我用 `mdreview import-batch` 导入)。会话应进入待改稿,我这边挂着的等待会收到,然后按你的批注改稿。
    - 改完后我把新版放回手机应用文件夹,你在手机上重新打开即可看到。CloudKit 到位前,"新版回到手机"先这样走。
 
-## 三、账户激活后我要做的(第一轮剩余)
+## 三、账户已激活(2026-10-13 确认):同步进度
 
-1. Xcode 里给 iOS 工程填付费团队,用正式包标识 org.mdturn.ios;创建 CloudKit 容器,部署数据结构到生产环境。手机上的「MDTurn 测试」到时可以删掉。
-2. Mac 端 CloudKit 接法选型:原生辅助进程 vs CloudKit JS,按路线图 6.1 节规则出结果。
-3. 把 `SyncTransport` 的 CloudKit 实现接上(手机)和 Mac 侧接收/回执/新版推送;`mdreview push` 命令。
-4. Developer ID 签名 + 公证 Mac 包;TestFlight 上传 iOS 包;用真实分发包跑完整闭环一次。
-5. 需要你办:App Store Connect 接口密钥、新建 App 记录、CloudKit 管理令牌、手机装 TestFlight 包。
+账户 2026-10-13 确认生效(Xcode 新签的描述文件有效期一年,团队号不变)。四个产品决定已写进跨端规则 v2(第 12 节是技术设计)。
+
+| 步骤 | 状态 |
+|---|---|
+| Mac 侧状态:文档标识、轮次、待推送队列、`/api/app/sync/*`、`mdreview push` / `sync-status` / `complete --summary` | 完成,5 个测试 |
+| Mac 接法选型(路线图 6.1):**原生辅助程序**(Swift + CloudKit),不用 CloudKit JS(网页令牌 30 分钟过期) | 已定 |
+| MDTurn Sync.app:推文档/附件/状态/摘要,拉手机批次并回执,随 App 启动与退出 | 代码完成、编译通过;签名需要 iCloud 容器 |
+| iOS:接收 Mac 文档、「来自 Mac」列表、提交批次走 iCloud、回执与新版提示、静默推送 | 代码完成、编译通过;装机需要 iCloud 容器 |
+| **需要你办:在开发者网站创建 iCloud 容器 `iCloud.org.mdturn`**(命令行无法代办) | 等你 |
+| 真机联调:Mac 推 → 手机看到 → 手机批注提交 → Mac 收到并回执 → 改稿后新版回手机 | 容器建好后做 |
+| 数据结构部署到 CloudKit 生产环境;Developer ID 签名 + 公证 Mac 包;TestFlight;真实分发包跑完整闭环 | 之后 |
+| 之后需要你办:App Store Connect 新建 App 记录、手机装 TestFlight 包 | 之后 |
+
+记录名约定(已实现,写进规则 v2 下一版):`Receipt` 的记录名是 `receipt_<批次编号>`(与 `AnnotationBatch` 同区不能重名)。
 
 ## 四、已知问题与遗留
 
