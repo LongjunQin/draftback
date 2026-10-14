@@ -13,7 +13,7 @@ const {
   shell,
 } = require('electron');
 const { markdownPathsFromArguments, normalizeMarkdownPath } = require('./open-files');
-const { ensureService, stopOwnedService, ownedDataDirectory } = require('./service');
+const { ensureService, stopOwnedService, ownedDataDirectory, requestHealth } = require('./service');
 const { spawn } = require('child_process');
 const { exportDocx, findPandoc } = require('./export-docx');
 
@@ -79,6 +79,28 @@ function startSyncHelper() {
   } catch {
     syncHelper = null;
   }
+}
+
+// 内置服务掉线(崩溃、被强退)时界面会悄悄失灵:每 10 秒探一次,连续 3 次不通就重启服务与同步程序并重载页面
+const SERVICE_WATCH_INTERVAL_MS = 10_000;
+let serviceWatchTimer = null;
+let serviceMisses = 0;
+function startServiceWatch() {
+  if (serviceWatchTimer) return;
+  serviceWatchTimer = setInterval(async () => {
+    if (!activeService || connecting || !mainWindow || mainWindow.isDestroyed()) return;
+    const healthy = await requestHealth(activeService.port, 2_000);
+    if (healthy) { serviceMisses = 0; return; }
+    serviceMisses += 1;
+    if (serviceMisses < 3) return;
+    serviceMisses = 0;
+    console.error(`[MDTurn] 内置服务(端口 ${activeService.port})连续 3 次健康检查失败,重启`);
+    stopOwnedService(activeService);
+    activeService = null;
+    stopSyncHelper();
+    await connectAndLoad();
+  }, SERVICE_WATCH_INTERVAL_MS);
+  if (typeof serviceWatchTimer.unref === 'function') serviceWatchTimer.unref();
 }
 
 function stopSyncHelper() {
@@ -199,7 +221,9 @@ async function connectAndLoad() {
       }
       activeService = service;
       pendingOwnedProcess = null;
+      serviceMisses = 0;
       startSyncHelper();
+      startServiceWatch();
       serviceOrigin = `http://127.0.0.1:${service.port}`;
       rendererReady = false;
       // 等服务就绪可能要几秒,期间用户可能已把窗口关了
@@ -563,6 +587,7 @@ if (!hasSingleInstanceLock) {
   // 用 will-quit 而不是 before-quit:后者在窗口关闭之前触发,若用户在"未保存修改"提示里选了取消,
   // 服务已被杀、窗口却还在,之后保存只会报"服务不可达"。will-quit 只在所有窗口都已关闭后触发。
   app.on('will-quit', () => {
+    if (serviceWatchTimer) { clearInterval(serviceWatchTimer); serviceWatchTimer = null; }
     stopSyncHelper();
     stopOwnedService(activeService);
     if (pendingOwnedProcess) stopOwnedService({ ownedProcess: pendingOwnedProcess });

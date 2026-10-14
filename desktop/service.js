@@ -104,6 +104,7 @@ function startOwnedService(options = {}) {
   }
   const dataDir = ownedDataDirectory(options);
   fs.mkdirSync(dataDir, { recursive: true });
+  const logFd = openServiceLog(dataDir);
   const spawnProcess = options.spawn || spawn;
   const executablePath = options.executablePath || process.execPath;
   const child = spawnProcess(executablePath, [serverPath], {
@@ -118,12 +119,28 @@ function startOwnedService(options = {}) {
       MDTURN_PARENT_PID: String(process.pid),
     },
     detached: false,
-    stdio: 'ignore',
+    // 服务的输出写到数据目录 service.log:服务悄悄退出时这是唯一的线索
+    stdio: logFd === null ? 'ignore' : ['ignore', logFd, logFd],
     windowsHide: true,
   });
+  if (logFd !== null) child.once('spawn', () => { try { fs.closeSync(logFd); } catch {} });
   child.mdturnSpawnError = null;
   child.once('error', (error) => { child.mdturnSpawnError = error; });
   return { child, dataDir, portFile: path.join(dataDir, 'port') };
+}
+
+// 超过 2 MB 就从头来,不让日志无限长
+function openServiceLog(dataDir) {
+  const file = path.join(dataDir, 'service.log');
+  try {
+    let size = 0;
+    try { size = fs.statSync(file).size; } catch {}
+    const fd = fs.openSync(file, size > 2 * 1024 * 1024 ? 'w' : 'a');
+    fs.writeSync(fd, `\n===== ${new Date().toISOString()} MDTurn 启动内置服务 =====\n`);
+    return fd;
+  } catch {
+    return null;
+  }
 }
 
 function stopOwnedService(service) {

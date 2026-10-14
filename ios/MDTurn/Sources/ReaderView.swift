@@ -158,16 +158,34 @@ struct ReaderView: View {
         }
     }
 
+    /// 底部:左边状态链,右边「完成本轮」——每篇必走、唯一会把东西发出去的动作,不藏进「…」菜单(2026-10-14 用户决定)
     private var statusBar: some View {
         HStack(spacing: 8) {
             Image(systemName: document.openNotes.isEmpty && !document.submittedNotes.isEmpty ? "paperplane" : "lock.open")
-            Text(statusText)
+            Text(statusText).lineLimit(2)
             Spacer()
-            Text("选中文字 → 菜单「批注」").foregroundStyle(.secondary)
+            finishButton
         }
         .font(.footnote)
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(.bar)
+    }
+
+    @ViewBuilder private var finishButton: some View {
+        let open = document.openNotes.count
+        let synced = document.sync != nil
+        let canFinish = open > 0 && (document.sync?.canAnnotate ?? true)
+        if open == 0 && document.submittedNotes.isEmpty && (document.sync?.canAnnotate ?? true) {
+            Text("选中文字 → 菜单「批注」").foregroundStyle(.secondary)
+        } else {
+            Button { store.submitBatch(for: document) } label: {
+                Label(open > 0 ? "完成本轮(\(open) 条)" : (synced ? "完成本轮" : "导出批注"), systemImage: "paperplane.fill")
+                    .font(.footnote.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!canFinish)
+        }
     }
 
     /// 跨端规则第 7 节的手机状态链。Mac 推来的文档:本地已保存 → 等待同步 → Mac 已接收 → 等待智能体 → 修改中 → 新版可复核;
