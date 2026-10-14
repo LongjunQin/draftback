@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" width="640" height="400">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bfe3ff"/><stop offset="1" stop-color="#eef8ff"/></linearGradient>
+    <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#86cf73"/><stop offset="1" stop-color="#4f9e45"/></linearGradient>
+  </defs>
+  <rect width="640" height="400" fill="url(#sky)"/>
+  <circle cx="560" cy="70" r="38" fill="#ffd86b"/>
+  <g fill="#fff" opacity=".92">
+    <ellipse cx="120" cy="80" rx="58" ry="22"/><ellipse cx="160" cy="68" rx="40" ry="20"/>
+    <ellipse cx="380" cy="56" rx="44" ry="16"/><ellipse cx="410" cy="48" rx="30" ry="14"/>
+  </g>
+  <rect y="262" width="640" height="138" fill="url(#grass)"/>
+  <g stroke="#3f8a37" stroke-width="3" stroke-linecap="round">
+    <path d="M30 300 l5 -18 M42 300 l2 -22 M54 300 l-4 -17 M590 312 l5 -18 M602 312 l2 -22 M614 312 l-4 -17 M300 384 l5 -18 M312 384 l2 -22"/>
+  </g>
+
+  <!-- 小狗:左边,前身压低、屁股翘起的"邀玩"姿势 -->
+  <g>
+    <path d="M282 282 Q 300 250 292 226" stroke="#d29a5c" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M304 236 q 10 4 14 14 M300 220 q 12 0 18 8" stroke="#8a5a2e" stroke-width="2.5" fill="none" stroke-linecap="round" opacity=".7"/>
+    <ellipse cx="225" cy="296" rx="70" ry="40" fill="#e0aa70"/>
+    <rect x="232" y="318" width="18" height="44" rx="9" fill="#d29a5c"/>
+    <rect x="262" y="314" width="18" height="48" rx="9" fill="#d29a5c"/>
+    <ellipse cx="168" cy="322" rx="42" ry="26" fill="#e8b67e"/>
+    <rect x="96" y="336" width="74" height="17" rx="8.5" fill="#d29a5c"/>
+    <rect x="100" y="352" width="70" height="12" rx="6" fill="#d29a5c"/>
+    <path d="M150 300 q 18 10 34 2" stroke="#d6403a" stroke-width="7" fill="none" stroke-linecap="round"/>
+    <circle cx="170" cy="312" r="5" fill="#f2c94c"/>
+    <circle cx="132" cy="284" r="42" fill="#e0aa70"/>
+    <ellipse cx="100" cy="270" rx="14" ry="31" fill="#a8683a" transform="rotate(25 100 270)"/>
+    <ellipse cx="164" cy="262" rx="14" ry="31" fill="#a8683a" transform="rotate(-28 164 262)"/>
+    <ellipse cx="118" cy="300" rx="23" ry="17" fill="#f6dbb4"/>
+    <ellipse cx="104" cy="293" rx="8" ry="6" fill="#3a2a20"/>
+    <path d="M112 312 q 4 14 12 2" fill="#ff7b93" stroke="#e05a75" stroke-width="1.5"/>
+    <circle cx="124" cy="274" r="5.5" fill="#2b2b2b"/><circle cx="148" cy="274" r="5.5" fill="#2b2b2b"/>
+    <circle cx="126" cy="272" r="1.8" fill="#fff"/><circle cx="150" cy="272" r="1.8" fill="#fff"/>
+  </g>
+
+  <!-- 毛线球与散开的线 -->
+  <path d="M168 352 C 220 372, 270 350, 304 344" stroke="#e45b7a" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <circle cx="324" cy="334" r="24" fill="#e45b7a"/>
+  <path d="M304 326 q 20 -12 40 2 M302 340 q 22 -10 44 4 M312 314 q 6 20 2 42 M330 312 q 10 20 2 44" stroke="#c43d5d" stroke-width="2.5" fill="none"/>
+
+  <!-- 小猫:右边,抬爪扑向毛线球 -->
+  <g>
+    <path d="M540 304 Q 584 286 572 246 Q 566 226 584 222" stroke="#f0a54a" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <ellipse cx="486" cy="312" rx="62" ry="34" fill="#f0a54a"/>
+    <path d="M470 286 q 6 22 0 50 M494 282 q 6 24 0 58 M516 288 q 5 20 0 44" stroke="#d6852c" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <ellipse cx="446" cy="342" rx="15" ry="10" fill="#f0a54a"/>
+    <ellipse cx="530" cy="342" rx="15" ry="10" fill="#f0a54a"/>
+    <path d="M430 300 Q 392 300 366 316" stroke="#f0a54a" stroke-width="15" fill="none" stroke-linecap="round"/>
+    <ellipse cx="362" cy="318" rx="12" ry="9" fill="#f6c07a"/>
+    <circle cx="426" cy="276" r="35" fill="#f0a54a"/>
+    <path d="M398 258 L 402 224 L 424 248 Z M432 246 L 452 220 L 458 256 Z" fill="#f0a54a"/>
+    <path d="M403 252 L 405 234 L 417 248 Z M438 246 L 450 230 L 453 252 Z" fill="#f7a1b5"/>
+    <ellipse cx="414" cy="274" rx="5.5" ry="8" fill="#2b2b2b"/><ellipse cx="438" cy="274" rx="5.5" ry="8" fill="#2b2b2b"/>
+    <circle cx="416" cy="271" r="2" fill="#fff"/><circle cx="440" cy="271" r="2" fill="#fff"/>
+    <path d="M421 287 l5 5 l5 -5 z" fill="#f7a1b5"/>
+    <path d="M426 292 q -7 9 -14 3 M426 292 q 7 9 14 3" stroke="#2b2b2b" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <g stroke="#2b2b2b" stroke-width="1.6" stroke-linecap="round"><path d="M400 287 l-28 -5 M400 293 l-28 3 M452 287 l28 -5 M452 293 l28 3"/></g>
+  </g>
+
+  <!-- 打闹的动感:心形与碰撞小星 -->
+  <g fill="#ff6b81">
+    <path d="M336 186 c -8 -12 -26 -2 -16 12 l 16 14 l 16 -14 c 10 -14 -8 -24 -16 -12 z"/>
+    <path d="M374 168 c -5 -8 -17 -1 -10 8 l 10 9 l 10 -9 c 7 -9 -5 -16 -10 -8 z" opacity=".8"/>
+  </g>
+  <g stroke="#f2a93b" stroke-width="3" stroke-linecap="round">
+    <path d="M330 286 l0 -14 M318 290 l-9 -9 M342 290 l9 -9"/>
+  </g>
+  <text x="320" y="392" text-anchor="middle" font-family="-apple-system, &quot;PingFang SC&quot;, sans-serif" font-size="14" fill="#2f5f2a">小狗和小猫在草坪上打闹 · 回稿批注往返测试</text>
+</svg>
