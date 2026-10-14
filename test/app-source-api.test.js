@@ -340,3 +340,48 @@ test('普通打开的文档也能取到旁边的图片(/api/app/file 按文档�
   const notMd = await request(f.port, `/api/app/file?d=${encodeURIComponent(path.join(f.docRoot, '带图', 'images', 'a.png'))}&path=a.png`);
   assert.notEqual(notMd.status, 200, 'd 必须是已存在的 .md');
 });
+
+test('上一次保存中途断掉留下的 pending 记录不再卡死本会话的保存', async (t) => {
+  const f = await fixture(t);
+  const file = writeMd(f.docRoot, '断电.md', '# 标题\n正文\n');
+  const opened = await request(f.port, '/api/app/open', { method: 'POST', body: { path: file } });
+  const ref = opened.json.review.id;
+  await request(f.port, `/api/review/submit?r=${ref}`, { method: 'POST', body: {} });
+  await request(f.port, `/api/app/review/begin-apply?r=${ref}`, { method: 'POST', body: { mode: 'manual' } });
+  const hash = store.sha256File(file);
+
+  // 情形一:记录是 pending,文件没变,且已超过 30 秒 → 当作那次保存没发生
+  await store.mutateReviewById(ref, (review) => {
+    review.sourceWriteRequests = { ghost: { clientRequestId: 'ghost', expectedHash: hash, contentHash: 'f'.repeat(64), status: 'pending', revision: 0, createdAt: new Date(Date.now() - 120_000).toISOString() } };
+    return { ...review };
+  }, { dataDir: f.dataDir });
+  const saved = await request(f.port, `/api/app/source?r=${ref}`, {
+    method: 'PUT', body: { content: '# 标题\n新正文\n', expectedHash: hash, clientRequestId: 'after-crash' },
+  });
+  assert.equal(saved.status, 200, saved.text);
+  assert.equal(fs.readFileSync(file, 'utf8'), '# 标题\n新正文\n');
+
+  // 情形二:记录是 pending,但文件内容其实已经是那次要写的 → 补记完成,新保存照常
+  const hash2 = store.sha256File(file);
+  await store.mutateReviewById(ref, (review) => {
+    review.sourceWriteRequests['ghost-2'] = { clientRequestId: 'ghost-2', expectedHash: hash, contentHash: hash2, status: 'pending', revision: 1, createdAt: new Date().toISOString() };
+    return { ...review };
+  }, { dataDir: f.dataDir });
+  const saved2 = await request(f.port, `/api/app/source?r=${ref}`, {
+    method: 'PUT', body: { content: '# 标题\n再改\n', expectedHash: hash2, clientRequestId: 'after-crash-2' },
+  });
+  assert.equal(saved2.status, 200, saved2.text);
+  assert.equal(fs.readFileSync(file, 'utf8'), '# 标题\n再改\n');
+
+  // 情形三:刚刚才 pending(30 秒内)且文件没变 → 仍然 409,让客户端用原 id 重试
+  const hash3 = store.sha256File(file);
+  await store.mutateReviewById(ref, (review) => {
+    review.sourceWriteRequests['fresh'] = { clientRequestId: 'fresh', expectedHash: hash3, contentHash: 'e'.repeat(64), status: 'pending', revision: 2, createdAt: new Date().toISOString() };
+    return { ...review };
+  }, { dataDir: f.dataDir });
+  const blocked = await request(f.port, `/api/app/source?r=${ref}`, {
+    method: 'PUT', body: { content: '# 标题\n又改\n', expectedHash: hash3, clientRequestId: 'too-soon' },
+  });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.json.error, 'source_write_pending');
+});

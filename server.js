@@ -824,6 +824,9 @@ if (Number.isInteger(parentPid) && parentPid > 0) {
       const actualPort = address && typeof address === 'object' ? address.port : port;
       await publishPort(actualPort);
       banner(actualPort);
+      store.pruneReviews().then((result) => {
+        if (result.removed || result.cancelled) console.log(`审阅索引清理: 删除 ${result.removed} 条,取消 ${result.cancelled} 条文件已不存在的会话`);
+      }).catch((error) => console.error('审阅索引清理失败:', error.message));
     } catch (error) {
       console.error('写入端口文件失败:', error.message);
       server.close(() => process.exit(1));

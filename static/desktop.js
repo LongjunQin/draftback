@@ -1947,10 +1947,11 @@
     card.append(meta, quote, comment, location);
     if (historical) {
       const status = document.createElement('div'); const effective = effectiveStatus(note);
-      status.className = `note-status-badge${effective === 'wontfix' ? ' wontfix' : ''}`;
-      status.textContent = effective === 'wontfix' ? '本轮未修改' : '已处理';
+      status.className = `note-status-badge${effective === 'wontfix' || effective === 'cancelled' ? ' wontfix' : ''}`;
+      status.textContent = effective === 'wontfix' ? '本轮未修改' : effective === 'cancelled' ? '已作废(会话解锁)' : '已处理';
       card.appendChild(status);
-      if (note.appliedNote) { const applied = document.createElement('div'); applied.className = 'applied-note'; applied.textContent = note.appliedNote; card.appendChild(applied); }
+      const resolvedNote = note.appliedNote || (effective === 'cancelled' ? note.cancelReason : '');
+      if (resolvedNote) { const applied = document.createElement('div'); applied.className = 'applied-note'; applied.textContent = resolvedNote; card.appendChild(applied); }
     } else {
       const actions = document.createElement('div'); actions.className = 'note-actions';
       if (tab.review.status === 'reviewing') {

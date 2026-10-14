@@ -223,3 +223,51 @@ test('改稿阶段再次 openReview 复用本轮,不冲突、不自动结束、�
   assert.equal(all.filter((item) => item.status === 'applying').length, 1, '不得另起一轮');
   assert.equal(all.length, 2, '只有闭环的第一轮和手工修改轮');
 });
+
+test('人工解锁作废本轮 open 批注,之后能进入手工修改', async (t) => {
+  const f = fixture(t);
+  const file = writeMd(f.root, '解锁.md', '# 标题\n正文\n');
+  const { review } = await store.openReview(file, f.options);
+  fs.writeFileSync(store.sidecarFor(file), JSON.stringify({
+    version: 1,
+    annotations: [
+      { id: 'n1', comment: '没处理的', quote: '正文', status: 'open', reviewSessionId: review.id },
+      { id: 'n0', comment: '上一轮已处理', quote: '标题', status: 'applied', reviewSessionId: 'r-old' },
+    ],
+  }));
+  await assert.rejects(store.beginManualEdit(file, f.options), (error) => error.code === 'STATE_ERROR' || error.code === 'OPEN_ANNOTATIONS' || /活动审阅会话/.test(error.message));
+  const unlocked = await store.unlockReview(file, '不想要这轮了', f.options);
+  assert.equal(unlocked.status, 'cancelled');
+  const sidecar = JSON.parse(fs.readFileSync(store.sidecarFor(file), 'utf8'));
+  assert.equal(sidecar.annotations.find((a) => a.id === 'n1').status, 'cancelled');
+  assert.match(sidecar.annotations.find((a) => a.id === 'n1').cancelReason, /不想要这轮了/);
+  assert.equal(sidecar.annotations.find((a) => a.id === 'n0').status, 'applied');
+  const manual = await store.beginManualEdit(file, f.options);
+  assert.equal(manual.status, 'applying');
+  assert.equal(manual.applyMode, 'manual');
+});
+
+test('启动清理:文件已删的会话取消或删除,结束超过 90 天的会话删除,活动会话保留', async (t) => {
+  const f = fixture(t);
+  const keep = writeMd(f.root, '保留.md');
+  const gone = writeMd(f.root, '已删.md');
+  const oldDone = writeMd(f.root, '很久以前.md');
+  const { review: active } = await store.openReview(keep, f.options);
+  const { review: goneActive } = await store.openReview(gone, f.options);
+  const { review: done } = await store.openReview(oldDone, f.options);
+  await store.mutateReviews((data) => {
+    data.reviews[goneActive.id].lastOpenedAt = '2026-01-01T00:00:00.000Z'; // 一天没碰
+    data.reviews[done.id].status = 'complete';
+    data.reviews[done.id].completedAt = '2026-01-01T00:00:00.000Z'; // 超过 90 天
+    data.reviews['r-gone-finished'] = { id: 'r-gone-finished', absPath: path.join(f.root, '不存在.md'), file: '不存在.md', status: 'cancelled', cancelledAt: new Date().toISOString(), createdAt: new Date().toISOString() };
+    data.reviews['r-broken'] = null;
+    return null;
+  }, f.options);
+  fs.rmSync(gone);
+  const result = await store.pruneReviews(f.options);
+  assert.deepEqual(result, { removed: 3, cancelled: 1 });
+  const left = await store.listReviews(f.options);
+  assert.deepEqual(left.map((r) => r.id).sort(), [active.id, goneActive.id].sort());
+  assert.equal((await store.getReviewById(goneActive.id, f.options)).status, 'cancelled');
+  assert.equal((await store.getReviewById(active.id, f.options)).status, 'reviewing');
+});
