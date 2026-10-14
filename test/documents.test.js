@@ -273,3 +273,31 @@ test('新建文档:createDocument 写入模板并计入最近文件;已存在则
   const again = await request(port, '/api/app/document/create', { method: 'POST', body: { path: path.join(docDir, '接口新建.md') } });
   assert.equal(again.status, 409, again.text);
 });
+
+test('非 UTF-8(GBK / UTF-16)文档按原样显示但只读:读得出中文,写入被拒', async (t) => {
+  const { docDir, options } = setup(t);
+  const gbkDoc = path.join(docDir, 'gbk.md');
+  fs.writeFileSync(gbkDoc, Buffer.from([0x23, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0x0a])); // "# 中文\n" 的 GBK 字节
+  const opened = await documents.readDocument(gbkDoc, options);
+  assert.equal(opened.source.content, '# 中文\n');
+  assert.equal(opened.source.encoding, 'gbk');
+  assert.equal(opened.source.readOnly, true);
+  await assert.rejects(
+    documents.writeDocument(gbkDoc, { content: '# 改\n', expectedHash: opened.source.hash, clientRequestId: 'g1' }, options),
+    (error) => error.code === 'ENCODING_READ_ONLY',
+  );
+  assert.deepEqual(fs.readFileSync(gbkDoc), Buffer.from([0x23, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0x0a]), '只读文件一个字节都不能动');
+
+  const utf16Doc = path.join(docDir, 'utf16.md');
+  fs.writeFileSync(utf16Doc, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('# 标题\n', 'utf16le')]));
+  const opened16 = await documents.readDocument(utf16Doc, options);
+  assert.equal(opened16.source.content, '# 标题\n');
+  assert.equal(opened16.source.encoding, 'utf-16le');
+  assert.equal(opened16.source.readOnly, true);
+
+  const utf8Doc = path.join(docDir, 'utf8.md');
+  fs.writeFileSync(utf8Doc, '# 正常\n');
+  const opened8 = await documents.readDocument(utf8Doc, options);
+  assert.equal(opened8.source.encoding, 'utf-8');
+  assert.equal(opened8.source.readOnly, false);
+});

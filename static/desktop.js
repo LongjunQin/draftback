@@ -1263,18 +1263,19 @@
     const review = tab.review;
     const descriptor = isPlain(tab) && tab.mode === 'edit' ? STATUS.plainEdit : statusDescriptor(review);
     nodes.reviewState.dataset.status = review.status || 'unknown';
-    nodes.reviewStateText.textContent = tab.remotePending
+    const encodingNote = tab.source && tab.source.readOnly ? ` · ${(tab.source.encoding || '非 UTF-8').toUpperCase()} 只读` : '';
+    nodes.reviewStateText.textContent = (tab.remotePending
       ? `${descriptor.text} · 远程更新待同步`
-      : descriptor.text;
+      : descriptor.text) + encodingNote;
     nodes.reviewStateIcon.className = `ph ${descriptor.icon}`;
-    nodes.reviewState.title = tab.remotePending
+    nodes.reviewState.title = (tab.remotePending
       ? `${descriptor.detail}当前草稿不会被覆盖，保存或退出编辑后将立即同步。`
-      : descriptor.detail;
+      : descriptor.detail) + (tab.source && tab.source.readOnly ? ` ${tab.source.readOnlyReason || ''}` : '');
     const count = openAnnotations(tab).length;
     nodes.reviewCount.textContent = isPlain(tab) ? '未审阅' : `本轮 ${count} 条未处理`;
     nodes.readingMode.classList.toggle('active', tab.mode !== 'edit');
     nodes.editingMode.classList.toggle('active', tab.mode === 'edit');
-    nodes.editingMode.disabled = review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual');
+    nodes.editingMode.disabled = review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual') || Boolean(tab.source && tab.source.readOnly);
     nodes.primaryAction.hidden = false;
     nodes.primaryAction.disabled = false;
     if (isPlain(tab)) nodes.primaryAction.textContent = '开始审阅';
@@ -2370,6 +2371,7 @@
 
   async function enterEditMode() {
     let tab = activeTab(); if (!tab) return;
+    if (tab.source && tab.source.readOnly) { toast(tab.source.readOnlyReason || '文件不是 UTF-8 编码,只读。'); return; }
     if (isPlain(tab)) {
       await setEditing(tab, true);
       tab.mode = 'edit'; persistTabs(); renderApp();
