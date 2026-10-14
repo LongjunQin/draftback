@@ -9,9 +9,12 @@ TEAM="${DEVELOPMENT_TEAM:-BG7Y59AT44}"
 xcodegen generate >/dev/null
 LOG="build/xcodebuild-${CONFIG}.log"
 mkdir -p build
+EXTRA=()
+# Release(Developer ID / 正式发布)走 Production 环境;Debug 走 Development(见 project.yml)
+[ "$CONFIG" = "Release" ] && EXTRA+=("CODE_SIGN_ENTITLEMENTS=Release.entitlements")
 if ! xcodebuild -project MDTurnSync.xcodeproj -scheme MDTurnSync -configuration "$CONFIG" \
     -derivedDataPath build/DerivedData -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
-    DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic build > "$LOG" 2>&1; then
+    DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic ${EXTRA[@]+"${EXTRA[@]}"} build > "$LOG" 2>&1; then
   echo "构建失败,日志: $LOG"; grep -E "error:|warning: .*provision" "$LOG" | sort -u | head -20; exit 1
 fi
 rm -rf "build/MDTurn Sync.app"

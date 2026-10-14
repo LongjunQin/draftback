@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import CloudKit
 
 /// 主循环:每 15 秒一轮——账号心跳 → 推待推送项 → 拉手机批次并回执。任何一步失败只记日志,下一轮再来。
@@ -54,7 +55,7 @@ final class SyncLoop {
             consecutiveFailures = 0
         } catch {
             consecutiveFailures += 1
-            let message = "\(error)"
+            let message = Describe.error(error)
             heartbeat["error"] = message
             if consecutiveFailures == 1 || consecutiveFailures % 20 == 0 { log.error("本轮失败(\(consecutiveFailures) 次): \(message)") }
         }
@@ -77,8 +78,8 @@ final class SyncLoop {
                                             contentHash: payload["contentHash"] as? String ?? "")
                 log.info("已推送 \(item["title"] as? String ?? docId) 第 \(item["round"] ?? 1) 轮(\(item["phoneState"] ?? "?"))")
             } catch {
-                log.error("推送 \(item["title"] as? String ?? docId) 失败: \(error)")
-                try? await server.markPushError(reviewId: reviewId, error: "\(error)")
+                log.error("推送 \(item["title"] as? String ?? docId) 失败: \(Describe.error(error))")
+                try? await server.markPushError(reviewId: reviewId, error: Describe.error(error))
             }
         }
         return true
@@ -214,10 +215,12 @@ final class SyncLoop {
     }
 
     private func environmentName() -> String {
-        // 开发签名的包走 Development 环境;App Store / Developer ID 包走 Production(由描述文件决定)
-        let profile = Bundle.main.bundleURL.appendingPathComponent("Contents/embedded.provisionprofile")
-        guard let text = try? String(contentsOf: profile, encoding: .isoLatin1) else { return "unknown" }
-        return text.contains("<key>com.apple.developer.icloud-container-environment</key>") && text.contains("Production") ? "production" : "development"
+        // 以自己签名里的 icloud-container-environment 为准(Debug 构建写 Development,Release 写 Production);没有这条时系统默认走 Production
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(task, "com.apple.developer.icloud-container-environment" as CFString, nil) else { return "production" }
+        if let text = value as? String { return text.lowercased() }
+        if let list = value as? [String], let first = list.first { return first.lowercased() }
+        return "unknown"
     }
 }
 
@@ -239,5 +242,21 @@ final class Logger {
             try? line.write(to: file, atomically: true, encoding: .utf8)
         }
         FileHandle.standardError.write(Data(line.utf8))
+    }
+}
+
+/// 把 CKError 连同服务端给的细节(ServerErrorDescription、分项失败)一起打出来,否则只有一句「Server Rejected Request」没法排查
+enum Describe {
+    static func error(_ error: Error) -> String {
+        guard let ck = error as? CKError else { return "\(error)" }
+        var parts = ["\(ck.code)(\(ck.code.rawValue))"]
+        if let server = ck.userInfo["ServerErrorDescription"] as? String { parts.append("服务端: \(server)") }
+        if let desc = ck.userInfo[NSLocalizedDescriptionKey] as? String { parts.append(desc) }
+        if let partial = ck.partialErrorsByItemID {
+            for (id, sub) in partial.prefix(5) { parts.append("[\(id)] \(Describe.error(sub))") }
+        }
+        if let retry = ck.retryAfterSeconds { parts.append("retryAfter=\(retry)") }
+        if let underlying = ck.userInfo[NSUnderlyingErrorKey] as? NSError { parts.append("underlying: \(underlying.domain) \(underlying.code) \(underlying.userInfo)") }
+        return parts.joined(separator: " | ")
     }
 }
