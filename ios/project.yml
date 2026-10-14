@@ -41,6 +41,8 @@ targets:
         com.apple.developer.icloud-container-identifiers: [iCloud.org.mdturn]
         com.apple.developer.icloud-services: [CloudKit]
         aps-environment: development
+        # 测试版走 CloudKit Development 环境(与 Mac 辅助程序 Debug 构建同一环境);上架版改 Production
+        com.apple.developer.icloud-container-environment: Development
     info:
       path: MDTurn/Info.plist
       properties:
