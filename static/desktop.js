@@ -2116,25 +2116,6 @@
     setAnnotationDialogPosition(rect.left, rect.top, { persist: false });
   }
 
-  // 规则③:什么时候算开始新一轮——首次成功保存一条文字批注或总体意见时。普通文档开第 1 轮并锁定原文,
-  // 稿子回来 / 本轮作废后开下一轮。只选字、只打开输入框又取消,都不改轮次。
-  async function ensureReviewRound(tab) {
-    if (tab.review.status === 'reviewing') return tab;
-    if (tab.dirty && !(await saveSource(tab))) return null;
-    const wasPlain = isPlain(tab);
-    try {
-      const result = await requestJson('/api/app/open', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: tab.review.sourceFile }),
-      });
-      const bundle = await fetchBundle(result.review.id);
-      const next = upsertTab(bundle, { activate: true });
-      if (!next || next.review.status !== 'reviewing') { toast('没能开始新一轮审阅,请稍后再试。', 'error'); return null; }
-      toast(wasPlain ? '原文已锁定,开始第 1 轮审阅;批注会交给 AI。' : `已开始第 ${next.review.round || ''} 轮审阅。`);
-      void refreshRecents();
-      return next;
-    } catch (error) { toast(friendlyError(error, '开始审阅'), 'error'); return null; }
-  }
-
   async function saveAnnotation() {
     const dialog = state.dialog;
     let tab = dialog && state.tabs.find((candidate) => candidate.id === dialog.tabId);
@@ -2144,18 +2125,26 @@
       return toast('这条批注对应的文档状态已经变化，请关闭弹窗后重新选择。', 'error');
     }
     nodes.annotationSave.disabled = true; nodes.annotationSave.textContent = '保存中…';
-    if (tab.review.status !== 'reviewing') {
-      const opened = await ensureReviewRound(tab);
-      if (!opened || opened.sourceHash !== dialog.sourceHash) {
-        nodes.annotationSave.disabled = false;
-        nodes.annotationSave.textContent = dialog.noteId ? '保存修改' : '保存批注';
-        if (opened) toast('文档内容已变化，请关闭弹窗后重新选择。', 'error');
-        return;
-      }
-      tab = opened; dialog.tabId = tab.id;
-    }
     try {
       let result;
+      if (tab.review.status !== 'reviewing' && !dialog.noteId) {
+        // 规则③:首次成功保存一条批注或总体意见才算开轮。普通文档开第 1 轮并锁定原文,稿子回来 / 作废后开下一轮。
+        // 开轮与存批注在服务端合成一步:批注没存成就不留空轮。只选字、打开输入框又取消,都走不到这里。
+        if (tab.dirty && !(await saveSource(tab))) throw new Error('请先保存编辑中的内容。');
+        const wasPlain = isPlain(tab);
+        const payload = { ...dialog.anchor, comment, author: '我(本机)', clientRequestId: dialog.requestId };
+        if (dialog.scope === 'document') payload.scope = 'document';
+        result = await requestJson('/api/app/review/open-annotate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: tab.review.sourceFile, note: payload }),
+        });
+        const bundle = await fetchBundle(result.review.id);
+        const next = upsertTab(bundle, { activate: true });
+        closeAnnotationDialog();
+        window.getSelection()?.removeAllRanges(); state.cachedAnchor = null; nodes.annotate.hidden = true;
+        renderApp(); renderTabs(); void refreshRecents();
+        toast(wasPlain ? '原文已锁定,开始第 1 轮审阅;批注已保存,批完点「交给 AI」。' : `已开始第 ${(next && next.review.round) || ''} 轮审阅,批注已保存。`);
+        return;
+      }
       if (dialog.noteId) {
         result = await requestJson(`/api/annotations?r=${encodeURIComponent(tab.id)}&id=${encodeURIComponent(dialog.noteId)}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ comment }),

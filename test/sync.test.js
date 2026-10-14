@@ -143,7 +143,7 @@ test('正文与会话指纹不一致时不推送;推送失败与批次/回执状
   await assert.rejects(() => sync.requestPush(path.join(f.docDir, '没有.md'), f.options), (error) => error.code === 'NO_ACTIVE_REVIEW' || error.code === 'INVALID_PATH' || error.httpStatus === 404);
 });
 
-test('会话结束(完成 / 作废)后源文档再改:按实际指纹推当前正文,不再报不一致', async (t) => {
+test('会话结束后源文档再改:作废只推状态;完成从归档推完成稿,不拿工作稿冒充', async (t) => {
   const f = fixture(t);
   const doc = path.join(f.docDir, '收尾.md');
   fs.writeFileSync(doc, '# 收尾\n');
@@ -151,10 +151,27 @@ test('会话结束(完成 / 作废)后源文档再改:按实际指纹推当前�
   await store.unlockReview(doc, '测试', f.options); // → cancelled
   fs.writeFileSync(doc, '# 收尾\n\n作废后继续改。\n');
   const payload = await sync.readPushPayload(review.id, f.options);
-  assert.equal(payload.sourceChanged, true);
-  assert.equal(payload.contentHash, sha(fs.readFileSync(doc)));
-  assert.match(payload.content, /作废后继续改/);
+  assert.equal(payload.contentAvailable, false, '作废的轮次只推状态(规则⑤事件表)');
+  assert.equal(payload.content, null);
   assert.equal(payload.phoneState, 'cancelled');
+
+  // 完成的轮次:改稿后 complete,之后用户再普通编辑 → 推送的仍是归档的完成稿
+  const doc2 = path.join(f.docDir, '完成.md');
+  fs.writeFileSync(doc2, '# 完成\n\n原文。\n');
+  const second = (await store.openReview(doc2, f.options)).review;
+  sidecar(doc2, [{ id: 'n1', comment: '改', status: 'open', reviewSessionId: second.id }]);
+  await store.submitReview(second.id, f.options);
+  await store.beginApply(doc2, { applyMode: 'agent', ...f.options });
+  fs.writeFileSync(doc2, '# 完成\n\n改好的正文。\n');
+  sidecar(doc2, [{ id: 'n1', comment: '改', status: 'applied', reviewSessionId: second.id }]);
+  await store.completeReview(doc2, { summary: '改了一句', ...f.options });
+  const archivedHash = sha(fs.readFileSync(doc2));
+  fs.writeFileSync(doc2, '# 完成\n\n完成后又手痒改了一笔。\n');
+  const done = await sync.readPushPayload(second.id, f.options);
+  assert.equal(done.archived, true);
+  assert.equal(done.contentHash, archivedHash);
+  assert.match(done.content, /改好的正文/);
+  assert.doesNotMatch(done.content, /手痒/);
 
   await sync.markPushError(review.id, '上次的错', f.options);
   const item = (await sync.listOutbox(f.options)).find((entry) => entry.reviewId === review.id);

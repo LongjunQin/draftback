@@ -30,6 +30,23 @@
 | 会话完成 / 作废后文件再改,推送一直报「内容不一致」(409) | 已修:只有批注中 / 等待改稿的会话才要求正文指纹一致,其余按实际正文推(test/sync.test.js) |
 | 《跨端规则》v2.2、《三端 UI 方案》 | 已重新开审阅并推到手机,等用户批注 |
 
+## 〇·4、规则⑤第一段:文档身份层与留底(2026-10-14 晚,1.0.0-beta.4)
+
+按 [version-record-design.md](version-record-design.md) v4 第 2~5、7.1 节做,全量测试 141 项通过。
+
+| 项 | 做了什么 | 怎么验证的 |
+|---|---|---|
+| 文档身份层 | `documents.json`:每篇文档一个 docId、当前路径、下一轮轮号(单调,不再数会话记录)、下一版本序号、最新版本;独立手工修改轮也有身份 | test/version-store.test.js(清理会话记录后轮号不回退) |
+| 冻结即留底 | `openReview` 新建会话时把原稿原始字节写进 `versions/<docId>/<versionId>/original.md` + meta;留不下就不建会话;独立手工修改轮在第一次受控写入前留底,没写就不产生事件 | 同上 |
+| 交出 | 实时校验正文指纹;核对留底(缺了再捕一次,对不上就阻断交出);固定本轮成员 `memberAnnotationIds` 与输入快照 | 同上 |
+| 终态两步 | 完成 / 零批注通过 / 作废 / 重新打开自动结束旧轮:先固化载荷(final.md + 处理结果快照;写不下不推进终态),再发布(索引指向最新,失败留 `archive-retry`);每篇保留 10 个事件 | 同上;`mdreview versions`、`archive-retry` |
+| 成员集 | 交出后完成门槛、界面未处理计数只数成员;迟到批注不阻塞完成 | 同上 |
+| 终态不可变 | complete / cancelled 之后的受控写入不再改写 finalHash;同步推送完成稿从归档读(零批注通过推原稿、作废只推状态),不拿工作稿冒充 | test/sync.test.js 改写 |
+| 快照 | documents.json 与 versions/ 入快照并随恢复放回 | — |
+| 规则③补漏 | 开轮与存第一条批注合成服务端一步(`/api/app/review/open-annotate`):批注没存成就撤掉刚建的轮,不留空轮(Codex 审 UI 方案时指出) | test/open-annotate.test.js;普通文档冒烟 |
+
+没做(第二、三段):恢复事件与两阶段提交、收批次逐条身份与导入记录、重关联、云端 revision、对比视图与回稿卡。
+
 ## 〇·3、电脑端「先做」:五条规则落地 + 最小界面骨架 + AI 接手路径(2026-10-14 晚,1.0.0-beta.3)
 
 按 [mac-status-and-plan.md](mac-status-and-plan.md) v3 第 4 节「先做」做的,用户当天拍板规划后开工。

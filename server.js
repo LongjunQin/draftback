@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const store = require('./lib/review-store');
 const sync = require('./lib/sync');
 const presence = require('./lib/agent-presence');
+const versionStore = require('./lib/version-store');
 const documents = require('./lib/document-service');
 const snapshot = require('./lib/snapshot');
 const plainDocuments = require('./lib/documents');
@@ -226,7 +227,10 @@ async function reviewSummary(review) {
     title: path.basename(review.absPath),
     directory: path.dirname(review.absPath),
     counts: annotationCounts(data),
-    openCount: data.annotations.filter((annotation) => store.annotationStatus(annotation) === 'open').length,
+    // 交出后只数本轮成员(规则⑤第 7.1 节);批注中按整份旁注文件数
+    openCount: review.status === 'reviewing'
+      ? data.annotations.filter((annotation) => store.annotationStatus(annotation) === 'open').length
+      : store.countOpenForReview(review),
   };
 }
 
@@ -599,6 +603,64 @@ async function handleAppApi(req, res, pathname, q) {
     }
     await publishReviewChangedSafe(review.id, reason);
     return sendJson(res, 200, { ok: true, entry, agent: presence.describe(review.id) });
+  }
+  // 轮次版本记录(规则⑤第 11 节):按 docId / versionId 寻址,不依赖会话是否还在
+  if (pathname === '/api/app/document/versions') {
+    if (!allowMethods(req, res, ['GET'])) return;
+    const docId = q.get('docId');
+    if (!docId) return sendJson(res, 400, { error: 'bad_request', message: '缺少 docId。' });
+    return sendJson(res, 200, { document: versionStore.getDocument(docId), versions: versionStore.listVersions(docId) });
+  }
+  if (pathname === '/api/app/version') {
+    if (!allowMethods(req, res, ['GET'])) return;
+    const docId = q.get('docId');
+    const versionId = q.get('versionId');
+    const which = q.get('which') || 'final';
+    if (!docId || !versionId) return sendJson(res, 400, { error: 'bad_request', message: '缺少 docId 或 versionId。' });
+    const result = versionStore.readVersion(docId, versionId, which);
+    if (!result.available) return sendJson(res, 200, { available: false, reason: result.reason });
+    return sendJson(res, 200, { available: true, hash: result.hash, bytes: result.bytes, content: result.buffer.toString('utf8'), meta: result.meta });
+  }
+  if (pathname === '/api/app/document/archive-retry') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.docId !== 'string' || typeof body.versionId !== 'string') {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供 docId 与 versionId。' });
+    }
+    const meta = await versionStore.publish(body.docId, body.versionId);
+    return sendJson(res, 200, { ok: true, state: meta.state });
+  }
+  // 规则③:首次成功保存一条批注才算开轮。开轮与存第一条批注合成一步:批注没存成就撤掉刚建的轮,不留空轮。
+  if (pathname === '/api/app/review/open-annotate') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim() || !body.note || typeof body.note !== 'object' || !String(body.note.comment || '').trim()) {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供 path 与非空的 note。' });
+    }
+    const opened = await store.openReview(body.path);
+    const absMd = opened.review.absPath;
+    const requestId = body.note.clientRequestId ? String(body.note.clientRequestId).slice(0, 120) : null;
+    let saved;
+    try {
+      saved = await store.withReviewTransaction(absMd, async () => {
+        const writable = await requireWritableReview(opened.review.id);
+        return mutateReviewAnnotations(writable, (data) => {
+          if (requestId) {
+            const existing = data.annotations.find((item) => item.reviewSessionId === writable.id && item.clientRequestId === requestId);
+            if (existing) return { note: existing, reused: true };
+          }
+          const created = buildNote(body.note, body.note.author || '我(本机)', { reviewSessionId: writable.id, sourceHash: writable.sourceHash });
+          if (!requestId) delete created.clientRequestId;
+          data.annotations.push(created);
+          return { note: created, reused: false };
+        });
+      });
+    } catch (error) {
+      if (!opened.reused) await store.discardFreshReview(opened.review.id).catch(() => false);
+      throw error;
+    }
+    await publishReviewChangedSafe(opened.review.id, opened.reused ? 'review-reopened' : 'review-opened');
+    return sendJson(res, 200, { ok: true, reused: opened.reused, review: await reviewSummary(opened.review), note: saved.note, noteReused: saved.reused });
   }
   if (pathname === '/api/app/open') {
     if (!allowMethods(req, res, ['POST'])) return;

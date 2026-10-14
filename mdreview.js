@@ -16,6 +16,7 @@ const {
   unlockReview,
 } = require('./lib/review-store');
 const presence = require('./lib/agent-presence');
+const versionStore = require('./lib/version-store');
 const snapshot = require('./lib/snapshot');
 const batches = require('./lib/batches');
 const sync = require('./lib/sync');
@@ -32,6 +33,8 @@ function usage() {
     '  mdreview push <绝对路径.md>                        # 重新推到手机(open / complete 已自动推,手机没看到时用)',
     '  mdreview sync-status [--json]                      # 同步辅助程序是否在跑、各文档推送/接收状态',
     '  mdreview unlock <绝对路径.md> --reason "<原因>"',
+    '  mdreview versions <绝对路径.md> [--json]            # 这篇文档的轮次版本记录(每轮原稿 / 完成稿 / 处理结果是否留底)',
+    '  mdreview archive-retry <绝对路径.md>               # 某一轮完成后发布失败时只重试发布',
     '  mdreview snapshot [--reason "<原因>"]              # 整体备份审阅索引与全部批注文件(手动快照不自动清理)',
     '  mdreview snapshots [--json]                        # 列出快照',
     '  mdreview restore <快照id> [--dry-run] --yes         # 从快照恢复;恢复前自动再做一份 pre-restore 快照',
@@ -542,6 +545,28 @@ async function main() {
       if (result.dryRun) { console.log('（仅预览,未改动任何文件;确认无误后加 --yes 执行）'); return; }
       console.log(`已恢复: 审阅索引 ${result.restored.reviewsJson ? '1' : '0'} 份,批注文件 ${result.restored.sidecars} 份,跳过 ${result.restored.skipped.length} 份`);
       console.log(`恢复前的状态已另存为快照 ${result.preSnapshot},如需反悔: mdreview restore ${result.preSnapshot} --yes`);
+      return;
+    }
+    if (args.command === 'versions' || args.command === 'archive-retry') {
+      if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
+      const absPath = path.resolve(args.file);
+      const review = await getReviewByPath(absPath);
+      if (!review || !review.docId) throw new ReviewStoreError('NO_ACTIVE_REVIEW', `该文档没有带文档身份的会话: ${absPath}`, { httpStatus: 404 });
+      if (args.command === 'archive-retry') {
+        if (!review.versionId) throw new ReviewStoreError('VERSION_MISSING', '这一轮没有留底,没有可发布的版本。', { httpStatus: 409 });
+        const meta = await versionStore.publish(review.docId, review.versionId);
+        console.log(`已发布: ${review.docId}/${review.versionId}(${meta.state})`);
+        return;
+      }
+      const list = versionStore.listVersions(review.docId);
+      if (args.json) { console.log(JSON.stringify({ document: versionStore.getDocument(review.docId), versions: list }, null, 2)); return; }
+      console.log(`文档: ${absPath}`);
+      console.log(`身份: ${review.docId}`);
+      if (!list.length) { console.log('还没有版本记录(上线前的旧会话没有留底)。'); return; }
+      for (const item of list) {
+        const files = `原稿 ${item.files.original}${item.files.final ? ` / 完成稿 ${item.files.final}` : ''}`;
+        console.log(`- ${item.versionId}  第 ${item.round} 轮  ${item.kind}  ${item.state}  ${files}  采纳 ${item.counts.applied} / 不处理 ${item.counts.wontfix}${item.summary ? `  ${item.summary.slice(0, 40)}` : ''}`);
+      }
       return;
     }
     if (args.command === 'unlock') {

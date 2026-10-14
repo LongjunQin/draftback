@@ -111,6 +111,20 @@ Agent 的节奏固定为：`open` → 挂 `wait` → 改稿 → `complete` → �
 
 普通打开的文档**首次成功保存一条文字批注或总体意见时**自动开第 1 轮并锁定原文；稿子回来（`complete`）或本轮作废（`cancelled`）后同样在首次成功保存批注时开下一轮。只选字、只打开输入框又取消，都不改轮次。App 里没有单独的「开始审阅」按钮了；智能体侧仍用 `mdreview open`。
 
+## 轮次版本记录(2026-10-14 起,设计见 version-record-design.md)
+
+每篇文档有自己的身份索引(`~/.draftback/documents.json`:`docId`、当前路径、下一轮轮号),轮号只增不减,会话清理不影响历史。
+每一轮是 `~/.draftback/versions/<docId>/<versionId>/` 下的一个版本事件:
+
+| 文件 | 内容 |
+|---|---|
+| `original.md` | 冻结那一刻的原稿(原始字节;独立手工修改轮在第一次受控写入前捕获) |
+| `final.md` | 完成稿(AI 改 / 我自己改的轮才有) |
+| `meta.json` | 轮次、事件类型(review / approved / cancelled / manual / restored)、两份文件的指纹与状态、交出时固定的本轮成员、处理结果快照、改稿摘要、附件清单 |
+
+规矩:冻结即留底,留不下就不建会话;交出时核对留底并固定本轮成员(交出后新加的批注进下一轮,不阻塞完成);终态先「固化载荷」(写不下就不推进终态,智能体重试 `complete` 即可)再「发布」(失败可用 `mdreview archive-retry` 补);complete / cancelled 之后的普通编辑是工作稿,不改历史;同步推到手机的完成稿从归档读。每篇保留最近 10 个事件。
+命令:`mdreview versions <路径>` 列历史;接口 `GET /api/app/document/versions?docId=`、`GET /api/app/version?docId=&versionId=&which=original|final`。恢复与对比视图是后两段的工作。
+
 ## 内置服务
 
 本地服务由回稿桌面壳用 Electron 自带的 Node 运行时拉起（`ELECTRON_RUN_AS_NODE`），
