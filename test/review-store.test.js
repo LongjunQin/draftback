@@ -271,3 +271,16 @@ test('启动清理:文件已删的会话取消或删除,结束超过 90 天的�
   assert.equal((await store.getReviewById(goneActive.id, f.options)).status, 'cancelled');
   assert.equal((await store.getReviewById(active.id, f.options)).status, 'reviewing');
 });
+
+test('文件名的 NFC / NFD 两种写法指向同一篇文档,只建一套会话', async (t) => {
+  const f = fixture(t);
+  const nfd = '제안서.md'.normalize('NFD');
+  const nfc = '제안서.md'.normalize('NFC');
+  const file = writeMd(f.root, nfd, '# 제안\n');
+  const first = await store.openReview(file, f.options);
+  const second = await store.openReview(path.join(f.root, nfc), f.options);
+  assert.equal(second.review.id, first.review.id);
+  assert.equal(second.reused, true);
+  assert.equal(first.review.absPath, first.review.absPath.normalize('NFC'));
+  assert.equal((await store.listReviews(f.options)).length, 1);
+});

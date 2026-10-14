@@ -932,6 +932,11 @@
   async function buildStandaloneHtml(tab) {
     const article = document.getElementById('documentContent').cloneNode(true);
     article.removeAttribute('id');
+    // 导出的是干净的正文:不带阅读缩放、批注图钉、查找高亮这些界面状态
+    article.removeAttribute('style');
+    article.querySelectorAll('.note-pin, mark.search-hit').forEach((el) => {
+      if (el.tagName === 'MARK') el.replaceWith(...el.childNodes); else el.remove();
+    });
     article.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
     await Promise.all(Array.from(article.querySelectorAll('img[src]')).map(async (image) => {
       const src = image.getAttribute('src') || '';
@@ -1625,7 +1630,9 @@
         const tab = activeTab();
         setOutlineActive(item.id);
         if (tab?.mode === 'edit' && window.MDTurnEditor && state.editorView && typeof window.MDTurnEditor.revealLine === 'function') {
-          window.MDTurnEditor.revealLine(state.editorView, item.lineStart);
+          // 编辑器里不含 Front Matter,大纲行号是按整篇源文算的,要减去 Front Matter 占的行数
+          const frontMatterLines = (splitFrontMatter(tab.source).frontMatter.match(/\n/g) || []).length;
+          window.MDTurnEditor.revealLine(state.editorView, Math.max(1, item.lineStart - frontMatterLines));
           return;
         }
         const target = document.getElementById(item.id);
