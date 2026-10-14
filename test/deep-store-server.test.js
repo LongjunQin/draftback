@@ -19,8 +19,23 @@ function fixture(t) {
   const docRoot = path.join(root, 'docs');
   fs.mkdirSync(docRoot, { recursive: true });
   store.ensureDataDir({ dataDir });
-  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  return { root, dataDir, docRoot };
+  const children = [];
+  // 收尾按登记顺序执行:必须先关掉本用例起的服务、再删临时目录;删目录失败只记录,不能让后续收尾中断
+  // (以前先删目录,服务还在写文件 → ENOTEMPTY → 关服务那步没执行 → 孤儿服务让整轮测试挂住)
+  t.after(async () => {
+    await Promise.all(children.map((child) => stopChild(child)));
+    try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
+    catch (error) { console.error(`临时目录未删净(不影响结果): ${error.message}`); }
+  });
+  return { root, dataDir, docRoot, children };
+}
+function stopChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(); }, 3000);
+    child.once('exit', () => { clearTimeout(timer); resolve(); });
+    try { child.kill('SIGTERM'); } catch { clearTimeout(timer); resolve(); }
+  });
 }
 
 function writeMd(root, name, body = '# 测试\n正文\n') {
@@ -86,12 +101,8 @@ async function startServer(t, f, extraEnv = {}) {
   });
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += chunk; });
-  t.after(async () => {
-    if (child.exitCode === null) {
-      child.kill('SIGTERM');
-      await new Promise((resolve) => child.once('exit', resolve));
-    }
-  });
+  if (Array.isArray(f.children)) f.children.push(child);
+  t.after(() => stopChild(child));
   const port = await waitForPort(store.getPaths({ dataDir: f.dataDir }).port, child);
   return { child, port, stderr: () => stderr };
 }

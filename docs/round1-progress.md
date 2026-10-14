@@ -2,6 +2,19 @@
 
 > 2026-10-14 起产品改名为 **Draftback / 回稿**(英文名 / 中文名),本文此前出现的 MDTurn 指同一产品。改名执行方案见 [rename-plan.md](rename-plan.md),代码在分支 `rename/draftback`。
 
+## 〇·1、改名第一阶段(2026-10-14,分支 rename/draftback)
+
+| 项 | 状态 |
+|---|---|
+| Mac:Draftback 1.0.0-beta.1(包标识 app.draftback.mac),中文系统显示「回稿」;首次启动从旧数据目录复制设置与页面存储;内置服务沿用上次端口 | 已装到用户电脑,验证通过(端口 54114 沿用,标签与偏好接上) |
+| 同步程序:Draftback Sync(app.draftback.mac.sync),iCloud 容器不变 | 验证通过(心跳正常、连上 iCloud) |
+| iOS:「回稿 测试」(app.draftback.ios.dev),主屏幕名按系统语言 | 已装到用户手机,「来自 Mac」拉到全部文档(用户确认) |
+| 测试 | 桌面 18 项、4 个浏览器冒烟通过;服务端测试收尾顺序修复后重跑 |
+| 新 App 第一次真实交回批注 | 等用户下次批注时自然验证 |
+| 旧 App ID(org.mdturn.desktop.sync、org.mdturn.ios.dev)与手机上的「MDTurn 测试」 | 新版跑通一轮交回后删除 |
+| 第二阶段:内部旧名(容器、~/.mdread、代码全局名、环境变量、md-read 服务名)清理与命名沿革文档 | 方案已提给用户,等拍板 |
+| GitHub 仓库改名 mdturn → draftback | 等用户点头(对外可见) |
+
 ## 〇、2026-10-13 缺陷审计与 0.6.4 修复
 
 下午对 Mac 版做了一轮完整审计(全部测试 + 三路代码审查 + 现场复现),找出 7 个严重问题和二十余个一般/轻微问题,严重的这批已在 0.6.4 修掉:

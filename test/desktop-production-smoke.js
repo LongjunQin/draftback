@@ -1040,7 +1040,8 @@ async function main() {
     assert.equal(secondBeforePush.length, 1, '第二标签应只保留自己的 Agent 批注');
     assert.equal(secondBeforePush[0].id, 'second-agent-note');
     assert.equal(secondBeforePush[0].status, 'open');
-    assert.equal(await chrome.cdp.evaluate('document.querySelector("#annotationDialog").hidden'), true);
+    // 保存后弹窗异步关闭;负载高时(和整套测试并行)立刻检查会偶发失败,改为等它关上
+    await waitUntil('批注弹窗保存后关闭', () => chrome.cdp.evaluate('document.querySelector("#annotationDialog").hidden'));
     await waitUntil('跨标签保存不串写右栏和状态', () => chrome.cdp.evaluate(`(() => {
       const active = document.querySelector('#tabList .tab.active .tab-title');
       const status = document.querySelector('#reviewStateText').textContent;
