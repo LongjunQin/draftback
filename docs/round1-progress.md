@@ -11,9 +11,24 @@
 | iOS:「回稿 测试」(app.draftback.ios.dev),主屏幕名按系统语言 | 已装到用户手机,「来自 Mac」拉到全部文档(用户确认) |
 | 测试 | 桌面 18 项、4 个浏览器冒烟通过;服务端测试收尾顺序修复后重跑 |
 | 新 App 第一次真实交回批注 | 等用户下次批注时自然验证 |
-| 旧 App ID(org.mdturn.desktop.sync、org.mdturn.ios.dev)与手机上的「MDTurn 测试」 | 新版跑通一轮交回后删除 |
+| 旧 App ID(org.mdturn.desktop.sync、org.mdturn.ios.dev)与手机上的「MDTurn 测试」 | 新 App 交回一轮(批次 46ac0f65)后已删除、已卸载 |
 | 第二阶段:内部旧名(容器 → `iCloud.app.draftback`、`~/.mdread` → `~/.draftback`、代码全局名、环境变量 `DRAFTBACK_*`、服务名 `draftback-service`)全部换新,命名沿革文档 [naming-history.md](naming-history.md) | 用户 2026-10-14 下午拍板「做干净」,已做 |
 | GitHub 仓库改名 mdturn → draftback | 用户点头,已做 |
+
+## 〇·2、改名第二阶段:内部标识换新并装机(2026-10-14 下午)
+
+用户拍板「做干净」后,内部标识全部换新(清单见 [naming-history.md](naming-history.md)),当天出包装机、云端切换验证通过。
+
+| 项 | 状态 |
+|---|---|
+| 云端容器 `iCloud.app.draftback`(区 `draftback`);Mac 同步程序启动时发现容器标记不同 → 清变更令牌、让服务把保留期内的文档全部重排待推 | 验证通过:切换后 3 篇文档自动重推,手机重新拉到 |
+| 数据目录 `~/.mdread` → `~/.draftback` 自动整目录搬迁;Mac 回稿 1.0.0-beta.2 装机,内置服务沿用端口 54114 | 已装,验证通过 |
+| iOS「回稿 测试」重签到新容器,Application Support/MDTurn → Draftback 自动搬迁 | 已装 |
+| 苹果开发者网站:两个新 App ID 挂上新容器;旧 App ID `org.mdturn.*` 删除;旧容器 `iCloud.org.mdturn` 闲置(苹果不让删) | 用户已做 |
+| **新容器第一次用的坑**:CloudKit 服务端对记录读写一律回 HTTP 500(建区却能成功),直到在 CloudKit 控制台(Safari)打开一次该容器的 Development 环境;打开后之前建的区随之消失 | 已遇到并处理。同步程序改为区丢失(zoneNotFound / userDeletedZone)自动清标记下一轮重建,不用重启 App;手机每次启动核对云端订阅是否还在,没有就重订 |
+| 推送全部失败时 3 秒一次重试、同一错误每轮写日志 | 已修:全失败按正常间隔(15 秒)重试,同一错误(按开头 60 字)只记一次 |
+| 会话完成 / 作废后文件再改,推送一直报「内容不一致」(409) | 已修:只有批注中 / 等待改稿的会话才要求正文指纹一致,其余按实际正文推(test/sync.test.js) |
+| 《跨端规则》v2.2、《三端 UI 方案》 | 已重新开审阅并推到手机,等用户批注 |
 
 ## 〇、2026-10-13 缺陷审计与 0.6.4 修复
 

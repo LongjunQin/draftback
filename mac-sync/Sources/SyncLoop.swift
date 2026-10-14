@@ -85,9 +85,12 @@ final class SyncLoop {
 
     // MARK: 推:Mac → 云
 
+    /// 返回是否真的推成功了至少一篇:全失败时按正常间隔重试,不缩短等待(否则会 3 秒一次地撞服务器);
+    /// 同一篇文档同样的错误只写一次日志(服务端把上次的错误带在队列条目里)
     func pushOutbox() async throws -> Bool {
         let items = try await server.outbox()
         guard !items.isEmpty else { return false }
+        var pushed = 0
         for item in items {
             guard let reviewId = item["reviewId"] as? String, let docId = item["docId"] as? String else { continue }
             do {
@@ -97,12 +100,17 @@ final class SyncLoop {
                                             signature: payload["signature"] as? String ?? "",
                                             contentHash: payload["contentHash"] as? String ?? "")
                 log.info("已推送 \(item["title"] as? String ?? docId) 第 \(item["round"] ?? 1) 轮(\(item["phoneState"] ?? "?"))")
+                pushed += 1
             } catch {
-                log.error("推送 \(item["title"] as? String ?? docId) 失败: \(Describe.error(error))")
-                try? await server.markPushError(reviewId: reviewId, error: Describe.error(error))
+                let message = Describe.error(error)
+                // 服务端错误里带请求编号和时间,逐字比较永远不同;只看开头(错误码与类别)是否一样
+                if (item["lastError"] as? String)?.prefix(60) != message.prefix(60) {
+                    log.error("推送 \(item["title"] as? String ?? docId) 失败: \(message)")
+                }
+                try? await server.markPushError(reviewId: reviewId, error: message)
             }
         }
-        return true
+        return pushed > 0
     }
 
     private func pushDocument(docId: String, reviewId: String, payload: [String: Any]) async throws {

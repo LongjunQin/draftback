@@ -39,14 +39,29 @@ final class CloudStore {
         zoneReady = true
     }
 
+    /// 区在云端没了(新容器在控制台第一次打开时会初始化开发环境,之前建的区随之消失;「Reset Environment」也一样):
+    /// 清掉"已建区"标记和变更令牌,下一轮 ensureZone 重建。不然进程不重启就一直报「Zone does not exist」
+    private func noteZoneLoss(_ error: Error) {
+        guard let ck = error as? CKError else { return }
+        let codes = [ck.code] + (ck.partialErrorsByItemID?.values.compactMap { ($0 as? CKError)?.code } ?? [])
+        if codes.contains(where: { $0 == .zoneNotFound || $0 == .userDeletedZone }) {
+            zoneReady = false
+            clearToken()
+        }
+    }
+
     func recordID(_ name: String) -> CKRecord.ID { CKRecord.ID(recordName: name, zoneID: zoneID) }
 
     func fetch(_ names: [String]) async throws -> [String: CKRecord] {
         guard !names.isEmpty else { return [:] }
-        let results = try await database.records(for: names.map(recordID))
+        let results: [CKRecord.ID: Result<CKRecord, Error>]
+        do { results = try await database.records(for: names.map(recordID)) } catch { noteZoneLoss(error); throw error }
         var out: [String: CKRecord] = [:]
         for (id, result) in results {
-            if case .success(let record) = result { out[id.recordName] = record }
+            switch result {
+            case .success(let record): out[id.recordName] = record
+            case .failure(let error): noteZoneLoss(error) // 记录不存在是正常的(首次推送),区不存在要记下来
+            }
         }
         return out
     }
@@ -54,9 +69,15 @@ final class CloudStore {
     /// Mac 是这些记录的唯一写入方,用 allKeys 覆盖,不和自己较劲版本标签
     func save(_ records: [CKRecord]) async throws {
         guard !records.isEmpty else { return }
-        let result = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .allKeys, atomically: true)
+        let result: (saveResults: [CKRecord.ID: Result<CKRecord, Error>], deleteResults: [CKRecord.ID: Result<Void, Error>])
+        do {
+            result = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .allKeys, atomically: true)
+        } catch { noteZoneLoss(error); throw error }
         for (id, outcome) in result.saveResults {
-            if case .failure(let error) = outcome { throw SyncError.cloud("保存记录 \(id.recordName) 失败: \(error.localizedDescription)") }
+            if case .failure(let error) = outcome {
+                noteZoneLoss(error)
+                throw SyncError.cloud("保存记录 \(id.recordName) 失败: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -102,6 +123,9 @@ final class CloudStore {
                 clearToken()
                 cursor = nil
                 changes = ZoneChanges()
+            } catch {
+                noteZoneLoss(error)
+                throw error
             }
         }
         return changes

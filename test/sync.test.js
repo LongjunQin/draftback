@@ -143,6 +143,24 @@ test('正文与会话指纹不一致时不推送;推送失败与批次/回执状
   await assert.rejects(() => sync.requestPush(path.join(f.docDir, '没有.md'), f.options), (error) => error.code === 'NO_ACTIVE_REVIEW' || error.code === 'INVALID_PATH' || error.httpStatus === 404);
 });
 
+test('会话结束(完成 / 作废)后源文档再改:按实际指纹推当前正文,不再报不一致', async (t) => {
+  const f = fixture(t);
+  const doc = path.join(f.docDir, '收尾.md');
+  fs.writeFileSync(doc, '# 收尾\n');
+  const { review } = await store.openReview(doc, f.options);
+  await store.unlockReview(doc, '测试', f.options); // → cancelled
+  fs.writeFileSync(doc, '# 收尾\n\n作废后继续改。\n');
+  const payload = await sync.readPushPayload(review.id, f.options);
+  assert.equal(payload.sourceChanged, true);
+  assert.equal(payload.contentHash, sha(fs.readFileSync(doc)));
+  assert.match(payload.content, /作废后继续改/);
+  assert.equal(payload.phoneState, 'cancelled');
+
+  await sync.markPushError(review.id, '上次的错', f.options);
+  const item = (await sync.listOutbox(f.options)).find((entry) => entry.reviewId === review.id);
+  assert.equal(item.lastError, '上次的错', '队列条目带上次错误,辅助程序据此去重日志');
+});
+
 test('批次按文档标识匹配会话:两篇内容相同的文档不会串', async (t) => {
   const f = fixture(t);
   const a = path.join(f.docDir, 'A.md'); const b = path.join(f.docDir, 'B.md');

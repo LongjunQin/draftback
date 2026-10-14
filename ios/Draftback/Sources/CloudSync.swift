@@ -336,8 +336,16 @@ final class CloudSyncEngine: ObservableObject {
     // MARK: 静默推送订阅
 
     private var subscribedKey: String { "draftback.cloud.subscribed.v1" }
+    private var subscriptionVerified = false
     private func subscribeIfNeeded() async {
-        if UserDefaults.standard.bool(forKey: subscribedKey) { return }
+        if UserDefaults.standard.bool(forKey: subscribedKey) {
+            // 标记只说明以前订阅过;容器的开发环境被初始化或重置后云端订阅会消失,所以每次启动核对一次,没有就重订
+            if subscriptionVerified { return }
+            if (try? await database.subscription(for: CloudSchema.subscriptionID)) != nil {
+                subscriptionVerified = true
+                return
+            }
+        }
         let subscription = CKDatabaseSubscription(subscriptionID: CloudSchema.subscriptionID)
         let info = CKSubscription.NotificationInfo()
         info.shouldSendContentAvailable = true
@@ -345,6 +353,7 @@ final class CloudSyncEngine: ObservableObject {
         do {
             _ = try await database.modifySubscriptions(saving: [subscription], deleting: [])
             UserDefaults.standard.set(true, forKey: subscribedKey)
+            subscriptionVerified = true
         } catch {
             // 没订阅成功也不影响使用:回到前台时照样拉取
         }
