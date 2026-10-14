@@ -500,12 +500,25 @@ kbd {
   font-weight: 650;
 }
 
-.review-state[data-status="ready_to_apply"],
+/* 状态区的键由 desktop-handoff.js 给出:已交出的三档(submitted / listening / claimed)、AI 修改中、自己改 → 琥珀;
+   稿子回来 / 已通过 / 已定稿 → 绿;冲突 → 红;普通阅读与作废 → 灰 */
+.review-state[data-status="submitted"],
+.review-state[data-status="listening"],
+.review-state[data-status="claimed"],
+.review-state[data-status="manual"],
 .review-state[data-status="applying"] { border-color: var(--amber-line-2); background: var(--amber-pale); color: var(--amber-text-2); }
-.review-state[data-status="complete"] { border-color: var(--green-line); background: var(--green-soft); color: var(--green-text); }
+.review-state[data-status="complete"],
+.review-state[data-status="approved"],
+.review-state[data-status="finalized"] { border-color: var(--green-line); background: var(--green-soft); color: var(--green-text); }
 .review-state[data-status="conflict"] { border-color: var(--red-line); background: var(--red-soft); color: var(--red-text); }
 .review-state[data-status="cancelled"] { border-color: var(--line); background: var(--surface-2); color: var(--muted); }
 .review-state[data-status="plain"] { border-color: var(--line); background: var(--surface-2); color: var(--muted); }
+
+/* 工具栏骨架(规划 v3 第 4.2 节):左「阅读 / 编辑」,中间状态区,右「查找、导出、次按钮、主按钮」 */
+.toolbar-group { display: inline-flex; align-items: center; gap: 6px; }
+.action-button { white-space: nowrap; }
+.document-toolbar > .icon-button.compact { color: var(--muted); }
+.document-toolbar > .icon-button.compact:hover { color: var(--text); }
 
 .review-count {
   padding-left: 10px;

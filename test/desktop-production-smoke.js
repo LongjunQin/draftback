@@ -674,14 +674,15 @@ async function main() {
     assert.equal(titlebarSafeArea.nameVisible, true, '常规窗口宽度下应显示 MDTurn 名称');
     assert.equal(titlebarSafeArea.titlebarDraggable, true,
       '整条标题栏背景必须是 Electron 可拖动区');
-    assert.ok(titlebarSafeArea.interactiveControls >= 4,
+    // 主按钮已搬到工具栏(规划 v3 第 4.2 节),标题栏只剩新建标签与两侧栏开关
+    assert.ok(titlebarSafeArea.interactiveControls >= 3,
       '标题栏的按钮应继续由 no-drag 规则排除');
     await chrome.cdp.click('#welcomeRecent .recent-item');
     await waitUntil('最近审阅打开并渲染正文', () => chrome.cdp.evaluate(`(() => {
       const title = document.querySelector('#tabList .tab-title');
       const paragraph = document.querySelector('#cross-one');
       return title && title.textContent.includes('MDTurn桌面真实回归.md') && paragraph &&
-        document.querySelector('#reviewStateText').textContent.includes('审阅中');
+        document.querySelector('#reviewStateText').textContent.includes('批注中');
     })()`));
     const outlineState = await waitUntil('文章大纲与当前章节高亮', () => chrome.cdp.evaluate(`(() => {
       const links = Array.from(document.querySelectorAll('#outlinePanel .outline-link'));
@@ -1048,7 +1049,7 @@ async function main() {
       const comments = Array.from(document.querySelectorAll('#openNotesList .note-comment'))
         .map((item) => item.textContent);
       return active && active.textContent.includes('MDTurn第二文档.md') &&
-        status.includes('审阅中') && comments.length === 1 &&
+        status.includes('批注中') && comments.length === 1 &&
         comments[0] === '请由 Agent 修改第二篇文档并主动通知 App。';
     })()`));
 
@@ -1065,7 +1066,7 @@ async function main() {
       const content = document.querySelector('#documentContent').textContent;
       const count = document.querySelector('#openNotesCount').textContent;
       if (!active || !active.textContent.includes('MDTurn第二文档.md') ||
-          !status.includes('审阅中') || !content.includes(${JSON.stringify(secondQuote)}) || count !== '1') return null;
+          !status.includes('批注中') || !content.includes(${JSON.stringify(secondQuote)}) || count !== '1') return null;
       const first = Array.from(document.querySelectorAll('#tabList .tab'))
         .find((tab) => tab.textContent.includes('MDTurn桌面真实回归.md'));
       const firstState = first && first.querySelector('.tab-state');
@@ -1078,7 +1079,7 @@ async function main() {
     const readyNotification = await notifyReview(server.port, secondOpened.review.id, 'review-submitted');
     assert.ok(readyNotification.delivered >= 1, '打开的 MDTurn 页面应已订阅主动通知');
     await waitUntil('主动推送 ready_to_apply 状态', () => chrome.cdp.evaluate(
-      `document.querySelector('#reviewStateText').textContent.includes('等待修改')`,
+      `document.querySelector('#reviewStateText').textContent.includes('已交出')`,
     ), 5_000);
 
     const applyingSecond = await store.beginApply(secondSource, {
@@ -1093,7 +1094,7 @@ async function main() {
     assert.ok(applyingNotification.delivered >= 1, 'Agent 开始改稿事件应送达打开的 MDTurn 页面');
     await waitUntil('主动推送 Agent applying 状态', () => chrome.cdp.evaluate(`(() => {
       const status = document.querySelector('#reviewStateText').textContent;
-      return status.includes('Agent 修改中') && status.includes('文档暂时只读');
+      return status.includes('AI 正在修改');
     })()`), 5_000);
 
     const pushedPhrase = 'Agent 主动推送后的最新版正文已加载。';
@@ -1136,7 +1137,7 @@ async function main() {
         .find((tab) => tab.textContent.includes('MDTurn桌面真实回归.md'));
       const firstState = first && first.querySelector('.tab-state');
       if (!active || !active.textContent.includes('MDTurn第二文档.md') ||
-          !status.includes('修改已完成') || !content.includes(${JSON.stringify(pushedPhrase)}) || count !== '0' ||
+          !status.includes('稿子回来了') || !content.includes(${JSON.stringify(pushedPhrase)}) || count !== '0' ||
           !toasts.some((text) => text.includes('Agent 修改完成'))) return null;
       return {
         status,
@@ -1218,7 +1219,7 @@ async function main() {
       const content = document.querySelector('#documentContent').textContent;
       const count = document.querySelector('#openNotesCount').textContent;
       return active && active.textContent.includes('MDTurn桌面真实回归.md') &&
-        status.includes('审阅中') && content.includes(${JSON.stringify(headingText)}) &&
+        status.includes('批注中') && content.includes(${JSON.stringify(headingText)}) &&
         !content.includes(${JSON.stringify(pushedPhrase)}) && count === '2';
     })()`), 5_000);
     const secondTabAfterPush = await chrome.cdp.evaluate(`(() => {
@@ -1247,7 +1248,7 @@ async function main() {
       return chrome.cdp.evaluate(`(() => {
         const pane = document.querySelector('#editorPane');
         const status = document.querySelector('#reviewStateText').textContent;
-        return !pane.hidden && status.includes('手工修改中') && !status.includes('原文已解冻') &&
+        return !pane.hidden && status.includes('我自己改') && !status.includes('原文已解冻') &&
           !!document.querySelector('#codeEditor .ProseMirror[contenteditable="true"]') &&
           !document.querySelector('.fallback-editor');
       })()`);
@@ -1359,7 +1360,7 @@ async function main() {
     await waitUntil('手工编辑闭环完成', async () => {
       const review = await store.getReviewById(opened.review.id, { dataDir });
       return review && review.status === 'complete' &&
-        chrome.cdp.evaluate(`document.querySelector('#reviewStateText').textContent.includes('修改已完成')`);
+        chrome.cdp.evaluate(`document.querySelector('#reviewStateText').textContent.includes('稿子回来了')`);
     });
 
     assert.equal(newestNote.anchorVersion, 3);

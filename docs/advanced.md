@@ -73,26 +73,43 @@ wait、wait 退出提示读批注并 begin-apply、begin-apply 提示标 applied
 complete）。从未读过本文档的 Agent 只要从 `mdreview open` 进入并照每步输出走，
 即可完整走完 打开 → 等待 → 改稿 → 完成 全流程；下文是完整协议说明。
 
-本地冻结审阅必须先由用户点击“完成本轮审阅”。推荐 Agent 在 `mdreview open` 之后立即
+本地冻结审阅必须先由用户点击「交给 AI」（⌘↩）。推荐 Agent 在 `mdreview open` 之后立即
 后台运行 `mdreview wait`：命令会一直阻塞到用户有下一个动作才退出（退出码
 0=批注已提交 / 全文通过 / 已定稿 / 用户手工改完 / 别处已开始改稿；2=冲突/取消/会话丢失；
 3=超时，默认 480 分钟，可 `--timeout-minutes` 调整）。命令退出即等于用户通报“批注完了”，
 用户不需要回到对话里再说一遍。
 
 `wait` 是**跨轮**的：它不会因为启动时已处于的状态而退出。上一轮 `complete` 之后再挂一次
-`wait`，它会一直等到用户在 App 里「开始新一轮审阅」并提交、或点「定稿并关闭」。因此
+`wait`，它会一直等到用户在 App 里再批注一轮并交出、或点「通过 · 定稿」。因此
 Agent 的节奏固定为：`open` → 挂 `wait` → 改稿 → `complete` → 再挂 `wait` …… 直到 `wait`
 报告“用户已定稿”。Agent 随后：
 
 1. 运行 `mdreview status`，确认状态（用了 wait 且退出码为 0 可跳过）；
 2. 读取 sidecar 中 `status=open` 的批注，对有歧义的先向用户提问确认；
-3. `ready_to_apply` 时运行 `mdreview begin-apply`；
+3. `ready_to_apply` 时先 `mdreview claim`（可省，`begin-apply` 也算领取），再运行 `mdreview begin-apply`；
 4. 逐条改稿，以 `quote + headingPath` 定位，标记 `applied/wontfix`，保留审计字段。
    带 `scope: "document"` 的批注是**总体意见**（针对全篇，无文字锚点）——若它要求重写、
    调整架构或先讨论，先与用户对齐方向再动笔，闭环方式相同；
 5. 全部 open 清零后运行 `mdreview complete`，再挂一次 `mdreview wait` 等下一轮或定稿。
 
 没有审阅会话的旧 sidecar 继续遵守原有 `open → applied/wontfix` 协议。
+
+### 接手路径：在听与领取分开记（2026-10-14 起）
+
+用户交出批注后，回稿的状态区要能回答"有没有 AI 接手"。这件事分两层记（电脑版规划 v3 规则②）：
+
+| 层 | 怎么记 | 含义 |
+|---|---|---|
+| 监听登记 | `mdreview wait` 启动时登记到数据目录的 `listeners.json`，每 30 秒续期，90 秒没续期自动失效；wait 因用户交出而返回时转为「已交棒」（15 分钟内仍算在线） | 只说明"有程序在听"，**不是**接手 |
+| 领取 | `mdreview claim` 或 `mdreview begin-apply` 成功时记在会话上（`claimedAt / claimedBy`） | 以真实事件为准；界面只在领取后才显示"AI 正在修改" |
+
+状态区据此显示三档：「已交出 · 还没有 AI 接入」（主按钮「复制改稿指令」，把文件路径和要执行的命令复制到剪贴板，贴给任何智能体都能接上）、「已交出 · ○○ 在线，等待领取」（超过 10 分钟没领取会提示重新复制指令）、「AI 正在修改…」。智能体名字取 `--agent`、环境变量 `DRAFTBACK_AGENT`，否则按运行环境推断（Claude Code / Codex / AI）。
+
+本地服务对应接口：`POST /api/app/review/listen`（`reviewSessionId, agent, handoff?`）、`/unlisten`、`POST /api/app/review/claim?r=<会话>`；摘要、bundle 与事件都带 `agentState`（`none / listening / claimed`，只在 `ready_to_apply` 下有值）。
+
+### 什么时候算开始新一轮（规则③）
+
+普通打开的文档**首次成功保存一条文字批注或总体意见时**自动开第 1 轮并锁定原文；稿子回来（`complete`）或本轮作废（`cancelled`）后同样在首次成功保存批注时开下一轮。只选字、只打开输入框又取消，都不改轮次。App 里没有单独的「开始审阅」按钮了；智能体侧仍用 `mdreview open`。
 
 ## 内置服务
 

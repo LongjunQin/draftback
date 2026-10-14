@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=8">
-  <link rel="stylesheet" href="/static/desktop.css?v=16">
+  <link rel="stylesheet" href="/static/desktop.css?v=17">
 </head>
 <body>
   <div id="appShell" class="app-shell">
@@ -32,10 +32,6 @@
         <button id="toggleRightTop" class="icon-button" type="button" title="显示或收起批注" aria-label="显示或收起批注">
           <i class="ph ph-notepad" aria-hidden="true"></i>
         </button>
-        <button id="finalizeAction" class="secondary-button finalize-button" type="button" hidden title="确认这版就是终稿:通知智能体审阅结束并关闭标签页">
-          <i class="ph ph-check-circle" aria-hidden="true"></i>定稿并关闭
-        </button>
-        <button id="primaryAction" class="primary-button" type="button" hidden>完成本轮审阅</button>
       </div>
     </header>
 
@@ -71,12 +67,20 @@
 
     <section id="workspace" class="workspace">
       <div id="documentToolbar" class="document-toolbar" hidden>
+        <div class="toolbar-group" role="group" aria-label="阅读或编辑">
+          <button id="readingModeButton" class="mode-button active" type="button">
+            <i class="ph ph-book-open-text" aria-hidden="true"></i>阅读与批注
+          </button>
+          <button id="editingModeButton" class="mode-button" type="button">
+            <i class="ph ph-pencil-simple-line" aria-hidden="true"></i>编辑
+          </button>
+        </div>
+        <span class="toolbar-spacer"></span>
         <div id="reviewStatePill" class="review-state" data-status="reviewing"
           role="status" aria-live="polite" aria-atomic="true">
           <i id="reviewStateIcon" class="ph ph-lock-key" aria-hidden="true"></i>
-          <span id="reviewStateText">审阅中 · 原文已锁定</span>
+          <span id="reviewStateText">批注中 · 0 条</span>
         </div>
-        <span id="reviewCount" class="review-count">本轮 0 条未处理</span>
         <span class="toolbar-spacer"></span>
         <div id="findBar" class="find-bar" role="search" hidden>
           <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
@@ -86,6 +90,7 @@
           <button id="findNext" class="icon-button compact" type="button" title="下一个(↩)" aria-label="下一个"><i class="ph ph-caret-down" aria-hidden="true"></i></button>
           <button id="findClose" class="icon-button compact" type="button" title="关闭(Esc)" aria-label="关闭查找"><i class="ph ph-x" aria-hidden="true"></i></button>
         </div>
+        <button id="findButton" class="icon-button compact" type="button" title="查找(⌘F)" aria-label="查找"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></button>
         <div id="dropOverlay" class="drop-overlay" hidden><div class="drop-card"><i class="ph ph-file-arrow-down" aria-hidden="true"></i>松开即打开 Markdown</div></div>
         <div class="export-menu-wrap">
           <button id="exportMenuButton" class="mode-button" type="button" aria-haspopup="menu" aria-expanded="false" title="导出或打印当前文档">
@@ -99,14 +104,9 @@
             <button type="button" role="menuitem" data-command="print"><span>打印…</span><kbd>⌘P</kbd></button>
           </div>
         </div>
-        <button id="readingModeButton" class="mode-button active" type="button">
-          <i class="ph ph-book-open-text" aria-hidden="true"></i>阅读与批注
-        </button>
-        <button id="editingModeButton" class="mode-button" type="button">
-          <i class="ph ph-pencil-simple-line" aria-hidden="true"></i>编辑
-        </button>
+        <button id="secondaryAction" class="secondary-button action-button" type="button" hidden></button>
+        <button id="primaryAction" class="primary-button action-button" type="button" hidden></button>
       </div>
-
       <main id="readerPane" class="reader-pane">
         <div id="welcome" class="welcome">
           <div class="welcome-mark"><img src="/static/brand/icon-256.png" alt="" aria-hidden="true"></div>
@@ -233,6 +233,7 @@
   <script src="/static/vendor/draftback-editor.js?v=8"></script>
   <script src="/static/markdown-patch.js?v=2"></script>
   <script src="/static/desktop-anchor.js?v=5"></script>
-  <script src="/static/desktop.js?v=26"></script>
+  <script src="/static/desktop-handoff.js?v=1"></script>
+  <script src="/static/desktop.js?v=27"></script>
 </body>
 </html>

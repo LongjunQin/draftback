@@ -12,6 +12,7 @@ const os = require('os');
 const crypto = require('crypto');
 const store = require('./lib/review-store');
 const sync = require('./lib/sync');
+const presence = require('./lib/agent-presence');
 const documents = require('./lib/document-service');
 const snapshot = require('./lib/snapshot');
 const plainDocuments = require('./lib/documents');
@@ -219,7 +220,7 @@ function annotationCounts(data) {
 async function reviewSummary(review) {
   const data = store.readAnnotations(review.absPath);
   return {
-    ...review,
+    ...presence.withAgentState(review),
     sessionId: review.id,
     sourceFile: review.absPath,
     title: path.basename(review.absPath),
@@ -246,6 +247,7 @@ function reviewEventPayload(review, reason) {
     workingHash: review.workingHash || review.sourceHash || null,
     finalHash: review.finalHash || null,
     completedAt: review.completedAt || null,
+    agentState: presence.agentStateFor(review, presence.describe(review.id)),
   };
 }
 
@@ -573,6 +575,31 @@ async function handleAppApi(req, res, pathname, q) {
       event: published.event,
     });
   }
+  // 智能体监听登记(规划 v3 规则②):登记只说明"有程序在听",不是领取。CLI 直接写 listeners.json,
+  // 这两条路由给没有数据目录直写权限的调用方用,并顺带广播事件让页面立刻刷新状态区。
+  if (pathname === '/api/app/review/listen' || pathname === '/api/app/review/unlisten') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.reviewSessionId !== 'string' || !body.reviewSessionId.trim()) {
+      return sendJson(res, 400, { error: 'bad_request', message: 'reviewSessionId 必须是非空字符串。' });
+    }
+    const reviewSessionId = body.reviewSessionId.trim().slice(0, 200);
+    const review = await store.getReviewById(reviewSessionId);
+    if (!review) return sendJson(res, 404, { error: 'review_not_found', message: `找不到审阅会话: ${reviewSessionId}` });
+    let entry = null;
+    let reason = 'agent-left';
+    if (pathname === '/api/app/review/unlisten') {
+      await presence.unregister(review.id);
+    } else if (body.handoff === true) {
+      entry = await presence.handoff(review.id, { agent: body.agent, minutes: body.minutes });
+      reason = 'agent-handoff';
+    } else {
+      entry = await presence.register(review.id, { agent: body.agent });
+      reason = 'agent-listening';
+    }
+    await publishReviewChangedSafe(review.id, reason);
+    return sendJson(res, 200, { ok: true, entry, agent: presence.describe(review.id) });
+  }
   if (pathname === '/api/app/open') {
     if (!allowMethods(req, res, ['POST'])) return;
     const body = await readBody(req);
@@ -701,6 +728,14 @@ async function handleAppApi(req, res, pathname, q) {
     const body = await readBody(req);
     const result = await documents.patchAnnotation(ref, q.get('id'), body);
     return sendJson(res, 200, { ok: true, ...result });
+  }
+  if (pathname === '/api/app/review/claim') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = (await readBody(req)) || {};
+    const existing = await documents.requireReview(ref);
+    const review = await store.claimReview(existing.absPath, { agent: body.agent, expectedReviewId: ref });
+    await publishReviewChangedSafe(review.id, 'agent-claimed');
+    return sendJson(res, 200, { ok: true, review: await reviewSummary(review) });
   }
   if (pathname === '/api/app/review/finalize') {
     if (!allowMethods(req, res, ['POST'])) return;

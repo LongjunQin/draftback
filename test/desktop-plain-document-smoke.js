@@ -3,9 +3,9 @@
 
 // 阅读与审阅分离的真实浏览器冒烟(路线图 v3 第一轮主线第 1 项,跨端规则第 8 节)。
 //
-//   1. 普通打开:不建会话、不加锁、不写 sidecar;状态条显示"普通阅读";划词不出批注按钮,只提示"开始审阅"。
+//   1. 普通打开:不建会话、不加锁、不写 sidecar;状态条显示"普通阅读";划词出批注按钮,但只选不写不开轮(规划 v3 规则③)。
 //   2. 普通编辑:进入编辑即登记,期间 mdreview open 被拒;保存直接写文件并留覆盖前备份;退出编辑解除登记。
-//   3. 开始审阅:同一标签转成审阅会话,状态条变"审阅中",划词出批注按钮。
+//   3. 首次成功保存一条批注:同一标签自动转成审阅会话(第 1 轮,原文锁定),状态条变"批注中 · 1 条",主按钮「交给 AI」。
 //   4. 最近文件列表同时显示普通文档与审阅状态。
 //
 // 用法: node test/desktop-plain-document-smoke.js   (需要本机有 Google Chrome / Chromium)
@@ -76,22 +76,18 @@ async function main() {
     })()`));
     const plainUi = await chrome.cdp.evaluate(`({
       pill: document.querySelector('#reviewStateText').textContent,
-      count: document.querySelector('#reviewCount').textContent,
-      primary: document.querySelector('#primaryAction').textContent,
       primaryHidden: document.querySelector('#primaryAction').hidden,
-      finalizeHidden: document.querySelector('#finalizeAction').hidden,
+      secondaryHidden: document.querySelector('#secondaryAction').hidden,
       docNoteHidden: document.querySelector('#docNoteButton').hidden,
       editEnabled: !document.querySelector('#editingModeButton').disabled,
       notesEmpty: document.querySelector('#openNotesList').textContent,
     })`);
     assert.match(plainUi.pill, /普通阅读/);
-    assert.equal(plainUi.count, '未审阅');
-    assert.equal(plainUi.primary, '开始审阅');
-    assert.equal(plainUi.primaryHidden, false);
-    assert.equal(plainUi.finalizeHidden, true);
-    assert.equal(plainUi.docNoteHidden, true, '普通阅读不能写总体意见');
+    assert.equal(plainUi.primaryHidden, true, '普通文档没有主按钮:划词批注即开轮');
+    assert.equal(plainUi.secondaryHidden, true);
+    assert.equal(plainUi.docNoteHidden, false, '普通阅读也能写总体意见(保存时开轮)');
     assert.equal(plainUi.editEnabled, true);
-    assert.match(plainUi.notesEmpty, /开始审阅/);
+    assert.match(plainUi.notesEmpty, /第 1 轮/);
     assert.equal(await store.getReviewByPath(source, { dataDir, activeOnly: true }), null, '普通打开不得创建审阅会话');
     assert.equal(fs.existsSync(store.sidecarFor(source)), false, '普通打开不得创建 sidecar');
     assert.equal(fs.existsSync(`${source}.lock`), false, '普通打开不得留下锁目录');
@@ -102,9 +98,10 @@ async function main() {
 
     const selected = await selectParagraph(chrome.cdp, '#plain-para');
     assert.match(selected, /普通阅读/);
+    await waitUntil('普通阅读划词出现批注按钮', () => chrome.cdp.evaluate(`!document.querySelector('#annotateButton').hidden`));
+    await chrome.cdp.evaluate(`window.getSelection().removeAllRanges(); document.dispatchEvent(new Event('selectionchange'));`);
     await sleep(150);
-    assert.equal(await chrome.cdp.evaluate(`document.querySelector('#annotateButton').hidden`), true, '普通阅读划词不得出现批注按钮');
-    await waitUntil('划词提示去开始审阅', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion *')).some((node) => node.textContent.includes('开始审阅'))`));
+    assert.equal(await store.getReviewByPath(source, { dataDir, activeOnly: true }), null, '只选字不写批注,不得开轮');
 
     // 2. 普通编辑:登记、拒绝冻结、直接保存、备份、解除登记。
     await chrome.cdp.evaluate(`document.querySelector('#editingModeButton').click()`);
@@ -147,30 +144,43 @@ async function main() {
     await waitUntil('编辑登记解除', () => !documents.isEditing(source, { dataDir }));
     assert.ok(await chrome.cdp.evaluate(`document.querySelector('#documentContent').textContent.includes('普通编辑新增的一句话')`), '阅读模式显示保存后的内容');
 
-    // 3. 开始审阅:同一标签转成会话。
-    await chrome.cdp.evaluate(`document.querySelector('#primaryAction').click()`);
-    await waitUntil('转为审阅会话', () => chrome.cdp.evaluate(`(() => {
+    // 3. 首次成功保存一条批注:同一标签自动转成第 1 轮审阅会话(规划 v3 规则③)。
+    await selectParagraph(chrome.cdp, '#plain-para');
+    await waitUntil('划词出现批注按钮', () => chrome.cdp.evaluate(`!document.querySelector('#annotateButton').hidden`));
+    await chrome.cdp.evaluate(`document.querySelector('#annotateButton').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))`);
+    await waitUntil('批注弹窗打开', () => chrome.cdp.evaluate(`!document.querySelector('#annotationDialog').hidden`));
+    await chrome.cdp.evaluate(`(() => {
+      const area = document.querySelector('#annotationText');
+      area.value = '第一条批注:这句改得更直接些。';
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('#saveAnnotation').click();
+    })()`);
+    await waitUntil('保存第一条批注后自动开轮', () => chrome.cdp.evaluate(`(() => {
       const pill = document.querySelector('#reviewStatePill');
-      return document.querySelectorAll('#tabList .tab').length === 1 && pill.dataset.status === 'reviewing' &&
-        document.querySelector('#primaryAction').textContent === '完成本轮审阅' && document.querySelector('#plain-para');
+      return document.querySelector('#annotationDialog').hidden && document.querySelectorAll('#tabList .tab').length === 1 &&
+        pill.dataset.status === 'reviewing' && document.querySelector('#reviewStateText').textContent === '批注中 · 1 条' &&
+        document.querySelector('#primaryAction').textContent === '交给 AI' && !document.querySelector('#primaryAction').hidden &&
+        document.querySelectorAll('#openNotesList .note-comment').length === 1 && document.querySelector('#plain-para');
     })()`));
     const review = await store.getReviewByPath(source, { dataDir, activeOnly: true });
-    assert.ok(review && review.status === 'reviewing', '开始审阅后必须有活动会话');
+    assert.ok(review && review.status === 'reviewing' && review.round === 1, '首次保存批注后必须有第 1 轮活动会话');
+    const saved1 = store.readAnnotations(source).annotations;
+    assert.equal(saved1.length, 1);
+    assert.equal(saved1[0].comment, '第一条批注:这句改得更直接些。');
     assert.equal(await chrome.cdp.evaluate(`document.querySelector('#tabList .tab.active').title`), source);
-    await selectParagraph(chrome.cdp, '#plain-para');
-    await waitUntil('审阅中划词出现批注按钮', () => chrome.cdp.evaluate(`!document.querySelector('#annotateButton').hidden`));
+    await waitUntil('提示原文已锁定', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion *')).some((node) => node.textContent.includes('原文已锁定'))`));
     assert.equal(await chrome.cdp.evaluate(`document.querySelector('#docNoteButton').hidden`), false);
 
     // 4. 最近文件列表。
     await chrome.cdp.evaluate(`document.querySelector('#filesModeButton').click()`);
     await waitUntil('最近文件显示审阅状态', () => chrome.cdp.evaluate(`(() => {
       const item = document.querySelector('#recentList .recent-item');
-      return item && item.textContent.includes('普通文档.md') && item.textContent.includes('审阅中');
+      return item && item.textContent.includes('普通文档.md') && item.textContent.includes('批注中');
     })()`));
 
     const fatal = chrome.cdp.exceptions.filter((item) => !/favicon/i.test(item));
     assert.deepEqual(fatal, [], `页面不得抛出未处理异常:\n${fatal.join('\n')}`);
-    console.log('PASS: 普通打开不建会话、划词只提示、编辑登记阻止冻结、直接保存并备份、开始审阅转会话、最近文件带状态。');
+    console.log('PASS: 普通打开不建会话、只选不写不开轮、编辑登记阻止冻结、直接保存并备份、首次保存批注自动开第 1 轮、最近文件带状态。');
   } finally {
     if (chrome) { try { chrome.cdp.socket && chrome.cdp.socket.close(); } catch (_) {} await stopChild(chrome.child); }
     if (server) await stopChild(server.child);

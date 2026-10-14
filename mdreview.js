@@ -12,8 +12,10 @@ const {
   openReview,
   beginApply,
   completeReview,
+  claimReview,
   unlockReview,
 } = require('./lib/review-store');
+const presence = require('./lib/agent-presence');
 const snapshot = require('./lib/snapshot');
 const batches = require('./lib/batches');
 const sync = require('./lib/sync');
@@ -23,7 +25,8 @@ function usage() {
     '用法:',
     '  mdreview open <绝对路径.md> [--no-open]',
     '  mdreview status <绝对路径.md> [--json]',
-    '  mdreview wait <绝对路径.md> [--timeout-minutes <n>]  # 阻塞等待用户下一个动作(提交批注/定稿/手工改完),可跨轮',
+    '  mdreview wait <绝对路径.md> [--timeout-minutes <n>]  # 阻塞等待用户下一个动作(提交批注/定稿/手工改完),可跨轮;挂着时回稿显示「AI 在线」',
+    '  mdreview claim <绝对路径.md>                       # 领取用户已交出的这一轮(回稿随即显示「AI 正在修改」);begin-apply 也算领取',
     '  mdreview begin-apply <绝对路径.md>',
     '  mdreview complete <绝对路径.md> [--summary "<本轮改了什么、哪些没采纳及原因>"]  # 摘要会随新版推到手机',
     '  mdreview push <绝对路径.md>                        # 重新推到手机(open / complete 已自动推,手机没看到时用)',
@@ -42,13 +45,14 @@ function fail(message, exitCode = 1) {
 }
 
 function parseArgs(argv) {
-  const result = { command: argv[0], file: null, json: false, noOpen: false, reason: null, summary: null, timeoutMinutes: null, yes: false, dryRun: false };
+  const result = { command: argv[0], file: null, json: false, noOpen: false, reason: null, summary: null, timeoutMinutes: null, yes: false, dryRun: false, agent: null };
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === '--json') result.json = true;
     else if (value === '--no-open') result.noOpen = true;
     else if (value === '--reason') result.reason = argv[++index];
     else if (value === '--summary') result.summary = argv[++index];
+    else if (value === '--agent') result.agent = argv[++index];
     else if (value === '--yes') result.yes = true;
     else if (value === '--dry-run') result.dryRun = true;
     else if (value === '--timeout-minutes') {
@@ -186,10 +190,29 @@ function resolveDesktopApp() {
   return null;
 }
 
+function agentName(args = {}) {
+  if (args.agent) return presence.cleanAgentName(args.agent);
+  if (process.env.DRAFTBACK_AGENT) return presence.cleanAgentName(process.env.DRAFTBACK_AGENT);
+  if (process.env.CLAUDECODE) return 'Claude Code';
+  if (process.env.CODEX_SANDBOX || process.env.CODEX_THREAD_ID) return 'Codex';
+  return 'AI';
+}
+
+function describeHandoff(review) {
+  if (review.status === 'applying') return review.applyMode === 'manual' ? '用户自己在改' : `AI 正在修改(${review.applyActor || review.claimedBy || 'agent'})`;
+  if (review.status !== 'ready_to_apply') return null;
+  if (review.claimedAt) return `已领取(${review.claimedBy || 'agent'},${review.claimedAt})`;
+  const who = presence.describe(review.id);
+  if (!who.listening) return '已交出,还没有程序在听,也没人领取';
+  return `${who.agent} 在听${who.handoff ? '(已交棒,等待领取)' : ''},尚未领取`;
+}
+
 function printReview(review) {
   console.log(`文档: ${review.absPath}`);
   console.log(`会话: ${review.id}${review.round ? `(第 ${review.round} 轮)` : ''}`);
   console.log(`状态: ${review.status}`);
+  const handoff = describeHandoff(review);
+  if (handoff) console.log(`接手: ${handoff}`);
   if (review.docId) console.log(`同步: ${sync.describeSync(review)}`);
 }
 
@@ -216,7 +239,7 @@ async function commandOpen(args) {
   // 兜底通道:通过本地服务事件流让运行中的 App 直接打开该标签(与下面的 open -a 并行,任一条通即可)
   const notified = await notifyReviewChangedBestEffort(review, 'cli-open');
   console.log(reused ? '已复用现有审阅会话(用户尚未提交)。' : '已冻结文档并创建审阅会话。');
-  console.log(`→ Agent 下一步: 立即以后台任务挂起 mdreview wait "${review.absPath}",阻塞至用户点击「完成本轮审阅」;用户不会回到对话里通报。审阅期间禁止绕过 mdreview 直接修改该文档。`);
+  console.log(`→ Agent 下一步: 立即以后台任务挂起 mdreview wait "${review.absPath}",阻塞至用户点击「交给 AI」;用户不会回到对话里通报。挂着期间回稿会显示「AI 在线」。审阅期间禁止绕过 mdreview 直接修改该文档。`);
   if (args.noOpen) return;
 
   if (process.platform !== 'darwin') {
@@ -271,16 +294,62 @@ async function commandWait(args) {
   const absPath = path.resolve(args.file);
   const pollMs = Math.max(300, Number(process.env.DRAFTBACK_WAIT_POLL_MS) || 2000);
   const deadline = Date.now() + (args.timeoutMinutes || 480) * 60000;
+  const agent = agentName(args);
   const initial = await getReviewByPath(absPath);
   if (!initial) {
     throw new ReviewStoreError('NO_ACTIVE_REVIEW', `该文档没有活动审阅会话,请先 mdreview open: ${absPath}`, { httpStatus: 404 });
   }
   console.log(`等待用户的下一个动作: ${absPath}`);
   console.log(`会话: ${initial.id}(当前状态 ${initial.status}${initial.applyMode ? '/' + initial.applyMode : ''})`);
+
+  // 监听登记(规划 v3 规则②):挂着时回稿显示「AI 在线」;每 30 秒续期,90 秒没续期自动失效,强退不会留下假在线。
+  // 用户交出批注、本命令返回去让智能体读批注时转为「已交棒」(15 分钟内仍算在线);其余退出一律注销。
+  let listeningId = null;
+  let lastBeat = 0;
+  const listen = async (review) => {
+    if (!review || listeningId === review.id) return;
+    if (listeningId) { try { await presence.unregister(listeningId); } catch (_) {} }
+    listeningId = review.id;
+    lastBeat = Date.now();
+    try {
+      await presence.register(review.id, { agent });
+      await notifyReviewChangedBestEffort(review, 'agent-listening');
+    } catch (_) {}
+  };
+  const beat = async () => {
+    if (!listeningId || Date.now() - lastBeat < presence.HEARTBEAT_MS) return;
+    lastBeat = Date.now();
+    try { await presence.heartbeat(listeningId, { agent }); } catch (_) {}
+  };
+  const leave = async (review, mode) => {
+    const id = (review && review.id) || listeningId;
+    listeningId = null;
+    if (!id) return;
+    try {
+      if (mode === 'handoff') {
+        await presence.handoff(id, { agent });
+        if (review) await notifyReviewChangedBestEffort(review, 'agent-handoff');
+      } else {
+        await presence.unregister(id);
+        if (review) await notifyReviewChangedBestEffort(review, 'agent-left');
+      }
+    } catch (_) {}
+  };
+  const stopOnSignal = (signal) => {
+    const id = listeningId;
+    listeningId = null;
+    const done = () => process.exit(signal === 'SIGINT' ? 130 : 143);
+    if (!id) return done();
+    presence.unregister(id).then(done, done);
+  };
+  process.once('SIGINT', stopOnSignal);
+  process.once('SIGTERM', stopOnSignal);
+
   // 启动时用户的动作已经发生(批注已提交 / 已在改稿 / 已定稿):不能再等"下一次变化",否则会白等到超时。
   if (initial.status === 'ready_to_apply') {
     printReview(initial);
-    console.log(`→ 用户已完成批注(在 wait 启动之前)。先读 ${absPath}.annotations.json 中 status=open 的批注(有歧义先向用户逐条确认,一次一个问题);修改源文件前必须先运行 mdreview begin-apply "${absPath}",否则触发版本冲突。`);
+    console.log(`→ 用户已完成批注(在 wait 启动之前)。先运行 mdreview claim "${absPath}" 领取(回稿会显示「AI 正在修改」),再读 ${absPath}.annotations.json 中 status=open 的批注(有歧义先向用户逐条确认,一次一个问题);修改源文件前必须先运行 mdreview begin-apply "${absPath}",否则触发版本冲突。`);
+    await leave(initial, 'handoff');
     return;
   }
   if (initial.status === 'applying' && initial.applyMode !== 'manual') {
@@ -298,57 +367,71 @@ async function commandWait(args) {
   } else if (initial.status === 'complete') {
     console.log('本轮已闭环,继续等待:用户可能在回稿里开始新一轮审阅,也可能定稿并关闭。');
   }
+  await listen(initial);
   let announced = initial.id;
   for (;;) {
     const review = await getReviewByPath(absPath);
     const status = review ? review.status : 'untracked';
     if (sameState(initial, review)) {
       if (Date.now() >= deadline) {
+        await leave(review, 'leave');
         fail(`等待超时(${args.timeoutMinutes || 480} 分钟),用户尚未有新动作。→ 可再次运行 mdreview wait "${absPath}" 继续等待,或 mdreview status 查看现状。`, 3);
         return;
       }
+      await beat();
       await new Promise((resolve) => setTimeout(resolve, pollMs));
       continue;
     }
     if (status === 'reviewing') {
       if (announced !== review.id) { announced = review.id; console.log(`用户已开始新一轮审阅(会话 ${review.id}),继续等待其提交。`); }
+      await listen(review); // 新一轮是新的会话编号,登记要跟着换
     } else if (status === 'applying' && review.applyMode === 'manual') {
       if (announced !== review.id) { announced = review.id; console.log(`用户正在回稿里手工修改(会话 ${review.id}),继续等待其提交;期间不要改这个文件。`); }
+      await listen(review);
     } else if (status === 'ready_to_apply') {
       printReview(review);
-      console.log(`→ 用户已完成批注。先读 ${absPath}.annotations.json 中 status=open 的批注(有歧义先向用户逐条确认,一次一个问题);修改源文件前必须先运行 mdreview begin-apply "${absPath}",否则触发版本冲突。`);
+      console.log(`→ 用户已完成批注。先运行 mdreview claim "${absPath}" 领取(回稿会显示「AI 正在修改」),再读 ${absPath}.annotations.json 中 status=open 的批注(有歧义先向用户逐条确认,一次一个问题);修改源文件前必须先运行 mdreview begin-apply "${absPath}",否则触发版本冲突。`);
+      await leave(review, 'handoff');
       return;
     } else if (status === 'applying') {
       printReview(review);
       console.log(`→ 本轮已进入改稿阶段(begin-apply 已在别处运行)。处理 ${absPath}.annotations.json 中 status=open 的批注,逐条标 applied/wontfix,全部清零后运行 mdreview complete "${absPath}"。`);
+      await leave(review, 'handoff');
       return;
     } else if (status === 'complete') {
       if (review.outcome === 'finalized') {
         printReview(review);
         console.log('→ 用户已定稿并关闭文档,审阅结束。不要再挂 wait,也不要再改这个文件;向用户汇报即可。');
+        await leave(review, 'leave');
         return;
       }
       if (review.outcome === 'approved') {
         printReview(review);
         console.log('→ 用户已完成本轮审阅: 全文通过,没有批注,无需改稿。若用户后续还要修改,会在回稿里开始新一轮,可再挂一次 wait。');
+        await leave(review, 'leave');
         return;
       }
       if (review.applyMode === 'manual') {
         printReview(review);
         console.log(`→ 用户已手工改完并提交,文件内容已更新(改前请重新读取)。若还需要用户审阅,重新 mdreview open "${absPath}";否则不必再操作。`);
+        await leave(review, 'leave');
         return;
       }
       if (announced !== review.id) { announced = review.id; console.log('本轮已闭环,继续等待用户开始新一轮或定稿。'); }
+      await listen(review);
     } else {
       const label = { conflict: '版本冲突', cancelled: '审阅被取消', untracked: '审阅会话丢失' }[status] || `状态异常(${status})`;
       if (review) printReview(review);
+      await leave(review, 'leave');
       fail(`等待异常结束: ${label}。→ 先运行 mdreview status "${absPath}" 查明情况,再决定下一步。`, 2);
       return;
     }
     if (Date.now() >= deadline) {
+      await leave(review, 'leave');
       fail(`等待超时(${args.timeoutMinutes || 480} 分钟),用户尚未有新动作。→ 可再次运行 mdreview wait "${absPath}" 继续等待,或 mdreview status 查看现状。`, 3);
       return;
     }
+    await beat();
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 }
@@ -364,9 +447,17 @@ async function main() {
     if (args.command === 'open') return await commandOpen(args);
     if (args.command === 'status') return await commandStatus(args);
     if (args.command === 'wait') return await commandWait(args);
+    if (args.command === 'claim') {
+      if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
+      const review = await claimReview(args.file, { agent: agentName(args) });
+      printReview(review);
+      console.log(`→ 已领取。读 ${review.absPath}.annotations.json 中 status=open 的批注(有歧义先向用户逐条确认);修改源文件前必须先运行 mdreview begin-apply "${review.absPath}"。`);
+      await notifyReviewChangedBestEffort(review, 'agent-claimed');
+      return;
+    }
     if (args.command === 'begin-apply') {
       if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
-      const review = await beginApply(args.file);
+      const review = await beginApply(args.file, { applyActor: agentName(args) });
       printReview(review);
       console.log(`→ 只处理 ${review.absPath}.annotations.json 中 status=open(或缺 status,同样算待处理)的批注,用 quote+headingPath 定位改稿,逐条就地标 applied/wontfix(可附 appliedNote 说明改法);全部清零后运行 mdreview complete "${review.absPath}"。`);
       await notifyReviewChangedBestEffort(review, 'agent-apply-started');
