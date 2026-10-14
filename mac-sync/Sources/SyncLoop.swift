@@ -101,6 +101,8 @@ final class SyncLoop {
                                             contentHash: payload["contentHash"] as? String ?? "")
                 log.info("已推送 \(item["title"] as? String ?? docId) 第 \(item["round"] ?? 1) 轮(\(item["phoneState"] ?? "?"))")
                 pushed += 1
+            } catch SyncError.superseded {
+                continue // 已按云端更新的发布处理,不记错误
             } catch {
                 let message = Describe.error(error)
                 // 服务端错误里带请求编号和时间,逐字比较永远不同;只看开头(错误码与类别)是否一样
@@ -113,9 +115,34 @@ final class SyncLoop {
         return pushed > 0
     }
 
+    /// 发布先后(跨端规则 v2.3 第 12 节):初读与冲突重读都先比业务 revision——云端更新则本次作废,相同只确认不重写,本地更新才条件写入
+    private enum RevisionVerdict { case superseded(Int), same, proceed }
+    private func compareRevision(_ existing: CKRecord?, _ payload: [String: Any]) -> RevisionVerdict {
+        guard let mine = payload["revision"] as? Int else { return .proceed } // 旧会话没有 revision:照旧覆盖
+        let cloud = (existing?["revision"] as? Int64).map(Int.init) ?? 0
+        if cloud > mine { return .superseded(cloud) }
+        if cloud == mine && existing != nil { return .same }
+        return .proceed
+    }
+
     private func pushDocument(docId: String, reviewId: String, payload: [String: Any]) async throws {
-        let existing = try await cloud.fetch([docId])[docId]
+        var existing = try await cloud.fetch([docId])[docId]
+        let signature = payload["signature"] as? String ?? ""
+        switch compareRevision(existing, payload) {
+        case .superseded(let cloudRevision):
+            log.info("云端已有更新的发布(revision \(cloudRevision)),本次作废: \(payload["title"] as? String ?? docId)")
+            try await server.markPushSuperseded(reviewId: reviewId, cloudRevision: cloudRevision, signature: signature)
+            throw SyncError.superseded
+        case .same:
+            return // 同一次发布已在云端:只确认,不重写
+        case .proceed:
+            break
+        }
         let record = existing ?? CKRecord(recordType: CloudSchema.reviewDocument, recordID: cloud.recordID(docId))
+        if let revision = payload["revision"] as? Int { record["revision"] = Int64(revision) }
+        record["outcome"] = payload["outcome"] as? String ?? ""
+        record["agentState"] = payload["agentState"] as? String ?? ""
+        record["versionId"] = payload["versionId"] as? String ?? ""
         record["docId"] = docId
         record["reviewId"] = reviewId
         record["title"] = payload["title"] as? String ?? ""
@@ -170,7 +197,19 @@ final class SyncLoop {
             record["contentAvailable"] = Int64(0)
         }
         records.append(record)
-        try await cloud.save(records)
+        do {
+            try await cloud.saveIfUnchanged(records)
+        } catch let error as CKError where error.code == .serverRecordChanged {
+            // 读到之后有人改过:重读、再比一次 revision;云端不比我们新就把字段搬到新鲜记录上再写一次
+            existing = try await cloud.fetch([docId])[docId]
+            if case .superseded(let cloudRevision) = compareRevision(existing, payload) {
+                try await server.markPushSuperseded(reviewId: reviewId, cloudRevision: cloudRevision, signature: signature)
+                throw SyncError.superseded
+            }
+            guard let fresh = existing else { throw error }
+            for key in record.allKeys() { fresh[key] = record[key] }
+            try await cloud.saveIfUnchanged(Array(records.dropLast()) + [fresh])
+        }
         try? FileManager.default.removeItem(at: tempDir)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     }
@@ -199,7 +238,7 @@ final class SyncLoop {
             return
         }
         var batch: [String: Any] = [
-            "version": 1,
+            "version": Int(record["version"] as? Int64 ?? 1), // 手机真实写出的协议版本,桥层不硬填
             "batchId": batchId,
             "docId": record["docId"] as? String ?? "",
             "reviewId": record["reviewId"] as? String ?? "",
@@ -212,9 +251,21 @@ final class SyncLoop {
            let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             batch["annotations"] = array
         } else {
-            batch["annotations"] = []
+            // 批注列表缺失或不是数组:载荷不完整,整批拒绝(不能当成零批注通过),写回执让手机知道,不反复重试
+            try await writeReceipt(batchId: batchId, docId: batch["docId"] as? String ?? "", reviewId: batch["reviewId"] as? String ?? "",
+                                   accepted: false, reason: "invalid-batch", message: "批次载荷不完整(没有批注列表),整批拒绝,请在手机上重新发送。", acceptedIds: [])
+            log.error("手机批次 \(batchId.prefix(8)) 载荷不完整,已拒收")
+            return
         }
-        let result = try await server.importBatch(batch)
+        let result: [String: Any]
+        do {
+            result = try await server.importBatch(batch)
+        } catch ServerClient.ClientError.http(let status, let body) where status == 400 {
+            try await writeReceipt(batchId: batchId, docId: batch["docId"] as? String ?? "", reviewId: batch["reviewId"] as? String ?? "",
+                                   accepted: false, reason: "invalid-batch", message: "批次结构无效: \(body.prefix(120))", acceptedIds: [])
+            log.error("手机批次 \(batchId.prefix(8)) 结构无效,已拒收")
+            return
+        }
         let receipt = (result["receipt"] as? [String: Any]) ?? [:]
         let reviewId = ((result["review"] as? [String: Any])?["id"] as? String) ?? (batch["reviewId"] as? String) ?? ""
         if (receipt["reused"] as? Bool) == true, record["receiptWrittenAt"] != nil { return }
@@ -224,20 +275,33 @@ final class SyncLoop {
             return
         }
 
-        let receiptRecord = CKRecord(recordType: CloudSchema.receipt, recordID: cloud.recordID(receiptName))
-        receiptRecord["batchId"] = batchId
-        receiptRecord["docId"] = batch["docId"] as? String ?? ""
-        receiptRecord["reviewId"] = reviewId
-        receiptRecord["accepted"] = Int64((receipt["accepted"] as? Bool) == true ? 1 : 0)
-        receiptRecord["reason"] = receipt["reason"] as? String ?? ""
-        receiptRecord["message"] = receipt["message"] as? String ?? ""
         let acceptedIds = (receipt["acceptedIds"] as? [String]) ?? []
-        receiptRecord["acceptedIds"] = String(decoding: try JSONSerialization.data(withJSONObject: acceptedIds), as: UTF8.self)
-        receiptRecord["receivedAt"] = Date()
-        try await cloud.save([receiptRecord])
+        try await writeReceipt(batchId: batchId, docId: batch["docId"] as? String ?? "", reviewId: reviewId,
+                               accepted: (receipt["accepted"] as? Bool) == true, reason: receipt["reason"] as? String ?? "",
+                               message: receipt["message"] as? String ?? "", acceptedIds: acceptedIds,
+                               batchReviewId: receipt["batchReviewId"] as? String, baseVersion: receipt["baseVersion"] as? String,
+                               latestRound: receipt["latestRound"] as? Int)
         if !reviewId.isEmpty { try? await server.markReceiptSent(reviewId: reviewId, batchId: batchId) }
         let verdict = (receipt["accepted"] as? Bool) == true ? "已采用 \(acceptedIds.count) 条" : "拒收(\(receipt["reason"] ?? "?"))"
         log.info("收到手机批次 \(batchId.prefix(8)) → \(verdict)")
+    }
+
+    /// 回执带批次原身份与指纹(跨端规则 v2.3 第 6.6 条),手机据此把拒收原因挂到正确的批注上
+    private func writeReceipt(batchId: String, docId: String, reviewId: String, accepted: Bool, reason: String, message: String, acceptedIds: [String],
+                              batchReviewId: String? = nil, baseVersion: String? = nil, latestRound: Int? = nil) async throws {
+        let receiptRecord = CKRecord(recordType: CloudSchema.receipt, recordID: cloud.recordID(CloudSchema.receiptName(batchId: batchId)))
+        receiptRecord["batchId"] = batchId
+        receiptRecord["docId"] = docId
+        receiptRecord["reviewId"] = reviewId
+        receiptRecord["batchReviewId"] = batchReviewId ?? ""
+        receiptRecord["baseVersion"] = baseVersion ?? ""
+        if let latestRound { receiptRecord["latestRound"] = Int64(latestRound) }
+        receiptRecord["accepted"] = Int64(accepted ? 1 : 0)
+        receiptRecord["reason"] = reason
+        receiptRecord["message"] = message
+        receiptRecord["acceptedIds"] = String(decoding: try JSONSerialization.data(withJSONObject: acceptedIds), as: UTF8.self)
+        receiptRecord["receivedAt"] = Date()
+        try await cloud.save([receiptRecord])
     }
 
     // MARK: 杂项

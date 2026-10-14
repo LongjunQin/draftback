@@ -404,6 +404,16 @@ final class DocumentStore: ObservableObject {
         if latest.contentHash != sync.contentHash && latest.contentAvailable {
             // 手头没有未提交的批注:新版直接换进来,不用退出再进;有未提交的批注(锚在旧正文上)才留给用户点「新版」
             if document.openNotes.isEmpty { loadLatestVersion(latest, into: document) } else { document.newerVersionAvailable = true }
+        } else if latest.reviewId != sync.reviewId && latest.contentAvailable && latest.contentHash == document.hash {
+            // 正文一字不差但换了一轮(零批注通过再开轮、恢复到相同内容):字节已通过本轮指纹,直接把正文身份挂到新轮;
+            // 手头有旧轮未提交的批注就先留「新版」入口,旧批注保留原身份
+            if document.openNotes.isEmpty {
+                document.sync = latest
+                document.contentReviewId = latest.reviewId
+                document.notice = "已进入第 \(latest.round) 轮"
+            } else {
+                document.newerVersionAvailable = true
+            }
         } else {
             // 状态变了而正文没变(或只推了状态、新正文不可用):就地更新元数据;正文身份 contentReviewId 不改挂,
             // 指纹对不上时 annotationAllowed 自然为 false(v2.3 第 5 节)

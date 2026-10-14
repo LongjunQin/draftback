@@ -147,10 +147,12 @@ final class CloudStore {
 enum SyncError: Error, CustomStringConvertible {
     case cloud(String)
     case payload(String)
+    case superseded
     var description: String {
         switch self {
         case .cloud(let message): return message
         case .payload(let message): return message
+        case .superseded: return "云端已有更新的发布,本次作废"
         }
     }
 }

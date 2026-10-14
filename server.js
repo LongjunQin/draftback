@@ -472,7 +472,7 @@ async function handleSyncApi(req, res, pathname, q) {
   }
   if (pathname === '/api/app/sync/superseded') {
     if (!body || typeof body.reviewId !== 'string') return sendJson(res, 400, { error: 'bad_request', message: '缺少 reviewId。' });
-    return sendJson(res, 200, { ok: true, review: await sync.markPushSuperseded(body.reviewId, body.cloudRevision) });
+    return sendJson(res, 200, { ok: true, review: await sync.markPushSuperseded(body.reviewId, body.cloudRevision, body.signature) });
   }
   if (pathname === '/api/app/sync/error') {
     const review = await sync.markPushError(body.reviewId, body.error);

@@ -1,6 +1,6 @@
 {
   "name": "draftback-desktop",
-  "version": "1.0.0-beta.5",
+  "version": "1.0.0-beta.6",
   "private": true,
   "description": "Draftback (回稿) desktop app: you mark up the draft, the AI revises it, the draft comes back",
   "main": "main.js",

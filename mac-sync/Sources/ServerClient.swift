@@ -96,8 +96,8 @@ struct ServerClient {
         try await postJSON("/api/app/sync/error", ["reviewId": reviewId, "error": error])
     }
     /// 云端记录的 revision 比本地要发的新(迟到的发布):本次作废、抬高水位,不再重试
-    func markPushSuperseded(reviewId: String, cloudRevision: Int) async throws {
-        try await postJSON("/api/app/sync/superseded", ["reviewId": reviewId, "cloudRevision": cloudRevision])
+    func markPushSuperseded(reviewId: String, cloudRevision: Int, signature: String) async throws {
+        try await postJSON("/api/app/sync/superseded", ["reviewId": reviewId, "cloudRevision": cloudRevision, "signature": signature])
     }
     func importBatch(_ batch: [String: Any]) async throws -> [String: Any] {
         try await postJSON("/api/app/sync/batch", ["batch": batch])
