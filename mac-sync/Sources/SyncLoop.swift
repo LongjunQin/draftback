@@ -37,6 +37,12 @@ final class SyncLoop {
     }
 
     /// 一轮;返回是否做了实际工作(做了就缩短下一轮的等待,把一批文档尽快推完)
+    /// 排查用:删除云端记录(--delete-records)
+    func deleteRecords(_ names: [String]) async throws {
+        try await cloud.ensureZone()
+        try await cloud.delete(names)
+    }
+
     func tick() async -> Bool {
         var worked = false
         var heartbeat: [String: Any] = ["version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"]
@@ -164,6 +170,12 @@ final class SyncLoop {
 
     private func handleBatch(_ record: CKRecord) async throws {
         guard let batchId = record["batchId"] as? String ?? Optional(record.recordID.recordName) else { return }
+        // 云端已有这个批次的回执(这台或别的 Mac 早处理过;换电脑、重装、令牌丢失后会重拉历史):绝不重做,否则会把"已采用"覆盖成"拒收"
+        let receiptName = CloudSchema.receiptName(batchId: batchId)
+        if try await cloud.fetch([receiptName])[receiptName] != nil {
+            log.info("手机批次 \(batchId.prefix(8)) 已有回执,跳过")
+            return
+        }
         var batch: [String: Any] = [
             "version": 1,
             "batchId": batchId,
@@ -184,8 +196,13 @@ final class SyncLoop {
         let receipt = (result["receipt"] as? [String: Any]) ?? [:]
         let reviewId = ((result["review"] as? [String: Any])?["id"] as? String) ?? (batch["reviewId"] as? String) ?? ""
         if (receipt["reused"] as? Bool) == true, record["receiptWrittenAt"] != nil { return }
+        // 这台 Mac 从没见过这个文档(别的电脑发起的审阅):不是我们的批次,不回执、不打扰手机
+        if (receipt["reason"] as? String) == "no-session", (result["documentKnown"] as? Bool) != true {
+            log.info("手机批次 \(batchId.prefix(8)) 不属于这台 Mac 的文档,跳过")
+            return
+        }
 
-        let receiptRecord = CKRecord(recordType: CloudSchema.receipt, recordID: cloud.recordID(CloudSchema.receiptName(batchId: batchId)))
+        let receiptRecord = CKRecord(recordType: CloudSchema.receipt, recordID: cloud.recordID(receiptName))
         receiptRecord["batchId"] = batchId
         receiptRecord["docId"] = batch["docId"] as? String ?? ""
         receiptRecord["reviewId"] = reviewId

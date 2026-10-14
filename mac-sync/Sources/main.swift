@@ -2,7 +2,7 @@ import Foundation
 
 // MDTurn Sync:无界面,由 MDTurn.app 启动(也可手动跑,方便排查)。
 // 环境变量:MDREAD_DATA_DIR(默认 ~/.mdread)、MDTURN_PARENT_PID(主进程退出则随之退出)、MDTURN_SYNC_INTERVAL(秒,默认 15)
-// 参数:--once 只跑一轮就退出(排查用)
+// 参数:--once 只跑一轮就退出(排查用);--delete-records 名1,名2 删除云端记录后退出(排查用)
 
 let environment = ProcessInfo.processInfo.environment
 let dataDir = URL(fileURLWithPath: environment["MDREAD_DATA_DIR"] ?? (NSHomeDirectory() + "/.mdread"), isDirectory: true)
@@ -15,7 +15,16 @@ let loop = SyncLoop(dataDir: dataDir, parentPid: parentPid, interval: interval, 
 signal(SIGTERM) { _ in exit(0) }
 signal(SIGINT) { _ in exit(0) }
 
-if CommandLine.arguments.contains("--once") {
+if let index = CommandLine.arguments.firstIndex(of: "--delete-records"), index + 1 < CommandLine.arguments.count {
+    let names = CommandLine.arguments[index + 1].split(separator: ",").map(String.init)
+    let semaphore = DispatchSemaphore(value: 0)
+    Task {
+        do { try await loop.deleteRecords(names); log.info("已删除云端记录: \(names.joined(separator: ", "))") } catch { log.error("删除失败: \(Describe.error(error))") }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    exit(0)
+} else if CommandLine.arguments.contains("--once") {
     let semaphore = DispatchSemaphore(value: 0)
     Task {
         let worked = await loop.tick()

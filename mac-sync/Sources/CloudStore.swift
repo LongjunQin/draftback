@@ -60,6 +60,12 @@ final class CloudStore {
         }
     }
 
+    /// 排查用:按记录名删除(main.swift --delete-records)
+    func delete(_ names: [String]) async throws {
+        guard !names.isEmpty else { return }
+        _ = try await database.modifyRecords(saving: [], deleting: names.map(recordID), savePolicy: .allKeys, atomically: true)
+    }
+
     // MARK: 增量拉取(服务端变更令牌落盘;处理失败时不推进令牌,下一轮重拉)
 
     func loadToken() -> CKServerChangeToken? {

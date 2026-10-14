@@ -71,22 +71,24 @@
    - Mac 上:把收到的 `.mdturn-batch.json` 拖进 MDTurn 窗口(或告诉我,我用 `mdreview import-batch` 导入)。会话应进入待改稿,我这边挂着的等待会收到,然后按你的批注改稿。
    - 改完后我把新版放回手机应用文件夹,你在手机上重新打开即可看到。CloudKit 到位前,"新版回到手机"先这样走。
 
-## 三、账户已激活(2026-10-13 确认):同步进度
+## 三、同步已跑通(2026-10-14 上午真机验证)
 
-账户 2026-10-13 确认生效(Xcode 新签的描述文件有效期一年,团队号不变)。四个产品决定已写进跨端规则 v2(第 12 节是技术设计)。
+账户 2026-10-13 确认生效。四个产品决定已写进跨端规则 v2(第 12 节是技术设计)。2026-10-14 早上用户在开发者网站建了 iCloud 容器 `iCloud.org.mdturn`,并把它挂到 `org.mdturn.desktop.sync` 与 `org.mdturn.ios.dev` 两个 App ID 上;CloudKit 控制台用 Safari 打开过一次容器后服务端才初始化(Chrome 缓存会报 "Error looking up Developer Teams")。
 
 | 步骤 | 状态 |
 |---|---|
 | Mac 侧状态:文档标识、轮次、待推送队列、`/api/app/sync/*`、`mdreview push` / `sync-status` / `complete --summary` | 完成,5 个测试 |
-| Mac 接法选型(路线图 6.1):**原生辅助程序**(Swift + CloudKit),不用 CloudKit JS(网页令牌 30 分钟过期) | 已定 |
-| MDTurn Sync.app:推文档/附件/状态/摘要,拉手机批次并回执,随 App 启动与退出 | 代码完成、编译通过;签名需要 iCloud 容器 |
-| iOS:接收 Mac 文档、「来自 Mac」列表、提交批次走 iCloud、回执与新版提示、静默推送 | 代码完成、编译通过;装机需要 iCloud 容器 |
-| **需要你办:在开发者网站创建 iCloud 容器 `iCloud.org.mdturn`**(命令行无法代办) | 等你 |
-| 真机联调:Mac 推 → 手机看到 → 手机批注提交 → Mac 收到并回执 → 改稿后新版回手机 | 容器建好后做 |
-| 数据结构部署到 CloudKit 生产环境;Developer ID 签名 + 公证 Mac 包;TestFlight;真实分发包跑完整闭环 | 之后 |
+| Mac 接法:**原生辅助程序** MDTurn Sync.app(Swift + CloudKit) | 完成;开发构建需显式签 `icloud-container-environment=Development` 与 `icloud-container-development-container-identifiers`,否则 CloudKit 报 Invalid bundle ID for container |
+| iOS:「来自 Mac」列表、批注走 iCloud 交回、回执、新版与摘要 | 完成 |
+| 真机联调两轮:Mac 推 → 手机看到(含 png/svg 附件)→ 手机批注交回 → Mac 收到并回执 → 改稿中横幅 → 改完**手机正文自动换新**(无需退出)→ 改稿摘要 | **通过** |
+| 手机端改进(2026-10-14):新版自动就地替换(有未提交批注才留「新版」按钮)、顶部横幅"等待智能体 / 正在修改"、前台每 20 秒保底拉取(静默推送不保证到达) | 完成 |
+| Mac 0.7.0:安装包带辅助程序,随 App 启动与退出 | 进行中 |
+| 数据结构部署到 CloudKit 生产环境;Developer ID 签名 + 公证;TestFlight;上架版 iOS 改 Production 环境 | 之后 |
 | 之后需要你办:App Store Connect 新建 App 记录、手机装 TestFlight 包 | 之后 |
 
-记录名约定(已实现,写进规则 v2 下一版):`Receipt` 的记录名是 `receipt_<批次编号>`(与 `AnnotationBatch` 同区不能重名)。
+记录名约定(已实现,写进规则 v2 下一版):`Receipt` 的记录名是 `receipt_<批次编号>`。
+
+用户 2026-10-14 提出、尚未做的手机端改法:「完成本轮」不该藏在「…」菜单里,建议底部放一个显眼按钮并显示未提交条数;「写总体意见」可留在菜单。
 
 ## 四、已知问题与遗留
 

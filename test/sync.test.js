@@ -239,4 +239,9 @@ test('/api/app/sync/*:辅助程序取队列、取正文、报推送、送批次�
   // 状态变了(ready_to_apply)→ 再次待推,手机才能显示"等待智能体"
   assert.equal((await request(port, '/api/app/sync/outbox')).json.items[0].phoneState, 'waiting-agent');
   assert.equal((await request(port, '/api/app/sync/nothing', { method: 'POST', body: {} })).status, 404);
+
+  // 别的电脑发起的文档(这台 Mac 没见过这个标识):拒收但标明 documentKnown=false,同步程序据此不写回执
+  const foreign = await request(port, '/api/app/sync/batch', { method: 'POST', body: { batch: { ...batch, batchId: 'b-foreign', docId: 'doc_0000000000000000', reviewId: 'r0', baseVersion: 'e'.repeat(64), documentName: '别台电脑的稿.md' } } });
+  assert.equal(foreign.json.receipt.reason, 'no-session');
+  assert.equal(foreign.json.documentKnown, false);
 });
