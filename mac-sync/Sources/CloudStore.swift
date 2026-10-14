@@ -81,6 +81,18 @@ final class CloudStore {
         }
     }
 
+    /// 条件写入(跨端规则 v2.3 第 12 节「发布先后」):只有"读到之后没人改过"才写;被改过抛 .serverRecordChanged,由调用方重读比较 revision
+    func saveIfUnchanged(_ records: [CKRecord]) async throws {
+        guard !records.isEmpty else { return }
+        let result: (saveResults: [CKRecord.ID: Result<CKRecord, Error>], deleteResults: [CKRecord.ID: Result<Void, Error>])
+        do {
+            result = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .ifServerRecordUnchanged, atomically: true)
+        } catch { noteZoneLoss(error); throw error }
+        for (_, outcome) in result.saveResults {
+            if case .failure(let error) = outcome { noteZoneLoss(error); throw error }
+        }
+    }
+
     /// 排查用:按记录名删除(main.swift --delete-records)
     func delete(_ names: [String]) async throws {
         guard !names.isEmpty else { return }

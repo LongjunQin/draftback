@@ -186,9 +186,9 @@ test('批次按文档标识匹配会话:两篇内容相同的文档不会串', a
   const rb = (await store.openReview(b, f.options)).review;
   assert.equal(ra.sourceHash, rb.sourceHash);
   const batch = {
-    version: 1, batchId: 'docid-batch-0001', docId: rb.docId, documentName: 'A.md', baseVersion: rb.sourceHash,
+    version: 2, batchId: 'docid-batch-0001', docId: rb.docId, reviewId: rb.id, documentName: 'A.md', baseVersion: rb.sourceHash,
     completedAt: new Date().toISOString(), device: '测试 iPhone',
-    annotations: [{ id: 'n-1', comment: '给 B 的批注', quote: '正文', anchorVersion: 3, lineStart: 2, lineEnd: 2, startTextOffset: 0, endTextOffset: 2 }],
+    annotations: [{ id: 'n-1', comment: '给 B 的批注', quote: '正文', anchorVersion: 3, lineStart: 2, lineEnd: 2, startTextOffset: 0, endTextOffset: 2, docId: rb.docId, reviewId: rb.id, baseVersion: rb.sourceHash }],
   };
   const result = await batches.importBatch(batch, f.options);
   assert.equal(result.receipt.accepted, true, result.receipt.message);
@@ -258,9 +258,9 @@ test('/api/app/sync/*:辅助程序取队列、取正文、报推送、送批次�
   assert.equal((await request(port, '/api/app/sync/status')).json.helper.account, 'iCloud 用户');
 
   const batch = {
-    version: 1, batchId: 'route-batch-0001', docId: review.docId, documentName: '路由.md', baseVersion: review.sourceHash,
+    version: 2, batchId: 'route-batch-0001', docId: review.docId, reviewId: review.id, documentName: '路由.md', baseVersion: review.sourceHash,
     completedAt: new Date().toISOString(), device: '测试 iPhone',
-    annotations: [{ id: 'n-r1', comment: '路由批注', quote: '正文', anchorVersion: 3, lineStart: 3, lineEnd: 3, startTextOffset: 0, endTextOffset: 2 }],
+    annotations: [{ id: 'n-r1', comment: '路由批注', quote: '正文', anchorVersion: 3, lineStart: 3, lineEnd: 3, startTextOffset: 0, endTextOffset: 2, docId: review.docId, reviewId: review.id, baseVersion: review.sourceHash }],
   };
   const imported = await request(port, '/api/app/sync/batch', { method: 'POST', body: { batch } });
   assert.equal(imported.status, 200, imported.text);
@@ -276,7 +276,7 @@ test('/api/app/sync/*:辅助程序取队列、取正文、报推送、送批次�
   assert.equal((await request(port, '/api/app/sync/nothing', { method: 'POST', body: {} })).status, 404);
 
   // 别的电脑发起的文档(这台 Mac 没见过这个标识):拒收但标明 documentKnown=false,同步程序据此不写回执
-  const foreign = await request(port, '/api/app/sync/batch', { method: 'POST', body: { batch: { ...batch, batchId: 'b-foreign', docId: 'doc_0000000000000000', reviewId: 'r0', baseVersion: 'e'.repeat(64), documentName: '别台电脑的稿.md' } } });
+  const foreign = await request(port, '/api/app/sync/batch', { method: 'POST', body: { batch: { ...batch, batchId: 'b-foreign', docId: 'doc_0000000000000000', reviewId: 'r000000000000000000000000', baseVersion: 'e'.repeat(64), documentName: '别台电脑的稿.md', annotations: batch.annotations.map((n) => ({ ...n, docId: 'doc_0000000000000000', reviewId: 'r000000000000000000000000', baseVersion: 'e'.repeat(64) })) } } });
   assert.equal(foreign.json.receipt.reason, 'no-session');
   assert.equal(foreign.json.documentKnown, false);
 });

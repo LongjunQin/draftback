@@ -80,6 +80,9 @@
     } else if (review.status === 'complete') {
       if (review.outcome === 'finalized') {
         view = { status: 'finalized', text: '已定稿', detail: '这篇已结束。再划词批注会开始新一轮。', icon: 'ph-check-circle', primary: HIDDEN, secondary: HIDDEN };
+      } else if (review.outcome === 'restored') {
+        const round = review.restoredFrom && review.restoredFrom.round;
+        view = { status: 'restored', text: `已恢复到第 ${round || '?'} 轮改稿前`, detail: '正文已换回那一轮改稿前的样子;恢复前的稿子留在历史里,可以再恢复回来。再划词批注会开始新一轮。', icon: 'ph-clock-counter-clockwise', primary: button('通过 · 定稿', 'finalize'), secondary: HIDDEN };
       } else if (review.outcome === 'approved') {
         view = { status: 'approved', text: '已通过 · 没有批注', detail: '点「通过 · 定稿」告诉 AI 这篇结束;再划词批注会开始新一轮。', icon: 'ph-check-circle', primary: button('通过 · 定稿', 'finalize'), secondary: HIDDEN };
       } else {
@@ -102,7 +105,7 @@
   /** 标签页角标与最近列表用的短标签 */
   function statusLabel(status, applyMode = '', outcome = '') {
     if (status === 'applying') return applyMode === 'manual' ? '我自己改' : 'AI 修改中';
-    if (status === 'complete') return outcome === 'finalized' ? '已定稿' : outcome === 'approved' ? '已通过' : '稿子回来了';
+    if (status === 'complete') return outcome === 'finalized' ? '已定稿' : outcome === 'approved' ? '已通过' : outcome === 'restored' ? '已恢复' : '稿子回来了';
     return ({ reviewing: '批注中', ready_to_apply: '已交出', conflict: '文件被改', cancelled: '已作废', plain: '普通阅读' })[status] || '未知状态';
   }
 

@@ -470,6 +470,10 @@ async function handleSyncApi(req, res, pathname, q) {
     await publishReviewChangedSafe(review.id, 'sync-pushed');
     return sendJson(res, 200, { ok: true, sync: review.sync });
   }
+  if (pathname === '/api/app/sync/superseded') {
+    if (!body || typeof body.reviewId !== 'string') return sendJson(res, 400, { error: 'bad_request', message: '缺少 reviewId。' });
+    return sendJson(res, 200, { ok: true, review: await sync.markPushSuperseded(body.reviewId, body.cloudRevision) });
+  }
   if (pathname === '/api/app/sync/error') {
     const review = await sync.markPushError(body.reviewId, body.error);
     return sendJson(res, 200, { ok: true, sync: review.sync });
@@ -621,6 +625,16 @@ async function handleAppApi(req, res, pathname, q) {
     if (!result.available) return sendJson(res, 200, { available: false, reason: result.reason });
     return sendJson(res, 200, { available: true, hash: result.hash, bytes: result.bytes, content: result.buffer.toString('utf8'), meta: result.meta });
   }
+  if (pathname === '/api/app/document/restore') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.docId !== 'string' || typeof body.toVersionId !== 'string') {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供 docId 与 toVersionId。' });
+    }
+    const result = await versionStore.restoreTo(body);
+    await publishReviewChangedSafe(result.reviewId, 'review-restored');
+    return sendJson(res, 200, result);
+  }
   if (pathname === '/api/app/document/archive-retry') {
     if (!allowMethods(req, res, ['POST'])) return;
     const body = await readBody(req);
@@ -721,10 +735,14 @@ async function handleAppApi(req, res, pathname, q) {
     // 拖进窗口的批次由页面读出内容直接提交(隔空投送落在「下载」,那里受系统访问保护,
     // 拖放本身就是用户授权,不必再让服务按路径去读);命令行和旧调用方仍可只给路径。
     let result;
+    // 拖进窗口 / 文件导入的批次没有轮次身份时,只能显式转为当前文档本轮的新批注(跨端规则 v2.3 第 2.2 节);
+    // 页面把当前标签的文档路径带上,拖放本身就是"转进这篇"的明确意图
+    const documentPath = body && typeof body.documentPath === 'string' && body.documentPath.trim() ? body.documentPath : null;
+    const asNewNotes = Boolean(body && (body.asNewNotes === true || (documentPath && body.batch && batches.identityProblem(batches.validateBatch(body.batch)))));
     if (body && body.batch && typeof body.batch === 'object' && !Array.isArray(body.batch)) {
-      result = await batches.importBatch(body.batch);
+      result = await batches.importBatch(body.batch, { documentPath, asNewNotes });
     } else if (body && typeof body.path === 'string' && body.path.trim()) {
-      result = await batches.importBatchFile(body.path);
+      result = await batches.importBatchFile(body.path, { documentPath, asNewNotes });
     } else {
       return sendJson(res, 400, { error: 'bad_request', message: '请提供批次内容或批次文件路径。' });
     }
@@ -936,6 +954,13 @@ if (Number.isInteger(parentPid) && parentPid > 0) {
       const actualPort = address && typeof address === 'object' ? address.port : port;
       await publishPort(actualPort);
       banner(actualPort);
+      versionStore.recoverRestores().then((results) => {
+        for (const item of results) console.log(`恢复事务收敛: ${item.id} → ${item.action}${item.message ? ` (${item.message})` : ''}`);
+      }).catch((error) => console.error(`恢复事务收敛失败: ${error.message || error}`));
+      batches.resumePendingImports().then((results) => {
+        const done = results.filter((item) => item && item.receipt).length;
+        if (done) console.log(`批次导入收敛: ${done} 个中途断掉的导入已补齐`);
+      }).catch((error) => console.error(`批次导入收敛失败: ${error.message || error}`));
       store.pruneReviews().then((result) => {
         if (result.removed || result.cancelled) console.log(`审阅索引清理: 删除 ${result.removed} 条,取消 ${result.cancelled} 条文件已不存在的会话`);
       }).catch((error) => console.error('审阅索引清理失败:', error.message));

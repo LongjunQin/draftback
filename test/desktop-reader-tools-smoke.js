@@ -128,7 +128,8 @@ async function main() {
     })()`);
     await waitUntil('拖放遮罩消失', () => chrome.cdp.evaluate(`document.querySelector('#dropOverlay').hidden`));
 
-    // 5. 拖入手机批注批次:页面读出文件内容提交(不靠服务按路径读「下载」),会话收到批注进入待改稿;坏文件给提示。
+    // 5. 拖入手机批注批次:页面读出文件内容提交(不靠服务按路径读「下载」)。没有轮次身份的批次(手机独立文件导出)
+    //    只能转为本轮新批注(跨端规则 v2.3 第 2.2 节):会话仍在批注中,批注带来源;坏文件给提示。
     const review = await store.getReviewByPath(source, { dataDir });
     const batch = {
       version: 1, batchId: 'smoke-batch-0001', documentName: '工具冒烟.md', baseVersion: review.sourceHash,
@@ -142,12 +143,9 @@ async function main() {
       window.dispatchEvent(drop);
     })()`);
     await dropFile(JSON.stringify(batch), '工具冒烟.smoke0001.draftback-batch.json');
-    await waitUntil('拖入批次后会话进入待改稿', async () => {
-      const current = await store.getReviewById(review.id, { dataDir });
-      return current && current.status === 'ready_to_apply';
-    });
-    assert.equal(store.readAnnotations(source).annotations.filter((note) => note.receivedBatchId === 'smoke-batch-0001').length, 1);
-    await waitUntil('导入成功提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('已接收手机批注 1 条'))`));
+    await waitUntil('拖入批次后转为本轮新批注', () => store.readAnnotations(source).annotations.some((note) => note.receivedBatchId === 'smoke-batch-0001' && note.sourceAnnotationId === 'smoke-batch-0001:phone-note-1'));
+    assert.equal((await store.getReviewById(review.id, { dataDir })).status, 'reviewing', '转换不交出,由用户在回稿里交');
+    await waitUntil('转换成功提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('转为本轮新批注'))`));
     await dropFile('不是 JSON', '坏的.draftback-batch.json');
     await waitUntil('坏批次提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('不是有效的批注批次文件'))`));
 

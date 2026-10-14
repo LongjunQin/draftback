@@ -23,6 +23,15 @@ final class OpenedDocument: ObservableObject, Identifiable {
     @Published var sync: SyncedDocument?
     /// Mac 已推来更新的版本,当前显示的还是旧版
     @Published var newerVersionAvailable = false
+    /// 当前正文实际对应的轮次身份;只收到状态更新时不改挂(v2.3 第 5 节)
+    @Published var contentReviewId: String?
+    /// 这一轮能不能批注:状态允许,且正文字节就是这一轮的
+    var annotationAllowed: Bool {
+        guard let sync else { return true }
+        return sync.canAnnotate && sync.contentHash == hash && contentReviewId == sync.reviewId
+    }
+    /// 批注归属用的轮次身份(本地独立文件没有)
+    var roundId: String? { sync == nil ? nil : contentReviewId }
     @Published var notes: [Note]
     @Published var outline: [OutlineItem] = []
 
@@ -30,8 +39,10 @@ final class OpenedDocument: ObservableObject, Identifiable {
         self.url = url
         self.name = sync?.title ?? url.lastPathComponent
         self.markdown = markdown
-        // Mac 推来的文档以 Mac 算的指纹为准(批次要对上 Mac 的版本);本地文件自己算
-        self.hash = (sync?.contentHash).flatMap { $0.isEmpty ? nil : $0 } ?? Hashing.sha256(markdown)
+        // 指纹按实际字节算;Mac 推来的文档要和 Mac 的指纹对上才算"这一轮的正文"(跨端规则 v2.3 第 5 节:缓存绑定自己的身份)
+        let computedHash = Hashing.sha256(markdown)
+        self.hash = computedHash
+        self.contentReviewId = (sync?.contentHash == computedHash) ? sync?.reviewId : nil
         self.assets = assets
         self.notes = notes
         self.securityScoped = securityScoped
@@ -45,7 +56,8 @@ final class OpenedDocument: ObservableObject, Identifiable {
     func replaceContent(markdown: String, assets: [String: String], sync: SyncedDocument) {
         self.markdown = markdown
         self.assets = assets
-        self.hash = sync.contentHash.isEmpty ? Hashing.sha256(markdown) : sync.contentHash
+        self.hash = Hashing.sha256(markdown)
+        self.contentReviewId = (sync.contentHash == self.hash) ? sync.reviewId : nil
         self.name = sync.title
         self.sync = sync
         self.newerVersionAvailable = false
@@ -53,18 +65,18 @@ final class OpenedDocument: ObservableObject, Identifiable {
     }
 
     /// 当前版本上还没导出的批注:可改可删,"完成本轮"时打包。
-    var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash) } }
+    var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash, reviewId: roundId) } }
     /// 当前版本上已提交(导出 / 上传)的批注:锁定,等 Mac 接收。
-    var submittedNotes: [Note] { notes.filter { $0.isSubmitted && $0.belongs(toVersion: hash) } }
+    var submittedNotes: [Note] { notes.filter { $0.isSubmitted && $0.belongs(toVersion: hash, reviewId: roundId) } }
     /// Mac 已接收的批注(回执到达)。
-    var receivedNotes: [Note] { notes.filter { $0.isReceived && $0.belongs(toVersion: hash) } }
+    var receivedNotes: [Note] { notes.filter { $0.isReceived && $0.belongs(toVersion: hash, reviewId: roundId) } }
     /// Mac 拒收的批注:保留,由用户决定下一轮是否重提(跨端规则 6.6)。
-    var rejectedNotes: [Note] { notes.filter { $0.isRejected && $0.belongs(toVersion: hash) } }
-    /// 写在旧版本上的批注:只读保留,不高亮、不再导出(跨端规则 6.6、6.7:不静默丢弃)。
-    var olderVersionNotes: [Note] { notes.filter { !$0.belongs(toVersion: hash) } }
-    /// 交给正文高亮的批注:只画当前版本的(旧版本锚点对不上新正文);已提交、已接收的照样画出来。
+    var rejectedNotes: [Note] { notes.filter { $0.isRejected && $0.belongs(toVersion: hash, reviewId: roundId) } }
+    /// 写在旧版本或旧轮次上的批注:只读保留,不高亮、不再打包(v2.3 第 6.8 条:不改挂到新轮,显式"复制到本轮"才成为新批注)。
+    var olderVersionNotes: [Note] { notes.filter { !$0.belongs(toVersion: hash, reviewId: roundId) } }
+    /// 交给正文高亮的批注:只画当前轮的(旧版本锚点对不上新正文);已提交、已接收的照样画出来。
     var highlightPayload: [[String: Any]] {
-        notes.filter { $0.belongs(toVersion: hash) && ($0.isOpen || $0.isSubmitted || $0.isReceived) }.map { note in
+        notes.filter { $0.belongs(toVersion: hash, reviewId: roundId) && ($0.isOpen || $0.isSubmitted || $0.isReceived) }.map { note in
             var raw = note.raw
             raw["status"] = "open"
             return raw
@@ -286,6 +298,11 @@ final class DocumentStore: ObservableObject {
     func add(note: Note, to document: OpenedDocument) {
         var raw = note.raw
         raw["baseVersion"] = document.hash
+        // 创建时固定轮次身份(v2.3 第 6.1 条);本地独立文件没有
+        if let sync = document.sync, document.annotationAllowed {
+            raw["docId"] = sync.docId
+            raw["reviewId"] = sync.reviewId
+        }
         document.notes.insert(Note(raw: raw), at: 0)
         persistNotes(document)
     }
@@ -358,9 +375,13 @@ final class DocumentStore: ObservableObject {
     private func makeBatch(_ notes: [Note], id: String, completedAt: String, document: OpenedDocument) -> AnnotationBatch? {
         guard let data = try? JSONSerialization.data(withJSONObject: notes.map { $0.raw }),
               let json = String(data: data, encoding: .utf8) else { lastError = "打包批注失败。"; return nil }
-        return AnnotationBatch(batchId: id, documentName: document.name, baseVersion: document.hash,
+        // 外层身份取自批注自己创建时固定的身份(v2.3 第 6.2 条),不用当前会话身份覆盖;本地独立文件没有身份,批次是 version 1
+        let first = notes.first
+        let docId = document.sync == nil ? nil : (first?.docId ?? document.sync?.docId)
+        let reviewId = document.sync == nil ? nil : (first?.reviewId ?? document.contentReviewId)
+        return AnnotationBatch(batchId: id, documentName: document.name, baseVersion: first?.baseVersion ?? document.hash,
                                completedAt: completedAt, device: UIDevice.current.name, annotationsJSON: json,
-                               docId: document.sync?.docId, reviewId: document.sync?.reviewId)
+                               docId: docId, reviewId: reviewId)
     }
 
     // MARK: Mac 推来的文档(跨端规则第 12 节)
@@ -384,7 +405,9 @@ final class DocumentStore: ObservableObject {
             // 手头没有未提交的批注:新版直接换进来,不用退出再进;有未提交的批注(锚在旧正文上)才留给用户点「新版」
             if document.openNotes.isEmpty { loadLatestVersion(latest, into: document) } else { document.newerVersionAvailable = true }
         } else {
-            document.sync = latest // 状态变了(等待智能体 / 修改中 …)而正文没变:就地更新
+            // 状态变了而正文没变(或只推了状态、新正文不可用):就地更新元数据;正文身份 contentReviewId 不改挂,
+            // 指纹对不上时 annotationAllowed 自然为 false(v2.3 第 5 节)
+            document.sync = latest
         }
     }
 

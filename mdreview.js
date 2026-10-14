@@ -35,10 +35,13 @@ function usage() {
     '  mdreview unlock <绝对路径.md> --reason "<原因>"',
     '  mdreview versions <绝对路径.md> [--json]            # 这篇文档的轮次版本记录(每轮原稿 / 完成稿 / 处理结果是否留底)',
     '  mdreview archive-retry <绝对路径.md>               # 某一轮完成后发布失败时只重试发布',
+    '  mdreview restore-round <绝对路径.md> --to <轮次> --yes  # 恢复到第 N 轮改稿前(产生新的一轮;当前稿留在历史里)',
+    '  mdreview relink <旧绝对路径.md> <新绝对路径.md>      # 文件改名 / 移动后保留文档身份与历史(复制请不要用:副本是新身份)',
     '  mdreview snapshot [--reason "<原因>"]              # 整体备份审阅索引与全部批注文件(手动快照不自动清理)',
     '  mdreview snapshots [--json]                        # 列出快照',
     '  mdreview restore <快照id> [--dry-run] --yes         # 从快照恢复;恢复前自动再做一份 pre-restore 快照',
-    '  mdreview import-batch <批次文件.json> [--json]      # 导入手机导出的批注批次(按版本指纹匹配审阅中的会话)',
+    '  mdreview import-batch <批次文件.json> [--json] [--as-new-notes --document <绝对路径.md>]  # 导入手机批次;没有轮次身份的旧批次只能转为指定文档本轮的新批注',
+    '  mdreview import-resume                              # 收敛中途断掉的批次导入(通常不需要,服务启动会自动做)',
   ].join('\n');
 }
 
@@ -48,7 +51,7 @@ function fail(message, exitCode = 1) {
 }
 
 function parseArgs(argv) {
-  const result = { command: argv[0], file: null, json: false, noOpen: false, reason: null, summary: null, timeoutMinutes: null, yes: false, dryRun: false, agent: null };
+  const result = { command: argv[0], file: null, json: false, noOpen: false, reason: null, summary: null, timeoutMinutes: null, yes: false, dryRun: false, agent: null, asNewNotes: false, document: null };
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === '--json') result.json = true;
@@ -56,6 +59,9 @@ function parseArgs(argv) {
     else if (value === '--reason') result.reason = argv[++index];
     else if (value === '--summary') result.summary = argv[++index];
     else if (value === '--agent') result.agent = argv[++index];
+    else if (value === '--as-new-notes') result.asNewNotes = true;
+    else if (value === '--document') result.document = argv[++index];
+    else if (value === '--to') result.to = argv[++index];
     else if (value === '--yes') result.yes = true;
     else if (value === '--dry-run') result.dryRun = true;
     else if (value === '--timeout-minutes') {
@@ -65,6 +71,7 @@ function parseArgs(argv) {
     }
     else if (value.startsWith('--')) throw new ReviewStoreError('BAD_ARGUMENT', `未知参数: ${value}`, { httpStatus: 400 });
     else if (!result.file) result.file = value;
+    else if (!result.second) result.second = value;
     else throw new ReviewStoreError('BAD_ARGUMENT', `多余参数: ${value}`, { httpStatus: 400 });
   }
   return result;
@@ -501,8 +508,9 @@ async function main() {
     }
     if (args.command === 'import-batch') {
       if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
-      const { receipt, review } = await batches.importBatchFile(args.file);
+      const { receipt, review } = await batches.importBatchFile(args.file, { asNewNotes: args.asNewNotes, documentPath: args.document ? path.resolve(args.document) : null });
       if (args.json) { console.log(JSON.stringify({ receipt, review }, null, 2)); return; }
+      if (receipt.converted && receipt.accepted) { printReview(review); console.log(`已把 ${receipt.acceptedIds.length} 条转为本轮新批注(来源批次 ${receipt.batchId});用户在回稿里交出后再改。`); return; }
       if (!receipt.accepted) {
         fail(`批次被拒收(${receipt.reason}):${receipt.message}`);
         return;
@@ -511,6 +519,12 @@ async function main() {
       console.log(`${receipt.reused ? '(重复导入,沿用上次回执)' : ''}已接收 ${receipt.acceptedIds.length} 条批注${receipt.skippedIds.length ? `,跳过已存在 ${receipt.skippedIds.length} 条` : ''};回执 ${receipt.batchId}`);
       if (review) await notifyReviewChangedBestEffort(review, 'batch-imported');
       if (review && review.status === 'ready_to_apply') console.log(`→ Agent 下一步: 运行 mdreview begin-apply "${review.absPath}" 开始按批注改稿。`);
+      return;
+    }
+    if (args.command === 'import-resume') {
+      const results = await batches.resumePendingImports();
+      if (!results.length) { console.log('没有未收敛的批次导入。'); return; }
+      for (const item of results) console.log(item.error ? `${item.batchId}: 失败 ${item.error}` : `${item.receipt.batchId}: ${item.receipt.accepted ? '已收敛' : item.receipt.reason}`);
       return;
     }
     if (args.command === 'snapshot') {
@@ -545,6 +559,26 @@ async function main() {
       if (result.dryRun) { console.log('（仅预览,未改动任何文件;确认无误后加 --yes 执行）'); return; }
       console.log(`已恢复: 审阅索引 ${result.restored.reviewsJson ? '1' : '0'} 份,批注文件 ${result.restored.sidecars} 份,跳过 ${result.restored.skipped.length} 份`);
       console.log(`恢复前的状态已另存为快照 ${result.preSnapshot},如需反悔: mdreview restore ${result.preSnapshot} --yes`);
+      return;
+    }
+    if (args.command === 'relink') {
+      if (!args.file || !args.second) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
+      const result = await versionStore.relink(path.resolve(args.file), path.resolve(args.second));
+      console.log(`已重关联: ${result.from} → ${result.to}(身份 ${result.docId},${result.reviews} 条会话记录随之更新)`);
+      return;
+    }
+    if (args.command === 'restore-round') {
+      if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
+      const absPath = path.resolve(args.file);
+      const review = await getReviewByPath(absPath);
+      if (!review || !review.docId) throw new ReviewStoreError('NO_ACTIVE_REVIEW', `该文档没有带文档身份的会话: ${absPath}`, { httpStatus: 404 });
+      const list = versionStore.listVersions(review.docId);
+      const target = list.find((item) => String(item.round) === String(args.to) && item.files.original === 'archived');
+      if (!target) throw new ReviewStoreError('VERSION_UNAVAILABLE', `没有第 ${args.to} 轮的原稿留底。用 mdreview versions 看有哪些。`, { httpStatus: 404 });
+      if (!args.yes) { console.log(`将把正文换回第 ${target.round} 轮改稿前(${target.versionId});当前稿会留在历史里。确认无误后加 --yes 执行。`); return; }
+      const result = await versionStore.restoreTo({ docId: review.docId, toVersionId: target.versionId, clientRequestId: `cli_${Date.now()}_${process.pid}` });
+      console.log(`已恢复到第 ${target.round} 轮改稿前:新的第 ${result.round} 轮(会话 ${result.reviewId}),当前稿留在 ${result.versionId} 的 original.md`);
+      await notifyReviewChangedBestEffort({ id: result.reviewId }, 'review-restored');
       return;
     }
     if (args.command === 'versions' || args.command === 'archive-retry') {

@@ -508,6 +508,7 @@ kbd {
 .review-state[data-status="manual"],
 .review-state[data-status="applying"] { border-color: var(--amber-line-2); background: var(--amber-pale); color: var(--amber-text-2); }
 .review-state[data-status="complete"],
+.review-state[data-status="restored"],
 .review-state[data-status="approved"],
 .review-state[data-status="finalized"] { border-color: var(--green-line); background: var(--green-soft); color: var(--green-text); }
 .review-state[data-status="conflict"] { border-color: var(--red-line); background: var(--red-soft); color: var(--red-text); }

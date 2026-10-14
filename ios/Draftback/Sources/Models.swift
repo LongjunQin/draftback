@@ -21,8 +21,16 @@ struct Note: Identifiable, Equatable {
     var rejectedReason: String? { raw["rejectedReason"] as? String }
     var submittedBatchId: String? { raw["submittedBatchId"] as? String }
     var baseVersion: String? { raw["baseVersion"] as? String }
-    /// 批注是否写在这个版本上;没有版本指纹的旧数据按当前版本对待。
-    func belongs(toVersion hash: String) -> Bool { baseVersion == nil || baseVersion == hash }
+    /// 创建时固定的轮次身份(跨端规则 v2.3 第 6.1 条):打包按它走,不取当前会话身份覆盖
+    var docId: String? { raw["docId"] as? String }
+    var reviewId: String? { raw["reviewId"] as? String }
+    /// 批注是否属于这一轮:正文指纹对得上,且(Mac 推来的文档)轮次身份也对得上;没有轮次身份的旧批注不算当前轮
+    func belongs(toVersion hash: String, reviewId current: String? = nil) -> Bool {
+        guard let baseVersion else { return current == nil } // 没有指纹的旧数据:只在本地独立文件里按当前版本对待
+        guard baseVersion == hash else { return false }
+        guard let current else { return true }
+        return reviewId == current
+    }
     var isDocumentScope: Bool { (raw["scope"] as? String) == "document" }
     var headingPath: [String] { raw["headingPath"] as? [String] ?? [] }
 
@@ -74,7 +82,8 @@ protocol SyncTransport {
 }
 
 struct AnnotationBatch: Codable {
-    var version: Int = 1
+    /// 有轮次身份(Mac 推来的文档)就是 version 2(逐条带身份);手机独立文件导出仍是 1
+    var version: Int = 2
     var batchId: String
     var documentName: String
     var baseVersion: String   // 所依据的文档版本指纹(SHA-256)
@@ -86,7 +95,7 @@ struct AnnotationBatch: Codable {
 
     func asJSONData() throws -> Data {
         var object: [String: Any] = [
-            "version": version, "batchId": batchId, "documentName": documentName,
+            "version": (docId != nil && reviewId != nil) ? version : 1, "batchId": batchId, "documentName": documentName,
             "baseVersion": baseVersion, "completedAt": completedAt, "device": device,
         ]
         if let docId { object["docId"] = docId }

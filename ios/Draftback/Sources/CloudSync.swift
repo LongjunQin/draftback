@@ -30,6 +30,9 @@ struct SyncedDocument: Identifiable, Codable, Equatable {
     var pusher: String
     var contentAvailable: Bool
     var updatedAt: Date
+    /// 发布序号(跨端规则 v2.3 第 12 节):比本地记录小的发布一律忽略;旧缓存没有这个字段
+    var revision: Int? = nil
+    var outcome: String? = nil
 
     var id: String { docId }
 
@@ -40,13 +43,15 @@ struct SyncedDocument: Identifiable, Codable, Equatable {
         case "waiting-agent": return "等待智能体"
         case "applying": return "修改中"
         case "manual-editing": return "Mac 上正在手工修改"
-        case "completed": return "新版可复核"
+        case "completed": return "稿子回来了"
+        case "restored": return "已恢复到改稿前"
         case "finalized": return "已定稿"
         case "conflict": return "原文已变,等待 Mac 处理"
         case "cancelled": return "已取消"
         default: return status
         }
     }
+    /// 状态上允许批注;正文字节是否真的是这一轮的,由 OpenedDocument.annotationAllowed 再核一次
     var canAnnotate: Bool { phoneState == "reviewing" }
 }
 
@@ -60,6 +65,10 @@ struct SyncReceipt: Codable, Equatable {
     var message: String
     var acceptedIds: [String]
     var receivedAt: Date?
+    /// 批次原身份与指纹(v2.3 第 6.6 条):把拒收原因挂到正确的批注上
+    var batchReviewId: String? = nil
+    var baseVersion: String? = nil
+    var latestRound: Int? = nil
 }
 
 /// 与 iCloud 打交道的全部逻辑:拉取文档与回执、提交批次(失败进待上传队列,联网后重试)、订阅静默推送。
@@ -205,14 +214,26 @@ final class CloudSyncEngine: ObservableObject {
         let dir = directory(for: docId)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         let contentHash = record["contentHash"] as? String ?? ""
-        let available = (record["contentAvailable"] as? Int64 ?? 0) == 1
+        let revision = (record["revision"] as? Int64).map(Int.init)
+        // 发布先后:比本地已有记录旧的发布一律忽略(迟到的旧发布不能覆盖新状态)
+        if let revision, let prior = documents.first(where: { $0.docId == docId }), let priorRevision = prior.revision, revision < priorRevision {
+            return false
+        }
+        var available = (record["contentAvailable"] as? Int64 ?? 0) == 1
+        let target = contentURL(for: docId)
         if available, let asset = record["content"] as? CKAsset, let source = asset.fileURL {
-            let target = contentURL(for: docId)
             let existing = (try? Data(contentsOf: target)).map { Hashing.sha256($0) }
             if existing != contentHash {
                 try? fileManager.removeItem(at: target)
                 try? fileManager.copyItem(at: source, to: target)
             }
+            // 复制后校验字节:对不上就当正文不可用(旧缓存照旧按旧身份只读显示)
+            let copied = (try? Data(contentsOf: target)).map { Hashing.sha256($0) }
+            if copied != contentHash { available = false }
+        } else {
+            // 只推状态(作废 / 非 UTF-8 / 发布失败):本地旧正文仍在,但它不是这一轮的;只有指纹相同才算可用
+            let existing = (try? Data(contentsOf: target)).map { Hashing.sha256($0) }
+            available = existing == contentHash
         }
         let item = SyncedDocument(
             docId: docId,
@@ -227,8 +248,10 @@ final class CloudSyncEngine: ObservableObject {
             openCount: Int(record["openCount"] as? Int64 ?? 0),
             pushedAt: record["pushedAt"] as? Date,
             pusher: record["pusher"] as? String ?? "Mac",
-            contentAvailable: available || fileManager.fileExists(atPath: contentURL(for: docId).path),
-            updatedAt: Date()
+            contentAvailable: available,
+            updatedAt: Date(),
+            revision: revision,
+            outcome: record["outcome"] as? String
         )
         documents.removeAll { $0.docId == docId }
         documents.insert(item, at: 0)
@@ -257,7 +280,9 @@ final class CloudSyncEngine: ObservableObject {
            let list = try? JSONSerialization.jsonObject(with: data) as? [String] { ids = list }
         let receipt = SyncReceipt(batchId: batchId, docId: record["docId"] as? String ?? "", reviewId: record["reviewId"] as? String ?? "",
                                   accepted: (record["accepted"] as? Int64 ?? 0) == 1, reason: record["reason"] as? String ?? "",
-                                  message: record["message"] as? String ?? "", acceptedIds: ids, receivedAt: record["receivedAt"] as? Date)
+                                  message: record["message"] as? String ?? "", acceptedIds: ids, receivedAt: record["receivedAt"] as? Date,
+                                  batchReviewId: record["batchReviewId"] as? String, baseVersion: record["baseVersion"] as? String,
+                                  latestRound: (record["latestRound"] as? Int64).map(Int.init))
         if let data = try? JSONEncoder().encode(receipt) {
             try? data.write(to: stateDir.appendingPathComponent("receipts/\(batchId).json"), options: .atomic)
         }
@@ -305,6 +330,7 @@ final class CloudSyncEngine: ObservableObject {
         guard let object = try? JSONSerialization.jsonObject(with: batchData) as? [String: Any],
               let batchId = object["batchId"] as? String else { return false }
         let record = CKRecord(recordType: CloudSchema.annotationBatch, recordID: CKRecord.ID(recordName: batchId, zoneID: zoneID))
+        record["version"] = Int64((object["version"] as? Int) ?? 1) // 真实写出协议版本,Mac 桥层原样传递
         record["batchId"] = batchId
         record["docId"] = object["docId"] as? String ?? ""
         record["reviewId"] = object["reviewId"] as? String ?? ""

@@ -1135,11 +1135,16 @@
     try { batch = JSON.parse(await file.text()); }
     catch (_) { toast(`《${file.name}》不是有效的批注批次文件。`, 'error'); return; }
     try {
+      const active = activeTab();
       const result = await requestJson('/api/app/batch/import', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batch }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch, documentPath: active ? active.review.sourceFile : null }),
       });
       const receipt = result.receipt || {};
-      if (receipt.accepted) {
+      if (receipt.accepted && receipt.converted) {
+        toast(`这份批次没有轮次身份,已把 ${receipt.acceptedIds.length} 条转为本轮新批注(保留来源)。`);
+        if (result.review && result.review.id) void queueRemoteReviewChange(result.review.id, { reason: 'batch-imported' });
+      } else if (receipt.accepted) {
         toast(`已接收手机批注 ${receipt.acceptedIds.length} 条${receipt.skippedIds && receipt.skippedIds.length ? `,跳过重复 ${receipt.skippedIds.length} 条` : ''}。`);
         if (result.review && result.review.id) void queueRemoteReviewChange(result.review.id, { reason: 'batch-imported' });
       } else {

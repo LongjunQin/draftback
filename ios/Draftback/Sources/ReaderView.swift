@@ -53,7 +53,7 @@ struct ReaderView: View {
                     Button { exportPDF() } label: { Label("导出 PDF", systemImage: "doc.richtext") }
                     if let sync = document.sync {
                         Button { store.submitBatch(for: document) } label: { Label("完成本轮:把批注交给 Mac", systemImage: "paperplane") }
-                            .disabled(document.openNotes.isEmpty || !sync.canAnnotate)
+                            .disabled(document.openNotes.isEmpty || !document.annotationAllowed)
                         if !document.submittedNotes.isEmpty {
                             Button { store.resubmitBatch(for: document) } label: { Label("重新发送已提交的批次", systemImage: "arrow.clockwise") }
                         }
@@ -174,8 +174,8 @@ struct ReaderView: View {
     @ViewBuilder private var finishButton: some View {
         let open = document.openNotes.count
         let synced = document.sync != nil
-        let canFinish = open > 0 && (document.sync?.canAnnotate ?? true)
-        if open == 0 && document.submittedNotes.isEmpty && (document.sync?.canAnnotate ?? true) {
+        let canFinish = open > 0 && document.annotationAllowed
+        if open == 0 && document.submittedNotes.isEmpty && document.annotationAllowed {
             Text("选中文字 → 菜单「批注」").foregroundStyle(.secondary)
         } else {
             Button { store.submitBatch(for: document) } label: {
@@ -203,6 +203,7 @@ struct ReaderView: View {
             }
             if received > 0 && open == 0 { return "Mac 已接收 \(received) 条 · \(sync.stateLabel)" }
             if rejected > 0 && open == 0 { return "\(rejected) 条未被采用 · \(sync.stateLabel)" }
+            if sync.canAnnotate && !document.annotationAllowed { return "正文还不是这一轮的,等同步完成后再批注" }
             return sync.canAnnotate ? "\(sync.stateLabel) · 本地已保存 \(open) 条" : sync.stateLabel
         }
         if sent > 0 && open == 0 { return "已导出 \(sent) 条 · 等待 Mac 接收" }

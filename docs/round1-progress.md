@@ -30,6 +30,19 @@
 | 会话完成 / 作废后文件再改,推送一直报「内容不一致」(409) | 已修:只有批注中 / 等待改稿的会话才要求正文指纹一致,其余按实际正文推(test/sync.test.js) |
 | 《跨端规则》v2.2、《三端 UI 方案》 | 已重新开审阅并推到手机,等用户批注 |
 
+## 〇·6、规则⑤第二段:恢复、收批次逐条身份、重关联、云端 revision、手机协议小改(2026-10-15 凌晨,1.0.0-beta.5)
+
+| 项 | 做了什么 | 怎么验证的 |
+|---|---|---|
+| 收批次(lib/batches.js 重写) | version 2 + 逐条身份;接收顺序:已有回执 → 缺身份 → 按 docId 定位(禁止跨文档回退)→ 最新轮次 round-advanced(正文相同也拒)→ 状态 → 实际文件指纹;同一事务写旁注、固定成员、交出(submitReviewLocked)、定稿回执;导入记录 imports/ 与崩溃重放(含空批次、全部去重);未收敛时不得改稿、不得开新轮;没身份的旧批次只能 `--as-new-notes` 转为本轮新批注(拖进窗口自动走这条) | test/batches.test.js 5 条重写;sync.test.js 改 version 2;阅读器冒烟改预期 |
+| 恢复(version-store.restoreTo) | 单一 restored 事件(original = 恢复前当前稿,final = 恢复后稿);前提在文档锁内核查(无活动会话、无编辑登记、无未收敛导入、expectedCurrentHash / expectedLatestReviewId、目标留底完整);两阶段提交 restores/ 日志;启动时按正文指纹补齐 / 撤销 / 报冲突;幂等凭据 restores/done/;新会话 complete/restored;状态区专用文案;`mdreview restore-round`;`POST /api/app/document/restore` | test/restore.test.js 4 条(三轮 + 恢复、旧批次 round-advanced、反悔、前提、三阶段中断) |
+| 编辑登记进文档锁 | documents.setEditing 在 withReviewTransaction 里登记,恢复持锁期间登记会等待 | restore.test.js |
+| 重关联(version-store.relink) | 改名 / 移动后更新索引 currentPath、会话 absPath、搬旁注;目标属于别的文档或旧文件内容不同(复制)时拒绝;`mdreview relink` | restore.test.js |
+| 云端 revision | 每次新发布分配跨轮单调 revision(sync.revision,重试沿用);Mac 辅助程序初读与冲突重读都先比 revision(云端新 → 作废并抬高水位;相同 → 只确认;本地新 → `ifServerRecordUnchanged` 条件写入);批次 version 原样传递;载荷不完整写 invalid-batch 回执不反复重试;回执带批次原身份 | 辅助程序编译通过;真机联调待手机连上 |
+| 手机协议小改(合同层例外) | 批注创建时固定 { docId, reviewId, baseVersion };打包按批注自身身份,version 2 真实写出;正文缓存绑定自己的身份(contentReviewId),只推状态不改挂,字节通过本轮指纹才允许批注;拒绝更小的 revision;复制后校验附件 / 正文字节;回执带原身份;状态文案加「稿子回来了 / 已恢复到改稿前」 | 通用目标编译;装机待手机连上 |
+
+没做(第三段):对比视图、回稿卡、历史按轮折叠;手机界面(复制到本轮、回稿卡)留手机阶段;账号切换队列隔离、云端 30 天清理仍待做。
+
 ## 〇·5、两份文档按已拍板方案对齐(2026-10-14 深夜,Codex 只读审查后由智能体修订,无需用户拍板)
 
 | 文档 | 改了什么 | Codex 结论 |
