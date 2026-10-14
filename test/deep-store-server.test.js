@@ -393,6 +393,16 @@ test('静态资源路由不得通过 symlink 越出 static 目录', async (t) =>
   assert.equal((await rawRequest(port, '/static/../server.js')).status, 404);
 });
 
+test('Host 头不是本机(DNS 重绑定)一律 404;本机的 localhost / 127.0.0.1 都放行', async (t) => {
+  const f = fixture(t);
+  writeMd(f.docRoot, '主机.md');
+  const { port } = await startServer(t, f);
+  assert.equal((await rawRequest(port, '/api/health', { headers: { Host: 'evil.example.com' } })).status, 404);
+  assert.equal((await rawRequest(port, '/api/health', { headers: { Host: `evil.example.com:${port}` } })).status, 404);
+  assert.equal((await rawRequest(port, '/api/health', { headers: { Host: `localhost:${port}` } })).status, 200);
+  assert.equal((await rawRequest(port, '/api/health', { headers: { Host: `127.0.0.1:${port}` } })).status, 200);
+});
+
 test('GET 接口拒绝写方法，空 PATCH body 返回 400 而非 500', async (t) => {
   const f = fixture(t);
   const file = writeMd(f.docRoot, '方法.md');

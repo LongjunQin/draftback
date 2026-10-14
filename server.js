@@ -151,8 +151,19 @@ function isLoopback(req) {
   const address = req.socket && req.socket.remoteAddress;
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
+// Host 头也要是本机:防 DNS 重绑定(恶意域名解析到 127.0.0.1 后,浏览器带着该域名的 Host 访问本地服务)
+function isLocalHostHeader(req) {
+  const host = req.headers.host;
+  if (!host) return true; // 极少数不带 Host 的本机命令行客户端
+  try {
+    const hostname = new URL(`http://${host}`).hostname;
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
 function localOnly(req, res) {
-  if (isLoopback(req)) return true;
+  if (isLoopback(req) && isLocalHostHeader(req)) return true;
   sendJson(res, 404, { error: 'not_found', message: 'Not found' });
   return false;
 }
