@@ -394,10 +394,10 @@ async function main() {
       const reviews = await sync.listSyncStatus();
       if (args.json) { console.log(JSON.stringify({ helper, reviews }, null, 2)); return; }
       if (!helper) console.log('同步辅助程序: 从未运行(MDTurn 0.7 起随 App 启动)。');
-      else console.log(`同步辅助程序: ${helper.error ? `异常(${helper.error})` : '正常'};上次轮询 ${helper.lastPollAt};账号 ${helper.account || '未知'}(${helper.accountStatus || '?'});环境 ${helper.environment || '?'}`);
+      else console.log(`同步辅助程序: ${helper.error ? `异常(${helper.error})` : '正常'};上次轮询 ${helper.lastPollAt};iCloud 账号 ${helper.account || (helper.accountStatus === 'available' ? '已登录' : '未知')}(${helper.accountStatus || '?'});环境 ${helper.environment || '?'}`);
       if (!reviews.length) console.log('没有参与同步的文档。');
       for (const item of reviews) {
-        console.log(`- ${item.title}(第 ${item.round} 轮,${item.status}${item.applyMode ? '/' + item.applyMode : ''}):${sync.describeSync({ ...item, docId: item.docId, sync: item.sync })}`);
+        console.log(`- ${item.title}(第 ${item.round} 轮,${item.status}${item.applyMode ? '/' + item.applyMode : ''}):${sync.describeSync(item, item.needsPush)}`);
       }
       return;
     }
