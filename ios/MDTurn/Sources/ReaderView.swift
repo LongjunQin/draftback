@@ -26,9 +26,14 @@ struct ReaderView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ReaderWebView(document: document, reloadToken: $reloadToken, onEvent: handle, onReady: { bridge = $0 })
+            progressBanner
+            ReaderWebView(document: document, reloadToken: $reloadToken, contentVersion: document.contentVersion, onEvent: handle, onReady: { bridge = $0 })
                 .ignoresSafeArea(edges: .bottom)
             statusBar
+        }
+        .onChange(of: document.notice) { _, notice in
+            guard notice != nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { if document.notice == notice { document.notice = nil } }
         }
         .navigationTitle(document.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -67,7 +72,7 @@ struct ReaderView: View {
             if document.newerVersionAvailable, let sync = document.sync {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        if let latest = store.synced.first(where: { $0.docId == sync.docId }) { store.openSynced(latest) }
+                        if let latest = store.synced.first(where: { $0.docId == sync.docId }) { store.loadLatestVersion(latest, into: document) }
                     } label: { Label("新版", systemImage: "arrow.down.doc") }
                     .tint(.orange)
                 }
@@ -107,6 +112,38 @@ struct ReaderView: View {
             if args.contains("--show-notes") { showNotes = true }
         }
         #endif
+    }
+
+    /// 顶部横幅:Mac 那头正在干什么(等待智能体 / 修改中),以及新版刚换进来的一次性提示
+    @ViewBuilder private var progressBanner: some View {
+        if let notice = document.notice {
+            Button {
+                if let summary = document.sync?.summary, !summary.isEmpty { message = summary }
+                document.notice = nil
+            } label: {
+                HStack(spacing: 8) { Image(systemName: "checkmark.circle.fill"); Text(notice); Spacer() }
+                    .font(.footnote).padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color.green.opacity(0.15))
+            }
+            .buttonStyle(.plain)
+        } else if let sync = document.sync, let text = progressText(sync) {
+            HStack(spacing: 8) {
+                if sync.phoneState == "applying" || sync.phoneState == "manual-editing" { ProgressView().controlSize(.small) } else { Image(systemName: "clock") }
+                Text(text); Spacer()
+            }
+            .font(.footnote).padding(.horizontal, 14).padding(.vertical, 8)
+            .background(Color.orange.opacity(0.15))
+        }
+    }
+
+    private func progressText(_ sync: SyncedDocument) -> String? {
+        switch sync.phoneState {
+        case "waiting-agent": return "批注已交给 Mac,等待智能体开始改稿"
+        case "applying": return "Mac 正在修改,改完会自动换成新版"
+        case "manual-editing": return "Mac 上正在手工修改,改完会自动换成新版"
+        case "conflict": return "Mac 上原文被改过,等待 Mac 处理"
+        default: return nil
+        }
     }
 
     private var badge: some View {

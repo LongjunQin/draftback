@@ -25,6 +25,8 @@ struct MDTurnApp: App {
                     store.refreshSync()
                 }
                 .onChange(of: scenePhase) { _, phase in if phase == .active { store.refreshSync() } }
+                // 静默推送不保证到达:前台时每 20 秒自己拉一次(没变化时只是一次极小的增量查询)
+                .onReceive(Timer.publish(every: 20, on: .main, in: .common).autoconnect()) { _ in if scenePhase == .active { store.refreshSync() } }
                 .onReceive(NotificationCenter.default.publisher(for: AppDelegate.cloudPushNotification)) { _ in store.refreshSync() }
         }
     }

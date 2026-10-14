@@ -8,10 +8,14 @@ import UniformTypeIdentifiers
 final class OpenedDocument: ObservableObject, Identifiable {
     let id = UUID()
     let url: URL
-    let name: String
-    let markdown: String
-    let hash: String
-    let assets: [String: String]      // 相对路径 → data: URL(能读到的同目录图片)
+    @Published private(set) var name: String
+    @Published private(set) var markdown: String
+    @Published private(set) var hash: String
+    @Published private(set) var assets: [String: String]      // 相对路径 → data: URL(能读到的同目录图片)
+    /// 正文被整体替换(Mac 推来新版)的次数:页面据此重新加载正文
+    @Published private(set) var contentVersion = 0
+    /// 顶部一次性提示(如"已更新到第 2 轮新版"),几秒后自动消失
+    @Published var notice: String?
     let securityScoped: Bool
     /// 批注文件的稳定键(本地文件按路径;Mac 推来的文档按文档标识)
     let storageKey: String
@@ -36,6 +40,17 @@ final class OpenedDocument: ObservableObject, Identifiable {
     }
 
     deinit { if securityScoped { url.stopAccessingSecurityScopedResource() } }
+
+    /// Mac 推来新版:就地换正文与附件,页面重载;旧版本上的批注按 6.6/6.7 只读保留(不高亮)
+    func replaceContent(markdown: String, assets: [String: String], sync: SyncedDocument) {
+        self.markdown = markdown
+        self.assets = assets
+        self.hash = sync.contentHash.isEmpty ? Hashing.sha256(markdown) : sync.contentHash
+        self.name = sync.title
+        self.sync = sync
+        self.newerVersionAvailable = false
+        self.contentVersion += 1
+    }
 
     /// 当前版本上还没导出的批注:可改可删,"完成本轮"时打包。
     var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash) } }
@@ -361,10 +376,22 @@ final class DocumentStore: ObservableObject {
         synced = docs
         guard let document = current, let sync = document.sync, let latest = docs.first(where: { $0.docId == sync.docId }) else { return }
         if latest.contentHash != sync.contentHash && latest.contentAvailable {
-            document.newerVersionAvailable = true
+            // 手头没有未提交的批注:新版直接换进来,不用退出再进;有未提交的批注(锚在旧正文上)才留给用户点「新版」
+            if document.openNotes.isEmpty { loadLatestVersion(latest, into: document) } else { document.newerVersionAvailable = true }
         } else {
             document.sync = latest // 状态变了(等待智能体 / 修改中 …)而正文没变:就地更新
         }
+    }
+
+    /// 把 Mac 推来的最新正文换进当前打开的文档(供自动更新与「新版」按钮共用)
+    func loadLatestVersion(_ latest: SyncedDocument, into document: OpenedDocument) {
+        let url = cloud.contentURL(for: latest.docId)
+        guard let data = try? Data(contentsOf: url), let markdown = String(data: data, encoding: .utf8) else {
+            document.newerVersionAvailable = true
+            return
+        }
+        document.replaceContent(markdown: markdown, assets: Self.collectAssets(markdown: markdown, around: url), sync: latest)
+        document.notice = latest.summary.isEmpty ? "已更新到第 \(latest.round) 轮新版" : "已更新到第 \(latest.round) 轮新版 · 点此看改稿摘要"
     }
 
     /// Mac 的回执到了:对应批次的批注标为"Mac 已接收"或"未被采用(原因)"(跨端规则 6.5、6.6)

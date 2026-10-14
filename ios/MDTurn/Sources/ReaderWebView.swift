@@ -27,6 +27,8 @@ enum ReaderEvent {
 struct ReaderWebView: UIViewRepresentable {
     let document: OpenedDocument
     @Binding var reloadToken: Int
+    /// 正文整体替换的次数(Mac 推来新版):变了就重载整页正文
+    let contentVersion: Int
     let onEvent: (ReaderEvent) -> Void
     let onReady: (ReaderBridge) -> Void
 
@@ -56,6 +58,12 @@ struct ReaderWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: AnnotatingWebView, context: Context) {
+        if context.coordinator.lastContentVersion != contentVersion {
+            context.coordinator.lastContentVersion = contentVersion
+            context.coordinator.lastReloadToken = reloadToken
+            if context.coordinator.pendingLoad == nil { context.coordinator.bridge?.load(document) } else { context.coordinator.pendingLoad = document }
+            return
+        }
         if context.coordinator.lastReloadToken != reloadToken {
             context.coordinator.lastReloadToken = reloadToken
             context.coordinator.bridge?.setAnnotations(document.highlightPayload)
@@ -71,6 +79,7 @@ struct ReaderWebView: UIViewRepresentable {
         var bridge: ReaderBridge?
         var pendingLoad: OpenedDocument?
         var lastReloadToken = 0
+        var lastContentVersion = 0
 
         init(onEvent: @escaping (ReaderEvent) -> Void) { self.onEvent = onEvent }
 
