@@ -68,8 +68,8 @@ test('本地审阅:幂等保存、状态冻结、冲突停写与公网路由关�
   // 分段计时:CI 上此测试若超时,stderr 里的检查点能定位卡在哪一步
   const startedAt = Date.now();
   const mark = (label) => console.error(`[server-test +${Date.now() - startedAt}ms] ${label}`);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdread-server-'));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-server-'));
+  const dataDir = path.join(root, '.draftback');
   const docRoot = path.join(root, 'docs');
   fs.mkdirSync(docRoot, { recursive: true });
   const localDoc = path.join(docRoot, '本地方案.md');
@@ -82,7 +82,7 @@ test('本地审阅:幂等保存、状态冻结、冲突停写与公网路由关�
 
   const child = spawn(process.execPath, ['server.js'], {
     cwd: PROJECT,
-    env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' },
+    env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir, DRAFTBACK_PORT: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';

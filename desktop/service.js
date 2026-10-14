@@ -13,14 +13,30 @@ const READY_TIMEOUT_MS = 12_000;
 
 function serverDirectory(options = {}) {
   if (options.serverDir) return path.resolve(options.serverDir);
-  if (options.isPackaged) return path.join(options.resourcesPath, 'mdturn-server');
+  if (options.isPackaged) return path.join(options.resourcesPath, 'draftback-server');
   return path.resolve(__dirname, '..');
 }
 
 // 必须与 lib/review-store.js 的默认数据目录一致,CLI 与 App 才能共享会话。
+function defaultDataDirectory(options = {}) { return path.join(options.homeDir || os.homedir(), '.draftback'); }
 function ownedDataDirectory(options = {}) {
-  const override = options.dataDir || process.env.MDREAD_DATA_DIR;
-  return path.resolve(override || path.join(os.homedir(), '.mdread'));
+  const override = options.dataDir || process.env.DRAFTBACK_DATA_DIR;
+  return path.resolve(override || defaultDataDirectory(options));
+}
+
+// 改名前的 ~/.mdread 整个搬到 ~/.draftback(与 lib/review-store.js 的做法一致;命名沿革见 docs/naming-history.md)。
+// 只由主进程在启动内置服务之前显式调用一次——不放进 ownedDataDirectory,免得单元测试一碰就把真实数据目录搬了家。
+const LEGACY_DATA_DIR_NAMES = ['.mdread'];
+function migrateLegacyDataDir(options = {}) {
+  const target = ownedDataDirectory(options);
+  if (path.resolve(target) !== path.resolve(defaultDataDirectory(options)) || fs.existsSync(target)) return { migrated: false };
+  for (const legacy of LEGACY_DATA_DIR_NAMES.map((name) => path.join(options.homeDir || os.homedir(), name))) {
+    let stat;
+    try { stat = fs.lstatSync(legacy); } catch { continue; }
+    if (!stat.isDirectory()) continue;
+    try { fs.renameSync(legacy, target); return { migrated: true, from: legacy }; } catch { return { migrated: false }; }
+  }
+  return { migrated: false };
 }
 
 function parsePort(value) {
@@ -55,7 +71,7 @@ function candidatePorts(options = {}) {
     .filter(Boolean);
   const ports = [...recorded];
   if (options.scanDefault !== false) {
-    const base = parsePort(process.env.MDREAD_PORT) || DEFAULT_PORT;
+    const base = parsePort(process.env.DRAFTBACK_PORT) || DEFAULT_PORT;
     const maximum = Math.min(base + PORT_SCAN_COUNT - 1, 65_535);
     for (let port = base; port <= maximum; port += 1) ports.push(port);
   }
@@ -78,7 +94,7 @@ function requestHealth(port, timeoutMs = HEALTH_TIMEOUT_MS) {
         try {
           const payload = JSON.parse(body);
           const valid = response.statusCode === 200 && payload && payload.ok === true &&
-            payload.service === 'md-read' && payload.port === port;
+            payload.service === 'draftback-service' && payload.port === port;
           resolve(valid ? { port, payload } : null);
         } catch {
           resolve(null);
@@ -112,13 +128,13 @@ function startOwnedService(options = {}) {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      MDREAD_DATA_DIR: dataDir,
-      MDREAD_HOST: '127.0.0.1',
+      DRAFTBACK_DATA_DIR: dataDir,
+      DRAFTBACK_HOST: '127.0.0.1',
       // 优先用上次的端口:页面的本地存储(打开的标签、未保存草稿、阅读偏好)按"地址+端口"隔离,
       // 端口每次随机就等于每次清空;占用时服务自己往后找 10 个,都不行再退回随机端口(见 ensureService)
-      MDREAD_PORT: preferredPortValue(options.preferredPort),
+      DRAFTBACK_PORT: preferredPortValue(options.preferredPort),
       // 服务自己盯着主进程:主进程崩溃/被强退时服务随之退出,不留孤儿
-      MDTURN_PARENT_PID: String(process.pid),
+      DRAFTBACK_PARENT_PID: String(process.pid),
     },
     detached: false,
     // 服务的输出写到数据目录 service.log:服务悄悄退出时这是唯一的线索
@@ -126,8 +142,8 @@ function startOwnedService(options = {}) {
     windowsHide: true,
   });
   if (logFd !== null) child.once('spawn', () => { try { fs.closeSync(logFd); } catch {} });
-  child.mdturnSpawnError = null;
-  child.once('error', (error) => { child.mdturnSpawnError = error; });
+  child.draftbackSpawnError = null;
+  child.once('error', (error) => { child.draftbackSpawnError = error; });
   return { child, dataDir, portFile: path.join(dataDir, 'port') };
 }
 
@@ -176,8 +192,8 @@ async function startAndAwaitService(options) {
   const deadline = Date.now() + readyTimeoutMs;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, options.pollIntervalMs || 250));
-    if (ownedProcess && ownedProcess.mdturnSpawnError) {
-      throw new Error(`无法启动回稿内置服务: ${ownedProcess.mdturnSpawnError.message}`);
+    if (ownedProcess && ownedProcess.draftbackSpawnError) {
+      throw new Error(`无法启动回稿内置服务: ${ownedProcess.draftbackSpawnError.message}`);
     }
     if (ownedProcess && ownedProcess.exitCode !== null) {
       const error = new Error(`回稿内置服务提前退出（代码 ${ownedProcess.exitCode}）。`);
@@ -209,6 +225,7 @@ module.exports = {
   candidatePorts,
   ensureService,
   findHealthyService,
+  migrateLegacyDataDir,
   ownedDataDirectory,
   parsePort,
   portFiles,

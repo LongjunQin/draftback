@@ -8,8 +8,8 @@ Windows 支持是平台适配，不是独立 fork 或业务重写。
 - Electron 主进程在 Windows 上使用原生标题栏、平台菜单和 AppUserModelId 通知身份。
 - 首次打开文件读取 `process.argv`，应用运行期间通过 `second-instance` 接收新的 `.md` 文件。
 - 如果没有可复用的健康服务，Electron 使用自身可执行文件和 `ELECTRON_RUN_AS_NODE=1` 启动
-  安装包内的 `resources/mdturn-server/server.js`，用户无需安装 Node.js。
-- 内置服务只监听 `127.0.0.1`，使用动态端口，数据位于 Electron `userData/mdread`；应用退出时
+  安装包内的 `resources/draftback-server/server.js`，用户无需安装 Node.js。
+- 内置服务只监听 `127.0.0.1`，使用动态端口，数据位于用户主目录下的 `.draftback`(与 macOS 相同)；应用退出时
   只终止本实例创建的服务。
 - `server.js`、`lib/`、`static/` 由 electron-builder `extraResources` 放入安装包，桌面主进程和
   preload 仍封装在 ASAR 中。

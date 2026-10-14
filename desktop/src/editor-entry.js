@@ -30,14 +30,14 @@ import '@milkdown/crepe/theme/frame.css';
 // 保存时由编辑器把排版反推回 Markdown。对外接口与旧版 CodeMirror 入口一致,
 // 但 create 返回的是句柄对象而非视图:Crepe 初始化是异步的,句柄先行占位。
 function assertHandle(handle) {
-  if (!handle || handle.__mdturnCrepe !== true) throw new TypeError('需要有效的 MDTurn 编辑器句柄。');
+  if (!handle || handle.__draftbackCrepe !== true) throw new TypeError('需要有效的 MDTurn 编辑器句柄。');
 }
 
 function create(container, options = {}) {
   if (!(container instanceof Element)) throw new TypeError('create 需要一个 DOM Element 容器。');
   const onChange = typeof options.onChange === 'function' ? options.onChange : null;
   const handle = {
-    __mdturnCrepe: true,
+    __draftbackCrepe: true,
     crepe: null,
     doc: String(options.doc ?? ''),
     pendingDoc: null,
@@ -171,7 +171,7 @@ function revealLine(handle, lineNumber) {
   });
 }
 
-Object.defineProperty(window, 'MDTurnEditor', {
+Object.defineProperty(window, 'DraftbackEditor', {
   value: Object.freeze({ create, setValue, getValue, destroy, focus, revealLine, normalize }),
   configurable: false,
   enumerable: true,

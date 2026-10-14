@@ -3,7 +3,7 @@ desktop/dist/
 desktop/.cache/
 desktop/.npm-cache/
 desktop/*.log
-.mdread/
+.draftback/
 .DS_Store
 
 # 内部 QA 记录与截图,不进开源仓库

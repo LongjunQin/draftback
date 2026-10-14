@@ -12,8 +12,8 @@
 | 测试 | 桌面 18 项、4 个浏览器冒烟通过;服务端测试收尾顺序修复后重跑 |
 | 新 App 第一次真实交回批注 | 等用户下次批注时自然验证 |
 | 旧 App ID(org.mdturn.desktop.sync、org.mdturn.ios.dev)与手机上的「MDTurn 测试」 | 新版跑通一轮交回后删除 |
-| 第二阶段:内部旧名(容器、~/.mdread、代码全局名、环境变量、md-read 服务名)清理与命名沿革文档 | 方案已提给用户,等拍板 |
-| GitHub 仓库改名 mdturn → draftback | 等用户点头(对外可见) |
+| 第二阶段:内部旧名(容器 → `iCloud.app.draftback`、`~/.mdread` → `~/.draftback`、代码全局名、环境变量 `DRAFTBACK_*`、服务名 `draftback-service`)全部换新,命名沿革文档 [naming-history.md](naming-history.md) | 用户 2026-10-14 下午拍板「做干净」,已做 |
+| GitHub 仓库改名 mdturn → draftback | 用户点头,已做 |
 
 ## 〇、2026-10-13 缺陷审计与 0.6.4 修复
 

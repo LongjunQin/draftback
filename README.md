@@ -16,7 +16,7 @@ Your agent hands you finished work all day long — project proposals, execution
 
 **macOS (Apple Silicon)** — click to download, that's it · 点击即可下载:
 
-### [⬇️ Download Draftback for macOS (.dmg)](https://github.com/LongjunQin/mdturn/releases/download/v0.4.1/MDTurn-0.4.1-arm64.dmg)
+### [⬇️ Download Draftback for macOS (.dmg)](https://github.com/LongjunQin/draftback/releases/download/v0.4.1/MDTurn-0.4.1-arm64.dmg)
 
 The latest published beta (v0.4.1) still carries the old name MDTurn; the first Draftback release will replace it. · 已发布的最新 Beta(v0.4.1)还叫 MDTurn,首个改名后的版本发布时替换。
 
@@ -24,9 +24,9 @@ Open the downloaded `.dmg`, drag **Draftback** into **Applications**. First laun
 
 下载后打开 `.dmg`,把 **回稿** 拖进**应用程序**。首次启动请**右键 → 打开**(Beta 版尚未做 Apple 公证,提示"未验证开发者"属正常现象)。
 
-**Windows 11 x64 (Beta)** — [⬇️ Download the installer (.exe)](https://github.com/LongjunQin/mdturn/releases/download/v0.4.1/MDTurn-0.4.1-x64.exe). Unsigned beta: SmartScreen will warn about an unknown publisher — click "More info → Run anyway". Windows support was contributed by [@ArnaudJiang](https://github.com/ArnaudJiang).
+**Windows 11 x64 (Beta)** — [⬇️ Download the installer (.exe)](https://github.com/LongjunQin/draftback/releases/download/v0.4.1/MDTurn-0.4.1-x64.exe). Unsigned beta: SmartScreen will warn about an unknown publisher — click "More info → Run anyway". Windows support was contributed by [@ArnaudJiang](https://github.com/ArnaudJiang).
 
-**Windows 11 x64(Beta)**——[⬇️ 下载安装包 (.exe)](https://github.com/LongjunQin/mdturn/releases/download/v0.4.1/MDTurn-0.4.1-x64.exe)。Beta 未做代码签名,SmartScreen 提示"未知发布者"属正常,点"仍要运行"即可。Windows 支持由 [@ArnaudJiang](https://github.com/ArnaudJiang) 贡献。
+**Windows 11 x64(Beta)**——[⬇️ 下载安装包 (.exe)](https://github.com/LongjunQin/draftback/releases/download/v0.4.1/MDTurn-0.4.1-x64.exe)。Beta 未做代码签名,SmartScreen 提示"未知发布者"属正常,点"仍要运行"即可。Windows 支持由 [@ArnaudJiang](https://github.com/ArnaudJiang) 贡献。
 
 ## What is Draftback · 回稿是什么
 
@@ -86,9 +86,9 @@ Draftback is built for the "human annotates, AI applies" loop: the agent drives 
 
 ## Contributing · 参与贡献
 
-Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Windows 11 x64 support was contributed by [@ArnaudJiang](https://github.com/ArnaudJiang) ([PR #1](https://github.com/LongjunQin/mdturn/pull/1)) — thank you! Most wanted next: a **Linux build**, plus Windows code-signing, auto-update and clean-VM validation.
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Windows 11 x64 support was contributed by [@ArnaudJiang](https://github.com/ArnaudJiang) ([PR #1](https://github.com/LongjunQin/draftback/pull/1)) — thank you! Most wanted next: a **Linux build**, plus Windows code-signing, auto-update and clean-VM validation.
 
-欢迎 Issue 与 PR,流程与约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。Windows 11 x64 支持由 [@ArnaudJiang](https://github.com/ArnaudJiang) 贡献([PR #1](https://github.com/LongjunQin/mdturn/pull/1)),在此致谢。当前最想要的贡献:**Linux 版**,以及 Windows 侧的代码签名、自动更新与干净环境验证。
+欢迎 Issue 与 PR,流程与约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。Windows 11 x64 支持由 [@ArnaudJiang](https://github.com/ArnaudJiang) 贡献([PR #1](https://github.com/LongjunQin/draftback/pull/1)),在此致谢。当前最想要的贡献:**Linux 版**,以及 Windows 侧的代码签名、自动更新与干净环境验证。
 
 ## License · 开源许可
 

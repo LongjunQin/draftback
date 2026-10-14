@@ -4,7 +4,7 @@
 // MDTurn desktop renderer real-browser smoke.
 //
 // This test deliberately has no npm dependency.  It launches an isolated
-// md-read server plus a real headless Chrome instance, then drives /desktop
+// draftback-service server plus a real headless Chrome instance, then drives /desktop
 // through Chrome DevTools Protocol.  It covers the regressions that cannot be
 // proven by the DOM-free anchor unit tests: Selection events, the floating
 // annotation affordance, CSS Custom Highlight ranges, note editing and the
@@ -218,15 +218,15 @@ async function startServer(dataDir, docRoot) {
     cwd: PROJECT,
     env: {
       ...process.env,
-      MDREAD_DATA_DIR: dataDir,
-      MDREAD_PORT: '0',
+      DRAFTBACK_DATA_DIR: dataDir,
+      DRAFTBACK_PORT: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += chunk; });
   const portFile = store.getPaths({ dataDir }).port;
-  const port = await waitUntil('md-read 隔离服务端口', async () => {
+  const port = await waitUntil('draftback-service 隔离服务端口', async () => {
     if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}: ${stderr}`);
     try {
       const value = Number(fs.readFileSync(portFile, 'utf8').trim());
@@ -241,7 +241,7 @@ async function startServer(dataDir, docRoot) {
 }
 
 async function startChrome(profileDir) {
-  const requestedWidth = Number(process.env.MDTURN_SMOKE_WIDTH || 1440);
+  const requestedWidth = Number(process.env.DRAFTBACK_SMOKE_WIDTH || 1440);
   const viewportWidth = Number.isFinite(requestedWidth) && requestedWidth >= 900
     ? Math.trunc(requestedWidth) : 1440;
   const child = spawn(chromeExecutable(), [
@@ -496,8 +496,8 @@ async function saveNewAnnotation(cdp, source, comment, expectedCount) {
 }
 
 async function main() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-desktop-smoke-'));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-desktop-smoke-'));
+  const dataDir = path.join(root, '.draftback');
   const docRoot = path.join(root, 'docs');
   const profileDir = path.join(root, 'chrome-profile');
   const source = path.join(docRoot, 'reports', 'round', 'MDTurn桌面真实回归.md');
@@ -783,8 +783,8 @@ async function main() {
       cardVisible: Array.from(document.querySelectorAll('#historyNotesList .note-card'))
         .some((card) => card.getClientRects().length > 0),
       legacyTint: document.querySelector('#history-target').classList.contains('legacy-note-block'),
-      highlightRanges: CSS.highlights && CSS.highlights.get('mdturn-open')
-        ? Array.from(CSS.highlights.get('mdturn-open')).map((range) => range.toString()) : [],
+      highlightRanges: CSS.highlights && CSS.highlights.get('draftback-open')
+        ? Array.from(CSS.highlights.get('draftback-open')).map((range) => range.toString()) : [],
     }))()`);
     assert.deepEqual(initialHistory, {
       open: false,
@@ -813,7 +813,7 @@ async function main() {
     // the immediately-following third paragraph.
     const exactHighlight = await waitUntil('CSS.highlights 精确跨两段', () => chrome.cdp.evaluate(`(() => {
       if (!globalThis.CSS || !CSS.highlights) throw new Error('CSS Custom Highlight API unavailable');
-      const highlight = CSS.highlights.get('mdturn-open');
+      const highlight = CSS.highlights.get('draftback-open');
       if (!highlight || Array.from(highlight).length !== 2) return null;
       return Array.from(highlight).map((range) => {
         const parent = range.startContainer.nodeType === Node.TEXT_NODE
@@ -837,7 +837,7 @@ async function main() {
     const markerGeometry = await waitUntil('批注图标贴近选区起点', async () => {
       lastMarkerGeometry = await chrome.cdp.evaluate(`(() => {
         const pin = document.querySelector('#annotationOverlay .note-pin:not([hidden])');
-        const highlight = CSS.highlights && CSS.highlights.get('mdturn-open');
+        const highlight = CSS.highlights && CSS.highlights.get('draftback-open');
         const range = highlight && Array.from(highlight)[0];
         if (!pin || !range) return null;
         const pinBox = pin.getBoundingClientRect();
@@ -860,7 +860,7 @@ async function main() {
     const collapsedBrand = await waitUntil('左栏收起后批注图标与标题栏自动重定位', () => chrome.cdp.evaluate(`(() => {
       if (!document.querySelector('#appShell').classList.contains('left-collapsed')) return null;
       const pin = document.querySelector('#annotationOverlay .note-pin:not([hidden])');
-      const highlight = CSS.highlights && CSS.highlights.get('mdturn-open');
+      const highlight = CSS.highlights && CSS.highlights.get('draftback-open');
       const range = highlight && Array.from(highlight)[0];
       if (!pin || !range) return null;
       const pinBox = pin.getBoundingClientRect();
@@ -957,7 +957,7 @@ async function main() {
     // Re-check that adding/editing current notes never wakes the historical
     // marker and never accidentally expands the history section.
     const finalUi = await chrome.cdp.evaluate(`(() => {
-      const highlight = CSS.highlights && CSS.highlights.get('mdturn-open');
+      const highlight = CSS.highlights && CSS.highlights.get('draftback-open');
       const ranges = highlight ? Array.from(highlight).map((range) => range.toString()) : [];
       return {
         historyOpen: document.querySelector('#historySection').open,
@@ -1293,7 +1293,7 @@ async function main() {
     await chrome.cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: caret.x, y: caret.y, button: 'left', buttons: 1, clickCount: 1 });
     await chrome.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: caret.x, y: caret.y, button: 'left', buttons: 0, clickCount: 1 });
     await chrome.cdp.send('Input.insertText', { text: '（已校）' });
-    const draftStorageKey = `mdturn.draft.${opened.review.id}`;
+    const draftStorageKey = `draftback.draft.${opened.review.id}`;
     await waitUntil('dirty 草稿进入 localStorage', () => chrome.cdp.evaluate(`(() => {
       const raw = localStorage.getItem(${JSON.stringify(draftStorageKey)});
       if (!raw) return null;

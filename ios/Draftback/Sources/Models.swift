@@ -102,10 +102,10 @@ struct AnnotationBatch: Codable {
 
 struct ExportTransport: SyncTransport {
     func submit(batch: AnnotationBatch) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mdturn-batches", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("draftback-batches", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let name = batch.documentName.replacingOccurrences(of: ".md", with: "")
-        let url = directory.appendingPathComponent("\(name).\(batch.batchId.prefix(8)).mdturn-batch.json")
+        let url = directory.appendingPathComponent("\(name).\(batch.batchId.prefix(8)).draftback-batch.json")
         try batch.asJSONData().write(to: url, options: .atomic)
         return url
     }

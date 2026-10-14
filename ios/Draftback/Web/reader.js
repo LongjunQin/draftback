@@ -3,18 +3,18 @@
  * 批注锚点格式与 Mac 的 sidecar 完全一致,这样手机上的批注批次可以原样回到 Mac。
  *
  * 与原生侧的约定:
- *   原生 → 页面:window.MDTurnReader.load({ markdown, annotations, assets })、setAnnotations(list)、
+ *   原生 → 页面:window.DraftbackReader.load({ markdown, annotations, assets })、setAnnotations(list)、
  *                 captureSelection()(由编辑菜单的「批注」触发)、scrollToLine(n)、focusNote(id)、clearSelection()
- *   页面 → 原生:webkit.messageHandlers.mdturn.postMessage({ type, ... })
+ *   页面 → 原生:webkit.messageHandlers.draftback.postMessage({ type, ... })
  *                 type = ready | rendered { outline } | selection { anchor, quote } | noteTap { id } | error { message }
  */
 (() => {
   'use strict';
   const content = document.getElementById('content');
   const empty = document.getElementById('empty');
-  const Anchor = window.MDTurnAnchor;
+  const Anchor = window.DraftbackAnchor;
   const post = (message) => {
-    try { window.webkit.messageHandlers.mdturn.postMessage(message); } catch (_) { /* 非 WKWebView 环境(调试)忽略 */ }
+    try { window.webkit.messageHandlers.draftback.postMessage(message); } catch (_) { /* 非 WKWebView 环境(调试)忽略 */ }
   };
 
   const purifier = window.DOMPurify;
@@ -110,7 +110,7 @@
 
   function outline() {
     return Array.from(content.querySelectorAll('h1,h2,h3')).map((heading, index) => {
-      if (!heading.id) heading.id = `mdturn-h-${index}`;
+      if (!heading.id) heading.id = `draftback-h-${index}`;
       return { id: heading.id, level: Number(heading.tagName.slice(1)), text: heading.textContent.trim(), line: Number(heading.dataset.lineStart || 0) };
     });
   }
@@ -182,7 +182,7 @@
   }
   function renderMarkers(focusId = null) {
     if (!(globalThis.CSS && CSS.highlights && globalThis.Highlight)) return;
-    CSS.highlights.delete('mdturn-open'); CSS.highlights.delete('mdturn-focus');
+    CSS.highlights.delete('draftback-open'); CSS.highlights.delete('draftback-focus');
     if (!state.rendered || !Anchor) return;
     const leaves = leafBlocks(); const blocks = descriptors(leaves);
     const open = [], focus = [];
@@ -197,8 +197,8 @@
         open.push(range); if (note.id === focusId) focus.push(range);
       }
     }
-    if (open.length) CSS.highlights.set('mdturn-open', new Highlight(...open));
-    if (focus.length) { CSS.highlights.set('mdturn-focus', new Highlight(...focus)); focus[0].startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    if (open.length) CSS.highlights.set('draftback-open', new Highlight(...open));
+    if (focus.length) { CSS.highlights.set('draftback-focus', new Highlight(...focus)); focus[0].startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
   }
 
   // ---------- 划词 → 锚点(与桌面端算法一致) ----------
@@ -252,7 +252,7 @@
     } catch (error) { post({ type: 'error', message: `锚点失败:${error.message}` }); return null; }
   }
 
-  window.MDTurnReader = Object.freeze({
+  window.DraftbackReader = Object.freeze({
     load(payload) {
       state.annotations = Array.isArray(payload.annotations) ? payload.annotations : [];
       state.assets = payload.assets && typeof payload.assets === 'object' ? payload.assets : {};

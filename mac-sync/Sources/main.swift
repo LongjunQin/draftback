@@ -1,14 +1,14 @@
 import Foundation
 
 // Draftback Sync:无界面,由 Draftback.app(回稿)启动(也可手动跑,方便排查)。
-// 环境变量:MDREAD_DATA_DIR(默认 ~/.mdread)、MDTURN_PARENT_PID(主进程退出则随之退出)、MDTURN_SYNC_INTERVAL(秒,默认 15)
+// 环境变量:DRAFTBACK_DATA_DIR(默认 ~/.draftback)、DRAFTBACK_PARENT_PID(主进程退出则随之退出)、DRAFTBACK_SYNC_INTERVAL(秒,默认 15)
 // 参数:--once 只跑一轮就退出(排查用);--delete-records 名1,名2 删除云端记录后退出(排查用)
 
 let environment = ProcessInfo.processInfo.environment
-let dataDir = URL(fileURLWithPath: environment["MDREAD_DATA_DIR"] ?? (NSHomeDirectory() + "/.mdread"), isDirectory: true)
+let dataDir = URL(fileURLWithPath: environment["DRAFTBACK_DATA_DIR"] ?? (NSHomeDirectory() + "/.draftback"), isDirectory: true)
 try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-let parentPid = environment["MDTURN_PARENT_PID"].flatMap { Int32($0) }
-let interval = environment["MDTURN_SYNC_INTERVAL"].flatMap { TimeInterval($0) } ?? 15
+let parentPid = environment["DRAFTBACK_PARENT_PID"].flatMap { Int32($0) }
+let interval = environment["DRAFTBACK_SYNC_INTERVAL"].flatMap { TimeInterval($0) } ?? 15
 let log = Logger(dataDir: dataDir)
 let loop = SyncLoop(dataDir: dataDir, parentPid: parentPid, interval: interval, log: log)
 

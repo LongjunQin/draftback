@@ -25,7 +25,7 @@ async function screenshot(cdp, file) {
 
 async function main() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-tools-smoke-')));
-  const dataDir = path.join(root, '.mdread');
+  const dataDir = path.join(root, '.draftback');
   const docRoot = path.join(root, 'docs');
   const profileDir = path.join(root, 'chrome-profile');
   const source = path.join(docRoot, '工具冒烟.md');
@@ -61,7 +61,7 @@ async function main() {
     await waitUntil('查找栏打开', () => chrome.cdp.evaluate(`!document.querySelector('#findBar').hidden && document.activeElement === document.querySelector('#findInput')`));
     await chrome.cdp.send('Input.insertText', { text: '苹果' });
     await waitUntil('计数', () => chrome.cdp.evaluate(`document.querySelector('#findCount').textContent === '1 / 6'`));
-    assert.equal(await chrome.cdp.evaluate(`CSS.highlights.has('mdturn-find') && CSS.highlights.has('mdturn-find-current')`), true, '查找命中必须用高亮标出');
+    assert.equal(await chrome.cdp.evaluate(`CSS.highlights.has('draftback-find') && CSS.highlights.has('draftback-find-current')`), true, '查找命中必须用高亮标出');
     await chrome.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await waitUntil('下一个', () => chrome.cdp.evaluate(`document.querySelector('#findCount').textContent === '2 / 6'`));
     await chrome.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', modifiers: 8, windowsVirtualKeyCode: 13 });
@@ -69,7 +69,7 @@ async function main() {
     await chrome.cdp.evaluate(`(() => { const i = document.querySelector('#findInput'); i.value = '不存在的词'; i.dispatchEvent(new Event('input')); })()`);
     await waitUntil('无命中', () => chrome.cdp.evaluate(`document.querySelector('#findBar').classList.contains('no-match') && document.querySelector('#findCount').textContent === '0 / 0'`));
     await chrome.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-    await waitUntil('查找栏关闭', () => chrome.cdp.evaluate(`document.querySelector('#findBar').hidden && !CSS.highlights.has('mdturn-find')`));
+    await waitUntil('查找栏关闭', () => chrome.cdp.evaluate(`document.querySelector('#findBar').hidden && !CSS.highlights.has('draftback-find')`));
     await screenshot(chrome.cdp, 'light-reading.png');
 
     // 2. 深色模式:模拟系统深色,壳与正文背景都应变暗,文字变亮。
@@ -141,29 +141,29 @@ async function main() {
       Object.defineProperty(drop, 'dataTransfer', { value: { types: ['Files'], files: [file] } });
       window.dispatchEvent(drop);
     })()`);
-    await dropFile(JSON.stringify(batch), '工具冒烟.smoke0001.mdturn-batch.json');
+    await dropFile(JSON.stringify(batch), '工具冒烟.smoke0001.draftback-batch.json');
     await waitUntil('拖入批次后会话进入待改稿', async () => {
       const current = await store.getReviewById(review.id, { dataDir });
       return current && current.status === 'ready_to_apply';
     });
     assert.equal(store.readAnnotations(source).annotations.filter((note) => note.receivedBatchId === 'smoke-batch-0001').length, 1);
     await waitUntil('导入成功提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('已接收手机批注 1 条'))`));
-    await dropFile('不是 JSON', '坏的.mdturn-batch.json');
+    await dropFile('不是 JSON', '坏的.draftback-batch.json');
     await waitUntil('坏批次提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('不是有效的批注批次文件'))`));
 
     // 6. 导出单文件 HTML:工具栏「导出」菜单 → 导出为 HTML。浏览器里没有外壳,走下载;这里截住生成的 Blob 读内容:
     //    文件应自带样式、图片内联、链接还原为相对路径,不引用本地服务。
     await chrome.cdp.evaluate(`(() => {
-      window.__mdturnExportBlobs = [];
+      window.__draftbackExportBlobs = [];
       const original = URL.createObjectURL.bind(URL);
-      URL.createObjectURL = (blob) => { window.__mdturnExportBlobs.push(blob); return original(blob); };
+      URL.createObjectURL = (blob) => { window.__draftbackExportBlobs.push(blob); return original(blob); };
     })()`);
     await chrome.cdp.evaluate(`document.querySelector('#exportMenuButton').click()`);
     await waitUntil('导出菜单打开', () => chrome.cdp.evaluate(`!document.querySelector('#exportMenu').hidden`));
     await screenshot(chrome.cdp, 'export-menu.png');
     await chrome.cdp.evaluate(`document.querySelector('#exportMenu button[data-command="export-html"]').click()`);
     await waitUntil('HTML 导出完成提示', () => chrome.cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).some((item) => item.textContent.includes('HTML 已导出'))`));
-    const html = await chrome.cdp.evaluate(`window.__mdturnExportBlobs.length ? window.__mdturnExportBlobs[0].text() : null`);
+    const html = await chrome.cdp.evaluate(`window.__draftbackExportBlobs.length ? window.__draftbackExportBlobs[0].text() : null`);
     assert.ok(html, '应生成 HTML 文件内容');
     assert.equal(await chrome.cdp.evaluate(`document.querySelector('#exportMenu').hidden`), true, '点击菜单项后菜单应关闭');
     assert.match(html, /<title>工具冒烟\.md<\/title>/);

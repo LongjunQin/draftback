@@ -1,13 +1,13 @@
 import Foundation
 import CloudKit
 
-/// 云端这一侧(跨端规则第 12 节):私有数据库、自定义区 `mdturn`、四种记录。
+/// 云端这一侧(跨端规则第 12 节):私有数据库、自定义区 `draftback`、四种记录。
 /// Mac 只写 ReviewDocument / Attachment / Receipt,只读 AnnotationBatch;手机反过来。
 /// 记录名约定:ReviewDocument = docId;Attachment = "att_<docId>_<相对路径校验码前 16 位>";
 /// AnnotationBatch = batchId;Receipt = "receipt_<batchId>"。
 enum CloudSchema {
-    static let containerID = "iCloud.org.mdturn"
-    static let zoneName = "mdturn"
+    static let containerID = "iCloud.app.draftback"
+    static let zoneName = "draftback"
     static let reviewDocument = "ReviewDocument"
     static let attachment = "Attachment"
     static let annotationBatch = "AnnotationBatch"

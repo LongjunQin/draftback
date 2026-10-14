@@ -16,8 +16,8 @@ const documents = require('../lib/documents');
 const PROJECT = path.resolve(__dirname, '..');
 
 function setup(t) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdread-documents-')));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-documents-')));
+  const dataDir = path.join(root, '.draftback');
   const docDir = path.join(root, 'docs');
   fs.mkdirSync(docDir, { recursive: true });
   store.ensureDataDir({ dataDir });
@@ -116,7 +116,7 @@ test('编辑登记:登记期间 openReview 拒绝冻结;退出登记后可冻结
   // CLI 入口同样被挡住,并给出指引。
   await store.unlockReview(doc, '测试', options);
   await documents.setEditing(doc, true, { token: 'tab-a' }, options);
-  const cli = spawnSync(process.execPath, ['mdreview.js', 'open', doc, '--no-open'], { cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: dataDir }, encoding: 'utf8' });
+  const cli = spawnSync(process.execPath, ['mdreview.js', 'open', doc, '--no-open'], { cwd: PROJECT, env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir }, encoding: 'utf8' });
   assert.notEqual(cli.status, 0);
   assert.match(cli.stderr, /USER_EDITING/);
   assert.match(cli.stderr, /退出编辑模式/);
@@ -187,7 +187,7 @@ test('服务接口:/api/app/document* 与 /api/app/recent;启动清空编辑登�
   fs.writeFileSync(doc, '# 接口\n正文\n');
   fs.writeFileSync(path.join(dataDir, 'editing.json'), JSON.stringify({ version: 1, entries: { [doc]: { since: 'x', token: 't', pid: process.pid } } }));
 
-  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir, DRAFTBACK_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += chunk; });
   t.after(async () => {
@@ -255,7 +255,7 @@ test('新建文档:createDocument 写入模板并计入最近文件;已存在则
   assert.equal(fs.readFileSync(fresh, 'utf8'), '原内容', '已存在的文件一个字都不能动');
   await assert.rejects(() => documents.createDocument(path.join(docDir, '不是md.txt'), {}, options), (error) => error.code === 'INVALID_DOCUMENT');
 
-  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir, DRAFTBACK_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(async () => { child.kill('SIGTERM'); await Promise.race([new Promise((resolve) => child.once('exit', resolve)), new Promise((resolve) => setTimeout(resolve, 5000))]); });
   const portFile = store.getPaths({ dataDir }).port;
   const deadline = Date.now() + 5000;

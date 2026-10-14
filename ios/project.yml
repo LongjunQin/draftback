@@ -38,12 +38,12 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         TARGETED_DEVICE_FAMILY: "1,2"
-    # iCloud(CloudKit)同步 + 静默推送(跨端规则第 12 节)。容器沿用 iCloud.org.mdturn(内部标识,改名不换容器,
-    # 否则手机上已同步的文档和未回执的批次全部作废);新 App ID 要在开发者网站把这个容器勾上
+    # iCloud(CloudKit)同步 + 静默推送(跨端规则第 12 节)。容器 iCloud.app.draftback(2026-10-14 随改名从 iCloud.org.mdturn 换过来,
+    # 旧容器闲置;命名沿革见 docs/naming-history.md);App ID 要在开发者网站把这个容器勾上
     entitlements:
       path: Draftback/Draftback.entitlements
       properties:
-        com.apple.developer.icloud-container-identifiers: [iCloud.org.mdturn]
+        com.apple.developer.icloud-container-identifiers: [iCloud.app.draftback]
         com.apple.developer.icloud-services: [CloudKit]
         aps-environment: development
         # 测试版走 CloudKit Development 环境(与 Mac 辅助程序 Debug 构建同一环境);上架版改 Production

@@ -14,8 +14,8 @@ const PROJECT = path.resolve(__dirname, '..');
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdread-deep-'));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-deep-'));
+  const dataDir = path.join(root, '.draftback');
   const docRoot = path.join(root, 'docs');
   fs.mkdirSync(docRoot, { recursive: true });
   store.ensureDataDir({ dataDir });
@@ -93,8 +93,8 @@ async function startServer(t, f, extraEnv = {}) {
     cwd: PROJECT,
     env: {
       ...process.env,
-      MDREAD_DATA_DIR: f.dataDir,
-      MDREAD_PORT: '0',
+      DRAFTBACK_DATA_DIR: f.dataDir,
+      DRAFTBACK_PORT: '0',
       ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -295,7 +295,7 @@ test('同一文档多进程 mdreview open 只创建一个活动会话', async (t
   const file = writeMd(f.docRoot, '同文档.md');
   const runs = await Promise.all(Array.from({ length: 24 }, () => runNode(
     ['mdreview.js', 'open', file, '--no-open'],
-    { MDREAD_DATA_DIR: f.dataDir },
+    { DRAFTBACK_DATA_DIR: f.dataDir },
   )));
   assert.ok(runs.every((run) => run.code === 0), runs.map((run) => run.stderr).join('\n'));
   const ids = runs.map((run) => /\u4f1a\u8bdd:\s*(\S+)/.exec(run.stdout)?.[1]);
@@ -458,7 +458,7 @@ test('端口 0 会发布实际端口，基础端口冲突时转到下一端口',
   const occupied = blocker.address().port;
 
   const f2 = fixture(t);
-  const second = await startServer(t, f2, { MDREAD_PORT: String(occupied) });
+  const second = await startServer(t, f2, { DRAFTBACK_PORT: String(occupied) });
   assert.equal(second.port, occupied + 1);
   assert.equal((await rawRequest(second.port, '/api/health')).status, 200);
 });
@@ -510,7 +510,7 @@ test('API 和动态静态资源不共享缓存，仅 vendor 资源可长缓存',
   assert.match(vendor.headers['cache-control'], /immutable/);
 });
 
-test('端口文件与 MDREAD_PORT 严格解析，不接受尾随字符或越界值', async (t) => {
+test('端口文件与 DRAFTBACK_PORT 严格解析，不接受尾随字符或越界值', async (t) => {
   const f = fixture(t);
   const portFile = store.getPaths({ dataDir: f.dataDir }).port;
   const valid = ['1', '8080\n', ' 65535 \n'];
@@ -526,10 +526,10 @@ test('端口文件与 MDREAD_PORT 严格解析，不接受尾随字符或越界�
   fs.rmSync(portFile, { force: true });
 
   const run = await runNode(['server.js'], {
-    MDREAD_DATA_DIR: f.dataDir,
-    MDREAD_PORT: '8080junk',
+    DRAFTBACK_DATA_DIR: f.dataDir,
+    DRAFTBACK_PORT: '8080junk',
   });
   assert.notEqual(run.code, 0);
-  assert.match(run.stderr, /MDREAD_PORT 无效/);
+  assert.match(run.stderr, /DRAFTBACK_PORT 无效/);
   assert.equal(fs.existsSync(portFile), false);
 });

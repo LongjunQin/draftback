@@ -52,7 +52,7 @@ async function timed(label, fn) {
 }
 
 async function probeOnce(root, index) {
-  const dataDir = path.join(root, `run-${index}`, '.mdread');
+  const dataDir = path.join(root, `run-${index}`, '.draftback');
   const docRoot = path.join(root, `run-${index}`, 'docs');
   const profileDir = path.join(root, `run-${index}`, 'chrome-profile');
   fs.mkdirSync(docRoot, { recursive: true });

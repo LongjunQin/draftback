@@ -10,6 +10,7 @@ final class SyncLoop {
     let parentPid: Int32?
     let interval: TimeInterval
     private let tempDir: URL
+    private let containerMarker: URL
     private var consecutiveFailures = 0
 
     init(dataDir: URL, parentPid: Int32?, interval: TimeInterval, log: Logger) {
@@ -17,10 +18,11 @@ final class SyncLoop {
         try? FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         server = ServerClient(dataDir: dataDir)
         cloud = CloudStore(stateDir: stateDir)
+        containerMarker = stateDir.appendingPathComponent("container")
         self.parentPid = parentPid
         self.interval = interval
         self.log = log
-        tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("mdturn-sync-\(getpid())", isDirectory: true)
+        tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("draftback-sync-\(getpid())", isDirectory: true)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     }
 
@@ -37,6 +39,17 @@ final class SyncLoop {
     }
 
     /// 一轮;返回是否做了实际工作(做了就缩短下一轮的等待,把一批文档尽快推完)
+    /// 云端容器换了(改名 iCloud.org.mdturn → iCloud.app.draftback):旧容器里的记录全部作废,
+    /// 清掉变更令牌,并让本地服务把所有参与同步的文档重新推一遍。只做一次,以数据目录里的标记为准。
+    private func ensureContainerGeneration() async throws {
+        let previous = try? String(contentsOf: containerMarker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        if previous == CloudSchema.containerID { return }
+        cloud.clearToken()
+        let result = try await server.resetPushes()
+        try CloudSchema.containerID.write(to: containerMarker, atomically: true, encoding: .utf8)
+        log.info("云端容器切换为 \(CloudSchema.containerID)(之前: \(previous ?? "无")),已重排 \(result["count"] ?? 0) 篇文档待推送")
+    }
+
     /// 排查用:删除云端记录(--delete-records)
     func deleteRecords(_ names: [String]) async throws {
         try await cloud.ensureZone()
@@ -55,6 +68,7 @@ final class SyncLoop {
                 try? await server.heartbeat(heartbeat)
                 return false
             }
+            try await ensureContainerGeneration()
             try await cloud.ensureZone()
             worked = try await pushOutbox() || worked
             worked = try await pullBatches() || worked

@@ -4,7 +4,7 @@
 
 ## 架构与入口
 
-`md-read` 是回稿复用的本地审阅服务与 CLI。批注保存在文档旁的
+`draftback-service` 是回稿复用的本地审阅服务与 CLI。批注保存在文档旁的
 `<文档.md>.annotations.json`：
 
 ```text
@@ -100,7 +100,7 @@ Agent 的节奏固定为：`open` → 挂 `wait` → 改稿 → `complete` → �
 macOS 与 Windows 走同一条路径：App 启动时先探测健康服务并复用，否则自己拉起并持有生命周期，
 退出时一并结束。开发时也可手工 `node server.js` 启动，App 会直接复用它。
 
-服务只监听 `127.0.0.1`，不提供本地目录浏览。实际端口写入 `~/.mdread/port`，CLI 不写死 8080。
+服务只监听 `127.0.0.1`，不提供本地目录浏览。实际端口写入 `~/.draftback/port`，CLI 不写死 8080。
 
 ## 普通阅读、普通编辑与审阅会话(2026-10 起)
 
@@ -109,10 +109,10 @@ macOS 与 Windows 走同一条路径：App 启动时先探测健康服务并复�
 智能体 `mdreview open` 建的会话照旧直接以审阅标签打开;同一文档已在普通标签里打开时自动转换。
 
 **普通编辑**直接把修改写回文件:保存前核对指纹(文件被别的程序改过就拒写,`SOURCE_CHANGED`),
-覆盖前把旧内容备份到 `~/.mdread/backups/documents/<路径哈希>/`(每篇保留 10 份),同一 `clientRequestId` 重复提交幂等。
+覆盖前把旧内容备份到 `~/.draftback/backups/documents/<路径哈希>/`(每篇保留 10 份),同一 `clientRequestId` 重复提交幂等。
 处于活动审阅会话的文档拒绝普通写入(`REVIEW_ACTIVE`),必须走审阅标签里的手工修改流程。
 
-**编辑登记**:进入普通编辑即在 `~/.mdread/editing.json` 登记;期间 `mdreview open` 以 `USER_EDITING` 拒绝冻结并提示稍后重试。
+**编辑登记**:进入普通编辑即在 `~/.draftback/editing.json` 登记;期间 `mdreview open` 以 `USER_EDITING` 拒绝冻结并提示稍后重试。
 登记归本地服务所有:服务重启清空,条目带进程号,进程不在即视为过期。
 
 **编辑保存保真**(所见即所得编辑器):保存不直接落盘编辑器输出,而是用 `static/markdown-patch.js` 做三方对比
@@ -130,29 +130,29 @@ mdreview restore <快照id> --dry-run     # 只预览
 mdreview restore <快照id> --yes         # 恢复;恢复前自动再做一份 pre-restore 快照,可反悔
 ```
 
-快照放在 `~/.mdread/snapshots/<时间戳-原因>/`。本地服务启动时自动做一份(24 小时内已有则跳过,只保留最近 10 份自动快照);手动快照不自动清理。
+快照放在 `~/.draftback/snapshots/<时间戳-原因>/`。本地服务启动时自动做一份(24 小时内已有则跳过,只保留最近 10 份自动快照);手动快照不自动清理。
 内容与清单校验不符的快照拒绝恢复;文档目录已不存在的 sidecar 跳过,不凭空建目录。
 
 ## 手机批注批次导入
 
-iPhone 端「完成本轮」导出 `<文档>.<批次id>.mdturn-batch.json`(格式见 docs/cross-device-rules.md 第 6 节)。CloudKit 接入前,把文件隔空投送到 Mac 后:
+iPhone 端「完成本轮」导出 `<文档>.<批次id>.draftback-batch.json`(格式见 docs/cross-device-rules.md 第 6 节)。CloudKit 接入前,把文件隔空投送到 Mac 后:
 
 ```bash
 mdreview import-batch "<批次文件>.json"
 ```
 
 或直接把文件拖进回稿窗口。接收规则:按 `baseVersion`(文档 SHA-256)匹配审阅中的会话 → 会话仍在审阅中 → 版本一致 → 批次编号未见过 →
-整批写入 sidecar(已存在的批注 id 跳过)并进入待改稿;任何一步不过都拒收并写回执(`~/.mdread/receipts/<批次id>.json`),
+整批写入 sidecar(已存在的批注 id 跳过)并进入待改稿;任何一步不过都拒收并写回执(`~/.draftback/receipts/<批次id>.json`),
 sidecar 与状态不动。重复导入沿用上次回执。
 
 ## 数据与可靠性
 
-- `~/.mdread/reviews.json`：本地审阅会话与冻结状态（CLI、App 与 Agent 共享；`MDREAD_DATA_DIR` 可覆盖）。
-- `~/.mdread/port`：当前本地服务端口。
+- `~/.draftback/reviews.json`：本地审阅会话与冻结状态（CLI、App 与 Agent 共享；`DRAFTBACK_DATA_DIR` 可覆盖）。
+- `~/.draftback/port`：当前本地服务端口。
 - `<文档.md>.annotations.json`：批注正文，兼容旧格式。
 - 批注修改会保留原创建记录，并追加 `updatedAt / updatedBy / editCount` 审计字段。
 - JSON 写入采用跨进程锁、锁内重读、临时文件和原子替换；已有 JSON 损坏时停止写入，不会按空数据覆盖。
-- `.mdread` 权限为 `0700`，其中索引文件为 `0600`。
+- `.draftback` 权限为 `0700`，其中索引文件为 `0600`。
 - 未保存的回稿编辑草稿按 `reviewSessionId + sourceHash` 保存在 App 本地存储中；刷新或异常重开时只恢复匹配版本的草稿。
 
 ## 开发、验证与打包
@@ -169,7 +169,7 @@ npm --prefix desktop run build:vendor
 ```bash
 node --test test/*.test.js
 node test/desktop-production-smoke.js          # 审阅全流程;编辑段验证刷新恢复草稿、保存只改动编辑过的块
-MDTURN_SMOKE_WIDTH=980 node test/desktop-production-smoke.js
+DRAFTBACK_SMOKE_WIDTH=980 node test/desktop-production-smoke.js
 node test/desktop-security-smoke.js            # 安全收口:夹带脚本不执行、CSP 无告警
 node test/desktop-plain-document-smoke.js      # 普通阅读/编辑/开始审阅,块级回写保真
 node test/desktop-reader-tools-smoke.js        # 查找、深色、打印样式、拖放;加 --shots <目录> 可截图

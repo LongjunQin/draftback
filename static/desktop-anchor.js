@@ -10,7 +10,7 @@
   'use strict';
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
-  if (root) root.MDTurnAnchor = api;
+  if (root) root.DraftbackAnchor = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, function factory() {
   'use strict';
 

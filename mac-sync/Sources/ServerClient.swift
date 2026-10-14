@@ -101,6 +101,10 @@ struct ServerClient {
     func markReceiptSent(reviewId: String, batchId: String) async throws {
         try await postJSON("/api/app/sync/receipt-sent", ["reviewId": reviewId, "batchId": batchId])
     }
+    /// 云端容器换了(改名):让本地服务把所有参与同步的文档重新排进待推送队列
+    func resetPushes() async throws -> [String: Any] {
+        try await postJSON("/api/app/sync/reset", [:])
+    }
     func heartbeat(_ state: [String: Any]) async throws {
         try await postJSON("/api/app/sync/heartbeat", state)
     }

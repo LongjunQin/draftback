@@ -3,15 +3,15 @@ import CloudKit
 import UIKit
 
 /// 云端约定(跨端规则第 12 节),与 Mac 端 mac-sync/Sources/CloudStore.swift 一字不差:
-/// 私有数据库、自定义区 `mdturn`;手机只读 ReviewDocument / Attachment / Receipt,只写 AnnotationBatch。
+/// 私有数据库、自定义区 `draftback`;手机只读 ReviewDocument / Attachment / Receipt,只写 AnnotationBatch。
 enum CloudSchema {
-    static let containerID = "iCloud.org.mdturn"
-    static let zoneName = "mdturn"
+    static let containerID = "iCloud.app.draftback"
+    static let zoneName = "draftback"
     static let reviewDocument = "ReviewDocument"
     static let attachment = "Attachment"
     static let annotationBatch = "AnnotationBatch"
     static let receipt = "Receipt"
-    static let subscriptionID = "mdturn-zone-changes"
+    static let subscriptionID = "draftback-zone-changes"
 }
 
 /// Mac 推过来的一篇文档(手机上的元数据;正文与附件在 synced/<docId>/ 目录里)。
@@ -78,13 +78,24 @@ final class CloudSyncEngine: ObservableObject {
     private let container = CKContainer(identifier: CloudSchema.containerID)
     private var database: CKDatabase { container.privateCloudDatabase }
     private let zoneID = CKRecordZone.ID(zoneName: CloudSchema.zoneName, ownerName: CKCurrentUserDefaultName)
-    private let root: URL       // …/MDTurn/synced
-    private let stateDir: URL   // …/MDTurn/sync
+    private let root: URL       // …/Draftback/synced
+    private let stateDir: URL   // …/Draftback/sync
     private let fileManager = FileManager.default
 
     init(dataDirectory: URL) {
         root = dataDirectory.appendingPathComponent("synced", isDirectory: true)
         stateDir = dataDirectory.appendingPathComponent("sync", isDirectory: true)
+        // 云端容器换了(改名):本地镜像、变更令牌、回执全部作废,重新从新容器拉;没上传的批次保留,会投到新容器
+        let marker = stateDir.appendingPathComponent("container")
+        let previous = (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if previous != CloudSchema.containerID {
+            try? fileManager.removeItem(at: root)
+            try? fileManager.removeItem(at: stateDir.appendingPathComponent("zone-change-token"))
+            try? fileManager.removeItem(at: stateDir.appendingPathComponent("receipts"))
+            UserDefaults.standard.removeObject(forKey: "draftback.cloud.subscribed.v1")
+            try? fileManager.createDirectory(at: stateDir, withIntermediateDirectories: true)
+            try? CloudSchema.containerID.write(to: marker, atomically: true, encoding: .utf8)
+        }
         for dir in [root, stateDir, stateDir.appendingPathComponent("outbox"), stateDir.appendingPathComponent("receipts")] {
             try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         }
@@ -324,7 +335,7 @@ final class CloudSyncEngine: ObservableObject {
 
     // MARK: 静默推送订阅
 
-    private var subscribedKey: String { "mdturn.cloud.subscribed.v1" }
+    private var subscribedKey: String { "draftback.cloud.subscribed.v1" }
     private func subscribeIfNeeded() async {
         if UserDefaults.standard.bool(forKey: subscribedKey) { return }
         let subscription = CKDatabaseSubscription(subscriptionID: CloudSchema.subscriptionID)

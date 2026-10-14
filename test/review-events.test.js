@@ -135,7 +135,7 @@ async function waitForPort(portFile, child) {
 
 async function fixture(t, prefix = 'mdturn-events-') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const dataDir = path.join(root, '.mdread');
+  const dataDir = path.join(root, '.draftback');
   const docRoot = path.join(root, 'docs');
   fs.mkdirSync(docRoot, { recursive: true });
   store.ensureDataDir({ dataDir });
@@ -143,9 +143,9 @@ async function fixture(t, prefix = 'mdturn-events-') {
     cwd: PROJECT,
     env: {
       ...process.env,
-      MDREAD_DATA_DIR: dataDir,
-      MDREAD_PORT: '0',
-      MDREAD_EVENT_HEARTBEAT_MS: '40',
+      DRAFTBACK_DATA_DIR: dataDir,
+      DRAFTBACK_PORT: '0',
+      DRAFTBACK_EVENT_HEARTBEAT_MS: '40',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -263,7 +263,7 @@ test('SSE/notify 仅限本机，通知必须重读磁盘真实状态', async (t)
 });
 
 test('服务内 open、submit 和 begin-apply 状态迁移均广播', async (t) => {
-  const f = await fixture(t, 'mdturn-service-state-events-');
+  const f = await fixture(t, 'draftback-service-state-events-');
   const file = writeMd(f.docRoot, '服务状态.md');
   const sse = await connectSse(f.port);
   t.after(() => sse.close());
@@ -330,8 +330,8 @@ test('服务内手工 complete 与独立 CLI complete 均主动广播真实终�
     cwd: '/',
     env: {
       ...process.env,
-      MDREAD_DATA_DIR: f.dataDir,
-      MDREAD_PORT: String(f.port),
+      DRAFTBACK_DATA_DIR: f.dataDir,
+      DRAFTBACK_PORT: String(f.port),
     },
     encoding: 'utf8',
     timeout: 10_000,
@@ -349,7 +349,7 @@ test('服务内手工 complete 与独立 CLI complete 均主动广播真实终�
 test('CLI complete 的主动通知不可达时仍保持成功终态', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-notify-best-effort-'));
   try {
-    const dataDir = path.join(root, '.mdread');
+    const dataDir = path.join(root, '.draftback');
     const docs = path.join(root, 'docs');
     fs.mkdirSync(docs, { recursive: true });
     store.ensureDataDir({ dataDir });
@@ -359,8 +359,8 @@ test('CLI complete 的主动通知不可达时仍保持成功终态', async () =
       cwd: '/',
       env: {
         ...process.env,
-        MDREAD_DATA_DIR: dataDir,
-        MDREAD_PORT: '65535',
+        DRAFTBACK_DATA_DIR: dataDir,
+        DRAFTBACK_PORT: '65535',
       },
       encoding: 'utf8',
       timeout: 10_000,

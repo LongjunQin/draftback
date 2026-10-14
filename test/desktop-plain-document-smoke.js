@@ -33,7 +33,7 @@ async function selectParagraph(cdp, selector) {
 
 async function main() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-plain-smoke-')));
-  const dataDir = path.join(root, '.mdread');
+  const dataDir = path.join(root, '.draftback');
   const docRoot = path.join(root, 'docs');
   const profileDir = path.join(root, 'chrome-profile');
   const source = path.join(docRoot, '普通文档.md');
@@ -115,7 +115,7 @@ async function main() {
         !!(pane.querySelector('.ProseMirror') || pane.querySelector('.fallback-editor'));
     })()`));
     await waitUntil('编辑登记生效', () => documents.isEditing(source, { dataDir }));
-    const refused = spawnSync(process.execPath, ['mdreview.js', 'open', source, '--no-open'], { cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: dataDir }, encoding: 'utf8' });
+    const refused = spawnSync(process.execPath, ['mdreview.js', 'open', source, '--no-open'], { cwd: PROJECT, env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir }, encoding: 'utf8' });
     assert.notEqual(refused.status, 0, '用户编辑中,智能体不得冻结文档');
     assert.match(refused.stderr, /USER_EDITING/);
     assert.equal(await store.getReviewByPath(source, { dataDir, activeOnly: true }), null);

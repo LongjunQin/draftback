@@ -18,8 +18,8 @@ const batches = require('../lib/batches');
 const PROJECT = path.resolve(__dirname, '..');
 
 function fixture(t) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-sync-')));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-sync-')));
+  const dataDir = path.join(root, '.draftback');
   const docDir = path.join(root, 'docs');
   fs.mkdirSync(docDir, { recursive: true });
   store.ensureDataDir({ dataDir });
@@ -184,7 +184,7 @@ function request(port, pathname, options = {}) {
   });
 }
 async function startServer(t, f) {
-  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: f.dataDir, MDREAD_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, DRAFTBACK_DATA_DIR: f.dataDir, DRAFTBACK_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = ''; child.stderr.on('data', (chunk) => { stderr += chunk; });
   t.after(async () => { if (child.exitCode === null) { child.kill('SIGTERM'); await new Promise((resolve) => child.once('exit', resolve)); } });
   const portFile = store.getPaths({ dataDir: f.dataDir }).port;
@@ -244,4 +244,22 @@ test('/api/app/sync/*:辅助程序取队列、取正文、报推送、送批次�
   const foreign = await request(port, '/api/app/sync/batch', { method: 'POST', body: { batch: { ...batch, batchId: 'b-foreign', docId: 'doc_0000000000000000', reviewId: 'r0', baseVersion: 'e'.repeat(64), documentName: '别台电脑的稿.md' } } });
   assert.equal(foreign.json.receipt.reason, 'no-session');
   assert.equal(foreign.json.documentKnown, false);
+});
+
+test('云端容器更换后 /api/app/sync/reset 让保留期内的文档全部重新待推', async (t) => {
+  const f = fixture(t);
+  const a = path.join(f.docDir, '甲.md');
+  const b = path.join(f.docDir, '乙.md');
+  fs.writeFileSync(a, '# 甲\n');
+  fs.writeFileSync(b, '# 乙\n');
+  const { review: ra } = await store.openReview(a, f.options);
+  const { review: rb } = await store.openReview(b, f.options);
+  await sync.markPushed(ra.id, { signature: sync.pushSignature(ra), contentHash: ra.sourceHash }, f.options);
+  await sync.markPushed(rb.id, { signature: sync.pushSignature(rb), contentHash: rb.sourceHash }, f.options);
+  assert.equal((await sync.listOutbox(f.options)).length, 0, '都推过了,队列应为空');
+  const result = await sync.requestPushAll(f.options);
+  assert.equal(result.count, 2);
+  const outbox = await sync.listOutbox(f.options);
+  assert.deepEqual(outbox.map((item) => item.reviewId).sort(), [ra.id, rb.id].sort());
+  assert.equal((await store.getReviewById(ra.id, f.options)).sync.state, 'never');
 });

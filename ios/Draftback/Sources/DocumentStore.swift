@@ -114,8 +114,13 @@ final class DocumentStore: ObservableObject {
     /// App 内部数据(批注、最近文件)放在 Application Support:随 iCloud 备份,但不出现在「文件」App 里,
     /// 免得被当成普通文件误删误改。
     static func appDataDirectory() -> URL {
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MDTurn", isDirectory: true)
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let url = base.appendingPathComponent("Draftback", isDirectory: true)
+        // 改名前的目录(命名沿革见 docs/naming-history.md):第一次遇到就整个搬过来
+        let legacy = base.appendingPathComponent("MDTurn", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: url.path), FileManager.default.fileExists(atPath: legacy.path) {
+            try? FileManager.default.moveItem(at: legacy, to: url)
+        }
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

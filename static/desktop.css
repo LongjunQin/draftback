@@ -644,7 +644,7 @@ kbd {
 .markdown-body .katex-display { overflow-x: auto; overflow-y: hidden; }
 .markdown-body .mermaid { margin: 1.4em 0; text-align: center; }
 
-::highlight(mdturn-open) { background: rgba(245, 171, 49, .31); color: inherit; }
+::highlight(draftback-open) { background: rgba(245, 171, 49, .31); color: inherit; }
 
 .legacy-note-block {
   background: var(--amber-pale);
@@ -1076,8 +1076,8 @@ details:not([open]) > #historyNotesList { display: none; }
 .find-bar input::-webkit-search-cancel-button { display: none; }
 .find-count { min-width: 44px; text-align: center; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .find-bar.no-match .find-count { color: var(--red); }
-::highlight(mdturn-find) { background: rgba(245, 154, 35, .32); }
-::highlight(mdturn-find-current) { background: rgba(245, 154, 35, .85); color: #1b1300; }
+::highlight(draftback-find) { background: rgba(245, 154, 35, .32); }
+::highlight(draftback-find-current) { background: rgba(245, 154, 35, .85); color: #1b1300; }
 
 /* 拖放提示 */
 .drop-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(13, 128, 119, .08); backdrop-filter: blur(2px); pointer-events: none; }
@@ -1112,5 +1112,5 @@ details:not([open]) > #historyNotesList { display: none; }
   .markdown-body details { display: block; }
   .markdown-body details > summary { list-style: none; font-weight: 700; }
   .markdown-body a { color: inherit; text-decoration: underline; }
-  ::highlight(mdturn-open), ::highlight(mdturn-find), ::highlight(mdturn-find-current) { background: transparent; }
+  ::highlight(draftback-open), ::highlight(draftback-find), ::highlight(draftback-find-current) { background: transparent; }
 }

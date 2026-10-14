@@ -15,12 +15,12 @@
  *   - Front Matter 不进编辑器,原样保留;行尾符与结尾换行沿用原文。
  * 不能对齐的情况(块数对不上等)退回整块替换,并在统计里标出来,由界面提示用户。
  *
- * 纯函数、无 DOM 依赖:浏览器里挂在 window.MDTurnPatch,Node 里 module.exports;
+ * 纯函数、无 DOM 依赖:浏览器里挂在 window.DraftbackPatch,Node 里 module.exports;
  * markdown-it 实例由调用方注入(渲染器与测试都用仓库自带的 vendor 版本)。
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.MDTurnPatch = factory();
+  else root.DraftbackPatch = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 

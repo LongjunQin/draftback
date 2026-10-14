@@ -44,5 +44,5 @@ body { padding: 12px 18px calc(40px + env(safe-area-inset-bottom)); }
 .markdown-body .mermaid svg { max-width: 100%; height: auto; }
 .markdown-body details > summary { cursor: pointer; font-weight: 700; }
 .md-missing-asset { display: inline-block; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: 13px; }
-::highlight(mdturn-open) { background: rgba(245, 154, 35, .32); }
-::highlight(mdturn-focus) { background: rgba(245, 154, 35, .78); color: #1b1300; }
+::highlight(draftback-open) { background: rgba(245, 154, 35, .32); }
+::highlight(draftback-focus) { background: rgba(245, 154, 35, .78); color: #1b1300; }

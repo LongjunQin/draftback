@@ -8,14 +8,14 @@
 # 用法:
 #   ios/scripts/install-device.sh              # 自动找第一台已配对、已开开发者模式的 iPhone
 #   ios/scripts/install-device.sh <设备UDID>
-# 可用环境变量覆盖:MDTURN_TEAM(签名团队 ID)、MDTURN_BUNDLE_ID、MDTURN_DISPLAY_NAME、MDTURN_CONFIGURATION
+# 可用环境变量覆盖:DRAFTBACK_TEAM(签名团队 ID)、DRAFTBACK_BUNDLE_ID、DRAFTBACK_DISPLAY_NAME、DRAFTBACK_CONFIGURATION
 set -euo pipefail
 IOS="$(cd "$(dirname "$0")/.." && pwd)"
-TEAM="${MDTURN_TEAM:-BG7Y59AT44}"
-BUNDLE_ID="${MDTURN_BUNDLE_ID:-app.draftback.ios.dev}"
-DISPLAY_NAME="${MDTURN_DISPLAY_NAME:-回稿 测试}"
-DISPLAY_NAME_EN="${MDTURN_DISPLAY_NAME_EN:-Draftback Beta}"
-CONFIGURATION="${MDTURN_CONFIGURATION:-Release}"
+TEAM="${DRAFTBACK_TEAM:-BG7Y59AT44}"
+BUNDLE_ID="${DRAFTBACK_BUNDLE_ID:-app.draftback.ios.dev}"
+DISPLAY_NAME="${DRAFTBACK_DISPLAY_NAME:-回稿 测试}"
+DISPLAY_NAME_EN="${DRAFTBACK_DISPLAY_NAME_EN:-Draftback Beta}"
+CONFIGURATION="${DRAFTBACK_CONFIGURATION:-Release}"
 DERIVED="$IOS/build/DerivedData-device"
 DEVICE="${1:-}"
 

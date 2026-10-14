@@ -13,7 +13,7 @@ const {
   shell,
 } = require('electron');
 const { markdownPathsFromArguments, normalizeMarkdownPath } = require('./open-files');
-const { ensureService, stopOwnedService, ownedDataDirectory, requestHealth } = require('./service');
+const { ensureService, stopOwnedService, ownedDataDirectory, migrateLegacyDataDir, requestHealth } = require('./service');
 const { spawn } = require('child_process');
 const { exportDocx, findPandoc } = require('./export-docx');
 const { migrateFromLegacyNames } = require('./user-data-migration');
@@ -53,9 +53,9 @@ function applyAppearance(value) {
   return appearance;
 }
 
-const OPEN_FILES_CHANNEL = 'mdturn:open-files';
-const COMMAND_CHANNEL = 'mdturn:command';
-const ACTIVATE_REVIEW_CHANNEL = 'mdturn:activate-review';
+const OPEN_FILES_CHANNEL = 'draftback:open-files';
+const COMMAND_CHANNEL = 'draftback:command';
+const ACTIVATE_REVIEW_CHANNEL = 'draftback:activate-review';
 
 let mainWindow = null;
 let serviceOrigin = null;
@@ -71,7 +71,7 @@ function syncHelperExecutable() {
   if (process.platform !== 'darwin') return null;
   const relative = path.join('Draftback Sync.app', 'Contents', 'MacOS', 'Draftback Sync');
   const candidates = [
-    process.env.MDTURN_SYNC_HELPER,
+    process.env.DRAFTBACK_SYNC_HELPER,
     app.isPackaged ? path.join(process.resourcesPath, '..', 'Helpers', relative) : null,
     path.join(__dirname, '..', 'mac-sync', 'build', relative),
   ].filter(Boolean);
@@ -82,12 +82,12 @@ function syncHelperExecutable() {
 }
 
 function startSyncHelper() {
-  if (syncHelper || process.env.MDTURN_SYNC_DISABLED === '1') return;
+  if (syncHelper || process.env.DRAFTBACK_SYNC_DISABLED === '1') return;
   const executable = syncHelperExecutable();
   if (!executable) return;
   try {
     syncHelper = spawn(executable, [], {
-      env: { ...process.env, MDREAD_DATA_DIR: ownedDataDirectory(), MDTURN_PARENT_PID: String(process.pid) },
+      env: { ...process.env, DRAFTBACK_DATA_DIR: ownedDataDirectory(), DRAFTBACK_PARENT_PID: String(process.pid) },
       stdio: 'ignore',
       detached: false,
     });
@@ -224,6 +224,8 @@ async function connectAndLoad() {
   if (connecting) return connecting;
   connecting = (async () => {
     try {
+      // 改名前的数据目录(~/.mdread)第一次启动时搬到 ~/.draftback;在起内置服务之前做,CLI 与服务才看到同一份数据
+      try { const moved = migrateLegacyDataDir(); if (moved.migrated) console.log(`[回稿] 数据目录已从 ${moved.from} 搬到 ${ownedDataDirectory()}`); } catch (error) { console.error('[回稿] 数据目录搬迁失败:', error && error.message); }
       const service = await ensureService({
         isPackaged: app.isPackaged,
         resourcesPath: process.resourcesPath,
@@ -323,11 +325,11 @@ function createWindow() {
 }
 
 function installIpc() {
-  ipcMain.handle('mdturn:pick-markdown', async (event) => {
+  ipcMain.handle('draftback:pick-markdown', async (event) => {
     if (!isTrustedRenderer(event)) throw new Error('拒绝非${DISPLAY_NAME}页面调用文件选择器。');
     return pickMarkdownFiles();
   });
-  ipcMain.handle('mdturn:reveal-path', async (event, targetPath) => {
+  ipcMain.handle('draftback:reveal-path', async (event, targetPath) => {
     if (!isTrustedRenderer(event) || typeof targetPath !== 'string' || targetPath.includes('\0') || !path.isAbsolute(targetPath)) {
       throw new Error('无效的本地路径。');
     }
@@ -336,13 +338,13 @@ function installIpc() {
     shell.showItemInFolder(realPath);
     return true;
   });
-  ipcMain.handle('mdturn:open-external', async (event, url) => {
+  ipcMain.handle('draftback:open-external', async (event, url) => {
     if (!isTrustedRenderer(event) || !isSafeExternalUrl(url)) throw new Error('只允许打开 http/https 外部链接。');
     await shell.openExternal(url);
     return true;
   });
   // 导出 PDF / 打印:都走 Chromium 的打印媒体(desktop.css 的 @media print 只留正文)。
-  ipcMain.handle('mdturn:export-pdf', async (event, payload) => {
+  ipcMain.handle('draftback:export-pdf', async (event, payload) => {
     if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的导出请求。');
     const suggested = payload && typeof payload.suggestedName === 'string' ? payload.suggestedName.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 120) : 'document';
     const defaultDir = payload && typeof payload.directory === 'string' && path.isAbsolute(payload.directory) ? payload.directory : app.getPath('documents');
@@ -362,7 +364,7 @@ function installIpc() {
     shell.showItemInFolder(result.filePath);
     return { ok: true, filePath: result.filePath };
   });
-  ipcMain.handle('mdturn:print', async (event) => {
+  ipcMain.handle('draftback:print', async (event) => {
     if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的打印请求。');
     return new Promise((resolve) => {
       mainWindow.webContents.print({ printBackground: true }, (success, reason) => resolve({ ok: success, reason: reason || null }));
@@ -376,7 +378,7 @@ function installIpc() {
     return typeof value === 'string' && path.isAbsolute(value) ? value : app.getPath('documents');
   }
   // 新建:只负责让用户选位置和文件名;真正建文件由本地服务完成(拒绝覆盖、计入最近文件)。
-  ipcMain.handle('mdturn:new-document', async (event, payload) => {
+  ipcMain.handle('draftback:new-document', async (event, payload) => {
     if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的新建请求。');
     const result = await dialog.showSaveDialog(mainWindow, {
       title: '新建 Markdown 文档',
@@ -389,7 +391,7 @@ function installIpc() {
     return { ok: true, filePath };
   });
   // 导出单文件 HTML:页面把正文、样式、图片都内联好,主进程只管存盘。
-  ipcMain.handle('mdturn:export-html', async (event, payload) => {
+  ipcMain.handle('draftback:export-html', async (event, payload) => {
     if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的导出请求。');
     const html = payload && typeof payload.html === 'string' ? payload.html : '';
     if (!html || html.length > 64 * 1024 * 1024) throw new Error('没有可导出的内容,或内容过大。');
@@ -404,7 +406,7 @@ function installIpc() {
     return { ok: true, filePath: result.filePath };
   });
   // 导出 Word:用 pandoc 从磁盘上的源文件转换(见 export-docx.js);没装 pandoc 时说明怎么装。
-  ipcMain.handle('mdturn:export-docx', async (event, payload) => {
+  ipcMain.handle('draftback:export-docx', async (event, payload) => {
     if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的导出请求。');
     const sourcePath = payload && typeof payload.sourcePath === 'string' ? payload.sourcePath : '';
     if (!path.isAbsolute(sourcePath) || !/\.md$/i.test(sourcePath) || !fs.existsSync(sourcePath)) throw new Error('找不到要导出的 Markdown 文件。');
@@ -432,7 +434,7 @@ function installIpc() {
     shell.showItemInFolder(outputPath);
     return { ok: true, filePath: outputPath };
   });
-  ipcMain.handle('mdturn:notify-review-complete', async (event, payload) => {
+  ipcMain.handle('draftback:notify-review-complete', async (event, payload) => {
     if (!isTrustedRenderer(event) || !payload || typeof payload !== 'object') {
       throw new Error('拒绝无效的通知请求。');
     }

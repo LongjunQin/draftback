@@ -56,7 +56,7 @@ function readReviews(dataDir) {
 }
 
 test('mdreview open 创建会话并把文档交给 MDTurn', DARWIN_ONLY, async () => {
-  const f = fixture('mdturn-open-');
+  const f = fixture('draftback-open-');
   const source = path.join(f.docs, 'MDTurn 优先.md');
   fs.writeFileSync(source, '# MDTurn\n');
   const appBundle = path.join(f.base, 'MDTurn.app');
@@ -64,8 +64,8 @@ test('mdreview open 创建会话并把文档交给 MDTurn', DARWIN_ONLY, async (
   const opened = path.join(f.base, 'opened.json');
 
   const result = await runNodeAsync(MDREVIEW, ['open', source], {
-    MDREAD_DATA_DIR: f.dataDir,
-    MDTURN_APP_PATH: appBundle,
+    DRAFTBACK_DATA_DIR: f.dataDir,
+    DRAFTBACK_APP_PATH: appBundle,
     NODE_OPTIONS: `--require=${writeOpenInterceptor(f.base)}`,
     OPEN_CAPTURE: opened,
   });
@@ -95,8 +95,8 @@ test('mdreview open 唤起 MDTurn 失败时报错但保留已创建的会话', D
   ].join('\n'));
 
   const result = await runNodeAsync(MDREVIEW, ['open', source], {
-    MDREAD_DATA_DIR: f.dataDir,
-    MDTURN_APP_PATH: appBundle,
+    DRAFTBACK_DATA_DIR: f.dataDir,
+    DRAFTBACK_APP_PATH: appBundle,
     NODE_OPTIONS: `--require=${preload}`,
   });
 
@@ -114,7 +114,7 @@ test('mdreview open --no-open 只创建会话,不唤起 App', async () => {
   const opened = path.join(f.base, 'opened.json');
 
   const result = await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], {
-    MDREAD_DATA_DIR: f.dataDir,
+    DRAFTBACK_DATA_DIR: f.dataDir,
     NODE_OPTIONS: `--require=${writeOpenInterceptor(f.base)}`,
     OPEN_CAPTURE: opened,
   });
@@ -128,7 +128,7 @@ test('mdreview wait 在用户提交批注后以 0 退出并给出改稿指引', 
   const f = fixture('mdturn-wait-');
   const source = path.join(f.docs, '等待.md');
   fs.writeFileSync(source, '# 等待\n');
-  const env = { MDREAD_DATA_DIR: f.dataDir, MDREAD_WAIT_POLL_MS: '300' };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir, DRAFTBACK_WAIT_POLL_MS: '300' };
 
   const openResult = await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env);
   assert.equal(openResult.status, 0, openResult.stderr);
@@ -163,7 +163,7 @@ test('mdreview wait 跨轮:complete 后继续等待,用户开新一轮并提交�
   const f = fixture('mdturn-wait-round-');
   const source = path.join(f.docs, '跨轮.md');
   fs.writeFileSync(source, '# 跨轮\n');
-  const env = { MDREAD_DATA_DIR: f.dataDir, MDREAD_WAIT_POLL_MS: '300' };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir, DRAFTBACK_WAIT_POLL_MS: '300' };
   fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({ version: 1, file: '跨轮.md', annotations: [] }));
 
   // 第一轮走完: open -> submit(有批注) -> begin-apply -> complete
@@ -198,7 +198,7 @@ test('mdreview wait 在用户「定稿并关闭」后返回并明确审阅结束
   const f = fixture('mdturn-wait-final-');
   const source = path.join(f.docs, '定稿.md');
   fs.writeFileSync(source, '# 定稿\n');
-  const env = { MDREAD_DATA_DIR: f.dataDir, MDREAD_WAIT_POLL_MS: '300' };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir, DRAFTBACK_WAIT_POLL_MS: '300' };
   assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
   fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({ version: 1, file: '定稿.md', annotations: [{ id: 'n1', comment: '改', status: 'open' }] }));
   assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);
@@ -224,7 +224,7 @@ test('手工修改轮:complete 后 beginManualEdit 开 applying/manual;open 不�
   const f = fixture('mdturn-manual-');
   const source = path.join(f.docs, '手工.md');
   fs.writeFileSync(source, '# 手工\n');
-  const env = { MDREAD_DATA_DIR: f.dataDir, MDREAD_WAIT_POLL_MS: '300' };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir, DRAFTBACK_WAIT_POLL_MS: '300' };
   // 零批注提交 -> complete/approved
   assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
   assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);
@@ -254,7 +254,7 @@ test('手工修改轮期间,智能体入口 mdreview complete 必须拒绝,会�
   const f = fixture('mdturn-manual-guard-');
   const source = path.join(f.docs, '手工守护.md');
   fs.writeFileSync(source, '# 手工守护\n');
-  const env = { MDREAD_DATA_DIR: f.dataDir };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir };
   assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
   assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);
   assert.equal((await storeCall(env, `await s.beginManualEdit(${JSON.stringify(source)});`)).status, 0);
@@ -280,7 +280,7 @@ test('agent 改稿轮:批注全部处理后 mdreview complete 成功并记录 fi
   const f = fixture('mdturn-agent-complete-');
   const source = path.join(f.docs, '智能体.md');
   fs.writeFileSync(source, '# 智能体\n原文。\n');
-  const env = { MDREAD_DATA_DIR: f.dataDir };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir };
   assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
   // 一条旧格式批注(缺 status),必须按 open 计数;标 applied 后才能 complete
   fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({
@@ -308,7 +308,7 @@ test('mdreview wait 启动时批注已提交(ready_to_apply)立即以 0 返回�
   const f = fixture('mdturn-wait-ready-');
   const source = path.join(f.docs, '已提交.md');
   fs.writeFileSync(source, '# 已提交\n');
-  const env = { MDREAD_DATA_DIR: f.dataDir, MDREAD_WAIT_POLL_MS: '300' };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir, DRAFTBACK_WAIT_POLL_MS: '300' };
   assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
   fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({ version: 1, file: '已提交.md', annotations: [{ id: 'n1', comment: '改', status: 'open' }] }));
   assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);
@@ -328,10 +328,10 @@ test('mdreview wait 启动时批注已提交(ready_to_apply)立即以 0 返回�
 });
 
 test('mdreview open 在改稿阶段(begin-apply 后文件已变)复用本轮而不是标记冲突', async () => {
-  const f = fixture('mdturn-open-applying-');
+  const f = fixture('draftback-open-applying-');
   const source = path.join(f.docs, '改稿中.md');
   fs.writeFileSync(source, '# 改稿中\n');
-  const env = { MDREAD_DATA_DIR: f.dataDir };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir };
   assert.equal((await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env)).status, 0);
   fs.writeFileSync(`${source}.annotations.json`, JSON.stringify({ version: 1, file: '改稿中.md', annotations: [{ id: 'n1', comment: '改', status: 'open' }] }));
   assert.equal((await storeCall(env, `await s.submitReview(${JSON.stringify(source)});`)).status, 0);

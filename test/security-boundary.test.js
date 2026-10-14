@@ -75,8 +75,8 @@ function metaCsp() {
 }
 
 test('安全边界:内容安全策略、跨站来源拒绝、文档资源访问范围', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdread-security-'));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-security-'));
+  const dataDir = path.join(root, '.draftback');
   const docDir = path.join(root, 'docs', 'reports');
   const siblingDir = path.join(root, 'assets');
   fs.mkdirSync(docDir, { recursive: true });
@@ -89,7 +89,7 @@ test('安全边界:内容安全策略、跨站来源拒绝、文档资源访问�
 
   const child = spawn(process.execPath, ['server.js'], {
     cwd: PROJECT,
-    env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' },
+    env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir, DRAFTBACK_PORT: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
@@ -139,8 +139,8 @@ test('安全边界:内容安全策略、跨站来源拒绝、文档资源访问�
   assert.equal((await file('./图.svg')).status, 200, '文档同目录的图片可用');
   assert.equal((await file('../../assets/上级.svg')).status, 200, '临时目录内的上级目录资源可用');
   assert.equal((await file(path.join(siblingDir, '上级.svg'))).status, 200, '允许范围内的绝对路径可用');
-  assert.equal((await file(path.join(dataDir, 'reviews.json'))).status, 404, '临时目录下的隐藏目录(.mdread)不可读');
-  assert.equal((await file('../../.mdread/reviews.json')).status, 404, '相对路径绕进隐藏目录同样不可读');
+  assert.equal((await file(path.join(dataDir, 'reviews.json'))).status, 404, '临时目录下的隐藏目录(.draftback)不可读');
+  assert.equal((await file('../../.draftback/reviews.json')).status, 404, '相对路径绕进隐藏目录同样不可读');
   const hostsFile = process.platform === 'win32' ? 'C:\\Windows\\System32\\drivers\\etc\\hosts' : '/etc/hosts';
   assert.equal((await file(hostsFile)).status, 404, '允许范围之外的系统文件不可读');
   assert.equal((await file('./不存在.svg')).status, 404);

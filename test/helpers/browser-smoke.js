@@ -1,6 +1,6 @@
 'use strict';
 
-// 真实无头 Chrome 冒烟测试的公共部分:隔离 md-read 服务、Chrome 启动、CDP 客户端。
+// 真实无头 Chrome 冒烟测试的公共部分:隔离 draftback-service 服务、Chrome 启动、CDP 客户端。
 // 被 desktop-security-smoke.js 与 desktop-plain-document-smoke.js 共用,无 npm 依赖。
 
 const fs = require('node:fs');
@@ -125,12 +125,12 @@ class CdpClient {
 
 async function startServer(dataDir) {
   const child = spawn(process.execPath, ['server.js'], {
-    cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: PROJECT, env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir, DRAFTBACK_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += chunk; });
   const portFile = store.getPaths({ dataDir }).port;
-  const port = await waitUntil('md-read 隔离服务端口', async () => {
+  const port = await waitUntil('draftback-service 隔离服务端口', async () => {
     if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}: ${stderr}`);
     try {
       const value = Number(fs.readFileSync(portFile, 'utf8').trim());

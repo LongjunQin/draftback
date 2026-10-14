@@ -16,9 +16,9 @@ test('没有 pandoc 时给出明确的 NO_PANDOC 错误', async () => {
     () => exportDocx({ sourcePath: '/tmp/x.md', outputPath: '/tmp/x.docx', pandoc: '/nonexistent/pandoc' }),
     (error) => /pandoc/.test(error.message),
   );
-  const saved = process.env.MDTURN_PANDOC;
+  const saved = process.env.DRAFTBACK_PANDOC;
   const savedPath = process.env.PATH;
-  process.env.MDTURN_PANDOC = '/nonexistent/pandoc';
+  process.env.DRAFTBACK_PANDOC = '/nonexistent/pandoc';
   process.env.PATH = '/nonexistent';
   try {
     if (!['/opt/homebrew/bin/pandoc', '/usr/local/bin/pandoc', '/usr/bin/pandoc'].some((p) => fs.existsSync(p))) {
@@ -26,7 +26,7 @@ test('没有 pandoc 时给出明确的 NO_PANDOC 错误', async () => {
       await assert.rejects(() => exportDocx({ sourcePath: '/tmp/x.md', outputPath: '/tmp/x.docx' }), (error) => error.code === 'NO_PANDOC');
     }
   } finally {
-    if (saved === undefined) delete process.env.MDTURN_PANDOC; else process.env.MDTURN_PANDOC = saved;
+    if (saved === undefined) delete process.env.DRAFTBACK_PANDOC; else process.env.DRAFTBACK_PANDOC = saved;
     process.env.PATH = savedPath;
   }
 });

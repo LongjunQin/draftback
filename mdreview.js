@@ -76,7 +76,7 @@ function requestHealth(port, timeoutMs = 700) {
         try {
           const data = JSON.parse(body);
           const valid = response.statusCode === 200 && data && data.ok === true &&
-            data.service === 'md-read' && data.port === port;
+            data.service === 'draftback-service' && data.port === port;
           resolve(valid ? { port, data } : null);
         } catch { resolve(null); }
       });
@@ -103,7 +103,7 @@ function readRecordedPortStrict() {
 function candidatePorts() {
   const ports = [];
   const recorded = readRecordedPortStrict();
-  const configured = parsePortStrict(process.env.MDREAD_PORT || '8080');
+  const configured = parsePortStrict(process.env.DRAFTBACK_PORT || '8080');
   if (recorded) ports.push(recorded);
   if (Number.isInteger(configured)) {
     for (let port = configured; port <= Math.min(configured + 10, 65535); port += 1) ports.push(port);
@@ -160,7 +160,7 @@ async function notifyReviewChangedBestEffort(review, reason) {
     if (!service) return false;
     return await postReviewNotification(service.port, review.id, reason);
   } catch (error) {
-    if (process.env.MDREAD_DEBUG) {
+    if (process.env.DRAFTBACK_DEBUG) {
       console.error(`主动通知未送达（状态已安全落盘）: ${error.message || error}`);
     }
     return false;
@@ -171,7 +171,7 @@ async function notifyReviewChangedBestEffort(review, reason) {
 function resolveDesktopApp() {
   const home = process.env.HOME;
   const candidates = [
-    process.env.MDTURN_APP_PATH,
+    process.env.DRAFTBACK_APP_PATH,
     '/Applications/Draftback.app',
     home ? path.join(home, 'Applications', 'Draftback.app') : null,
     '/Applications/MDTurn.app',
@@ -226,7 +226,7 @@ async function commandOpen(args) {
   const appPath = resolveDesktopApp();
   if (!appPath) {
     throw new ReviewStoreError('APP_NOT_FOUND',
-      '未找到回稿(Draftback.app)。请把它安装到 /Applications(下载: https://github.com/LongjunQin/mdturn/releases)后重试;审阅会话已创建,安装后重新运行本命令即可。', { httpStatus: 500 });
+      '未找到回稿(Draftback.app)。请把它安装到 /Applications(下载: https://github.com/LongjunQin/draftback/releases)后重试;审阅会话已创建,安装后重新运行本命令即可。', { httpStatus: 500 });
   }
   const appOpened = spawnSync('/usr/bin/open', ['-a', appPath, review.absPath], {
     encoding: 'utf8', timeout: 5000,
@@ -269,7 +269,7 @@ function sameState(a, b) {
 async function commandWait(args) {
   if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
   const absPath = path.resolve(args.file);
-  const pollMs = Math.max(300, Number(process.env.MDREAD_WAIT_POLL_MS) || 2000);
+  const pollMs = Math.max(300, Number(process.env.DRAFTBACK_WAIT_POLL_MS) || 2000);
   const deadline = Date.now() + (args.timeoutMinutes || 480) * 60000;
   const initial = await getReviewByPath(absPath);
   if (!initial) {
@@ -471,7 +471,7 @@ async function main() {
     if (error.code === 'OPEN_ANNOTATIONS' && args.file) {
       console.error(`→ 回到 ${path.resolve(args.file)}.annotations.json 把剩余 open 批注逐条标为 applied/wontfix,再运行 mdreview complete。`);
     }
-    if (error.details && process.env.MDREAD_DEBUG) console.error(JSON.stringify(error.details, null, 2));
+    if (error.details && process.env.DRAFTBACK_DEBUG) console.error(JSON.stringify(error.details, null, 2));
   }
 }
 

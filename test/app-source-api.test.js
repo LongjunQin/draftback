@@ -54,13 +54,13 @@ async function waitForPort(portFile, child) {
 
 async function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-app-api-'));
-  const dataDir = path.join(root, '.mdread');
+  const dataDir = path.join(root, '.draftback');
   const docRoot = path.join(root, 'docs');
   fs.mkdirSync(docRoot, { recursive: true });
   store.ensureDataDir({ dataDir });
   const child = spawn(process.execPath, ['server.js'], {
     cwd: PROJECT,
-    env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' },
+    env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir, DRAFTBACK_PORT: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';

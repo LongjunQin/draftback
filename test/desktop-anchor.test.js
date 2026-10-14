@@ -15,8 +15,8 @@ test('UMD 模块同时支持 CommonJS 和浏览器 window 全局', () => {
 
   const sandbox = {};
   vm.runInNewContext(fs.readFileSync(MODULE_PATH, 'utf8'), sandbox, { filename: MODULE_PATH });
-  assert.equal(sandbox.MDTurnAnchor.ANCHOR_VERSION, 3);
-  assert.equal(typeof sandbox.MDTurnAnchor.organizeAnnotations, 'function');
+  assert.equal(sandbox.DraftbackAnchor.ANCHOR_VERSION, 3);
+  assert.equal(typeof sandbox.DraftbackAnchor.organizeAnnotations, 'function');
 });
 
 test('anchorVersion 3 协议固定 UTF-16、end exclusive 和解析退化顺序', () => {

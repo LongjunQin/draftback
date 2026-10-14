@@ -14,8 +14,8 @@ const snapshot = require('../lib/snapshot');
 const PROJECT = path.resolve(__dirname, '..');
 
 function setup(t) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdread-snapshot-')));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-snapshot-')));
+  const dataDir = path.join(root, '.draftback');
   const docDir = path.join(root, 'docs');
   fs.mkdirSync(docDir, { recursive: true });
   store.ensureDataDir({ dataDir });
@@ -150,7 +150,7 @@ test('CLI:mdreview snapshot / snapshots / restore --dry-run 与 --yes', async (t
   const doc = path.join(docDir, '方案.md');
   fs.writeFileSync(doc, '# 方案\n正文\n');
   await openWithNote(doc, dataDir, 'CLI 批注');
-  const env = { ...process.env, MDREAD_DATA_DIR: dataDir };
+  const env = { ...process.env, DRAFTBACK_DATA_DIR: dataDir };
   const run = (...args) => spawnSync(process.execPath, ['mdreview.js', ...args], { cwd: PROJECT, env, encoding: 'utf8' });
 
   const created = run('snapshot', '--reason', 'cli-test', '--json');

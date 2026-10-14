@@ -24,13 +24,13 @@ targets:
     entitlements:
       path: DraftbackSync.entitlements
       properties:
-        com.apple.developer.icloud-container-identifiers: [iCloud.org.mdturn]
+        com.apple.developer.icloud-container-identifiers: [iCloud.app.draftback]
         com.apple.developer.icloud-services: [CloudKit]
         # 开发签名默认落到 Production 环境会被拒(Invalid bundle ID for container);
         # Debug 固定 Development,Release 由 build.sh 用 CODE_SIGN_ENTITLEMENTS 换成 Release.entitlements
         com.apple.developer.icloud-container-environment: Development
         # Mac 开发构建还要这条 Development 容器列表,否则 CloudKit 报 Invalid bundle ID for container
-        com.apple.developer.icloud-container-development-container-identifiers: [iCloud.org.mdturn]
+        com.apple.developer.icloud-container-development-container-identifiers: [iCloud.app.draftback]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.draftback.mac.sync

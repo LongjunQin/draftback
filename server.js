@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /*
- * md-read —— 回稿(Draftback,原名 MDTurn)的本机冻结审阅服务。
+ * draftback-service —— 回稿(Draftback,原名 MDTurn)的本机冻结审阅服务。
  *
  * 只监听 loopback:桌面壳加载 /desktop,CLI 与 App 通过 /api/* 协作。
  */
@@ -25,16 +25,16 @@ function parsePort(value, fallback = null, options = {}) {
   const minimum = options.allowZero ? 0 : 1;
   return Number.isInteger(port) && port >= minimum && port <= 65535 ? port : fallback;
 }
-const PORT_BASE = parsePort(process.env.MDREAD_PORT === undefined ? '8080' : process.env.MDREAD_PORT, null, { allowZero: true });
+const PORT_BASE = parsePort(process.env.DRAFTBACK_PORT === undefined ? '8080' : process.env.DRAFTBACK_PORT, null, { allowZero: true });
 if (PORT_BASE === null) {
-  console.error(`启动失败: MDREAD_PORT 无效: ${process.env.MDREAD_PORT}`);
+  console.error(`启动失败: DRAFTBACK_PORT 无效: ${process.env.DRAFTBACK_PORT}`);
   process.exit(1);
 }
-const HOST = process.env.MDREAD_HOST || '127.0.0.1';
+const HOST = process.env.DRAFTBACK_HOST || '127.0.0.1';
 const STATIC_DIR = path.join(__dirname, 'static');
 const PATHS = store.getPaths();
 const EVENT_HEARTBEAT_MS = (() => {
-  const value = Number(process.env.MDREAD_EVENT_HEARTBEAT_MS);
+  const value = Number(process.env.DRAFTBACK_EVENT_HEARTBEAT_MS);
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
 })();
 const reviewEvents = createReviewEventHub({ heartbeatMs: EVENT_HEARTBEAT_MS });
@@ -91,7 +91,7 @@ const DESKTOP_CSP = [
 ].join('; ');
 
 // 文档资源(图片、附件)的访问边界:只提供文档所在目录树、用户主目录、系统临时目录之内的文件,
-// 且主目录与临时目录下不进入任何以 . 开头的隐藏目录(.ssh、.mdread、.git 等);
+// 且主目录与临时目录下不进入任何以 . 开头的隐藏目录(.ssh、.draftback、.git 等);
 // 文档自己就住在隐藏目录里时,它所在的目录树照常可用。
 function isInside(root, target) {
   const relative = path.relative(root, target);
@@ -482,6 +482,10 @@ async function handleSyncApi(req, res, pathname, q) {
     }
     return sendJson(res, 200, result);
   }
+  if (pathname === '/api/app/sync/reset') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    return sendJson(res, 200, await sync.requestPushAll());
+  }
   if (pathname === '/api/app/sync/receipt-sent') {
     if (!body.reviewId) return sendJson(res, 400, { error: 'bad_request', message: '缺少 reviewId。' });
     const review = await sync.markReceiptSent(body.reviewId, body.batchId);
@@ -493,7 +497,7 @@ async function handleSyncApi(req, res, pathname, q) {
 async function handleLocalReviewApi(req, res, pathname, q) {
   if (pathname === '/api/health') {
     if (!allowMethods(req, res, ['GET'])) return;
-    return sendJson(res, 200, { ok: true, service: 'md-read', port: activePort });
+    return sendJson(res, 200, { ok: true, service: 'draftback-service', port: activePort });
   }
   if (pathname === '/api/reviews') {
     if (!allowMethods(req, res, ['GET'])) return;
@@ -764,7 +768,7 @@ let activePort = null;
 let ownedPortInode = null;
 function banner(port) {
   const line = '─'.repeat(54);
-  console.log(`\n${line}\n  📖  md-read 已启动  ${HOST}:${port}\n${line}`);
+  console.log(`\n${line}\n  📖  draftback-service 已启动  ${HOST}:${port}\n${line}`);
   console.log(`  回稿: http://localhost:${port}/desktop`);
   console.log('  停止: Ctrl + C\n');
 }
@@ -799,7 +803,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 // 作为 App 内置服务运行时:主进程崩溃或被强退不会给我们发 SIGTERM,这里自己盯着父进程,
 // 它消失就收摊;否则孤儿服务继续占着端口文件,下次启动的新 App 会复用它,看到的还是旧版代码。
-const parentPid = Number(process.env.MDTURN_PARENT_PID);
+const parentPid = Number(process.env.DRAFTBACK_PARENT_PID);
 if (Number.isInteger(parentPid) && parentPid > 0) {
   const watchdog = setInterval(() => {
     try { process.kill(parentPid, 0); } catch (error) {

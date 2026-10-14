@@ -16,7 +16,7 @@ npm run dev
 
 On both macOS and Windows, the desktop shell starts the bundled `server.js` with Electron's own Node
 runtime. It binds only to `127.0.0.1`, chooses a free port, and shares service state with the
-`mdreview` CLI below `~/.mdread`. End users do not need a separate Node.js installation.
+`mdreview` CLI below `~/.draftback`. End users do not need a separate Node.js installation.
 
 ## Build and test
 
@@ -33,7 +33,7 @@ macOS build commands remain available as `dist:app`, `dist:dmg`, `dist:zip`, and
 
 ## Renderer bridge
 
-`preload.js` exposes only `window.mdturnDesktop`: Markdown file picking, reveal-in-file-manager,
+`preload.js` exposes only `window.draftbackDesktop`: Markdown file picking, reveal-in-file-manager,
 safe external HTTP(S) links, review completion notifications, review activation, commands, and
 single-instance file-open delivery. Context isolation and the renderer sandbox remain enabled.
 

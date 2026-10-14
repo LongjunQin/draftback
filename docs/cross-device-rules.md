@@ -1,4 +1,6 @@
-# MDTurn 跨端规则(v2.1,2026-10-14)
+# 回稿 跨端规则(v2.2,2026-10-14)
+
+> 2026-10-14 产品改名为 Draftback / 回稿(原名 MDTurn);v2.2 只把容器与内部标识换成新名,规则本身与 v2.1 相同。命名沿革见 [naming-history.md](naming-history.md)。
 
 > 路线图 v3 第 5 节的落地文档。它回答一个问题:同一份文档在 Mac 和 iPhone 之间来回时,**谁说了算、怎么认出是同一份、批注怎么走、出了岔子怎么办**。第一轮和第二轮的代码按这份规则写,验收也按它验。
 > 不懂技术也能读:每条规则先说人话,再给实现要点。
@@ -21,7 +23,7 @@
 
 ### 2.1 Mac 发起的审阅(主线)
 
-人话:智能体在 Mac 上写好文档、用 MDTurn 发起审阅,手机上就自动出现这份文档;你批完点完成,批注回到 Mac,智能体接着改;改完新版又自动回到手机。
+人话:智能体在 Mac 上写好文档、用回稿发起审阅,手机上就自动出现这份文档;你批完点完成,批注回到 Mac,智能体接着改;改完新版又自动回到手机。
 
 规则:
 
@@ -173,8 +175,8 @@
 
 | 项 | 决定 |
 |---|---|
-| 容器 | `iCloud.org.mdturn`,私有数据库,自定义区 `mdturn`(支持按变更令牌增量拉取) |
-| Mac 接法 | 原生辅助程序 `MDTurn Sync.app`(Swift + CloudKit 框架,无界面),随 MDTurn.app 打包,由 MDTurn 启动与停止,主进程退出它随之退出;它通过本地服务的 `/api/app/sync/*` 接口取待推送项、报推送结果、导入批次。不用 CloudKit JS:网页登录令牌 30 分钟过期(勾"保持登录"也只有两周),常开同步会反复要求登录 |
+| 容器 | `iCloud.app.draftback`,私有数据库,自定义区 `draftback`(支持按变更令牌增量拉取)。2026-10-14 随改名从 `iCloud.org.mdturn` 换过来,旧容器闲置 |
+| Mac 接法 | 原生辅助程序 `Draftback Sync.app`(Swift + CloudKit 框架,无界面),随 Draftback.app 打包,由回稿启动与停止,主进程退出它随之退出;它通过本地服务的 `/api/app/sync/*` 接口取待推送项、报推送结果、导入批次。不用 CloudKit JS:网页登录令牌 30 分钟过期(勾"保持登录"也只有两周),常开同步会反复要求登录 |
 | 签名 | 开发期用 Apple Development 证书 + Xcode 自动描述文件,且必须显式签 `icloud-container-environment = Development` 与 `icloud-container-development-container-identifiers`(自建工程 Xcode 不会代加,缺了 CloudKit 报 "Invalid bundle ID for container");发布用 Developer ID 证书 + 含 iCloud 容器的 Developer ID 描述文件,嵌在 `Contents/embedded.provisionprofile`,环境签 Production;发布前先把数据结构部署到容器的 Production 环境 |
 | 记录类型 | `ReviewDocument`(记录名 = 文档标识):标题、会话标识、轮次、状态、版本指纹、正文(资产)、附件清单、改稿摘要、推送时间、推送者;`Attachment`(记录名 = 文档标识 + 相对路径校验码):所属文档、相对路径、字节数、校验码、文件(资产);`AnnotationBatch`(记录名 = 批次编号):文档标识、会话标识、所依据版本、完成时间、设备、批注 JSON;`Receipt`(记录名 = `receipt_` + 批次编号,与 `AnnotationBatch` 同区不能重名):接受/拒收、原因、说明、接受的批注 id、接收时间 |
 | 谁写谁读 | Mac 写 `ReviewDocument`、`Attachment`、`Receipt`,只读 `AnnotationBatch`;手机写 `AnnotationBatch`,只读其余三种。任何一种记录都只有一方写,不会两头改同一条 |

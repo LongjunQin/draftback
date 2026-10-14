@@ -11,8 +11,8 @@ const store = require('../lib/review-store');
 const PROJECT = path.resolve(__dirname, '..');
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdread-store-'));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-store-'));
+  const dataDir = path.join(root, '.draftback');
   t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { root, dataDir, options: { dataDir } };
 }
@@ -89,8 +89,8 @@ test('mdreview wait 在用户提交审阅后退出,无会话时直接报错', as
   const opened = await store.openReview(file, f.options);
   await store.mutateAnnotations(file, (data) => data.annotations.push({ id: 'w1', comment: '改一下', status: 'open' }));
   const waiting = runNode(['mdreview.js', 'wait', file, '--timeout-minutes', '1'], {
-    MDREAD_DATA_DIR: f.dataDir,
-    MDREAD_WAIT_POLL_MS: '300',
+    DRAFTBACK_DATA_DIR: f.dataDir,
+    DRAFTBACK_WAIT_POLL_MS: '300',
   });
   await new Promise((resolve) => setTimeout(resolve, 700));
   await store.submitReview(opened.review.id, f.options);
@@ -101,7 +101,7 @@ test('mdreview wait 在用户提交审阅后退出,无会话时直接报错', as
   assert.match(result.stdout, /annotations\.json/);
   assert.match(result.stdout, /begin-apply/);
 
-  const missing = await runNode(['mdreview.js', 'wait', path.join(f.root, '不存在.md')], { MDREAD_DATA_DIR: f.dataDir });
+  const missing = await runNode(['mdreview.js', 'wait', path.join(f.root, '不存在.md')], { DRAFTBACK_DATA_DIR: f.dataDir });
   assert.notEqual(missing.code, 0);
   assert.match(missing.stderr, /没有活动审阅会话/);
 });
@@ -109,7 +109,7 @@ test('mdreview wait 在用户提交审阅后退出,无会话时直接报错', as
 test('mdreview 全流程 stdout 内嵌代理下一步引导', async (t) => {
   const f = fixture(t);
   const file = writeMd(f.root, '引导.md');
-  const env = { MDREAD_DATA_DIR: f.dataDir };
+  const env = { DRAFTBACK_DATA_DIR: f.dataDir };
 
   const opened = await runNode(['mdreview.js', 'open', file, '--no-open'], env);
   assert.equal(opened.code, 0, opened.stderr);
@@ -174,7 +174,7 @@ test('多进程 mdreview open 不丢记录', async (t) => {
   const f = fixture(t);
   const files = Array.from({ length: 8 }, (_, index) => writeMd(f.root, `并发/文档 ${index}.md`));
   const reviewRuns = await Promise.all(files.map((file) => runNode(['mdreview.js', 'open', file, '--no-open'], {
-    MDREAD_DATA_DIR: f.dataDir,
+    DRAFTBACK_DATA_DIR: f.dataDir,
   })));
   assert.ok(reviewRuns.every((result) => result.code === 0), reviewRuns.map((result) => result.stderr).join('\n'));
   assert.equal((await store.listReviews(f.options)).length, files.length);

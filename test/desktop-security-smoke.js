@@ -20,7 +20,7 @@ const { sleep, waitUntil, stopChild, startServer, startChrome } = require('./hel
 
 async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-security-smoke-'));
-  const dataDir = path.join(root, '.mdread');
+  const dataDir = path.join(root, '.draftback');
   const docRoot = path.join(root, 'docs');
   const profileDir = path.join(root, 'chrome-profile');
   const source = path.join(docRoot, '夹带代码的方案.md');

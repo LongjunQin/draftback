@@ -3,8 +3,8 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-  const Anchor = window.MDTurnAnchor;
-  const bridge = window.mdturnDesktop || null;
+  const Anchor = window.DraftbackAnchor;
+  const bridge = window.draftbackDesktop || null;
 
   const nodes = {
     shell: $('#appShell'), tabList: $('#tabList'), openTabButton: $('#openTabButton'), primaryAction: $('#primaryAction'), finalizeAction: $('#finalizeAction'),
@@ -45,14 +45,26 @@
     plainEdit: { text: '编辑中 · 直接保存到文件', detail: '保存前会核对文件是否被别的程序改过;编辑期间智能体不会冻结这篇文档。', icon: 'ph-pencil-simple-line' },
   };
 
+  // 改名前的本地存储键 mdturn.*(标签、未保存草稿、阅读偏好)一次性搬到 draftback.*;命名沿革见 docs/naming-history.md
+  (function migrateLegacyLocalStorage() {
+    try {
+      for (const key of Object.keys(localStorage)) {
+        if (!key.startsWith('mdturn.')) continue;
+        const next = `draftback.${key.slice('mdturn.'.length)}`;
+        if (localStorage.getItem(next) === null) localStorage.setItem(next, localStorage.getItem(key));
+        localStorage.removeItem(key);
+      }
+    } catch (_) {}
+  })();
+
   const state = {
     tabs: [],
     activeId: null,
     recents: [],
-    leftMode: localStorage.getItem('mdturn.leftMode') === 'files' ? 'files' : 'outline',
-    leftCollapsed: localStorage.getItem('mdturn.leftCollapsed') === '1',
-    rightCollapsed: localStorage.getItem('mdturn.rightCollapsed') === '1',
-    readerZoom: Math.min(2.2, Math.max(0.6, parseFloat(localStorage.getItem('mdturn.readerZoom')) || 1)),
+    leftMode: localStorage.getItem('draftback.leftMode') === 'files' ? 'files' : 'outline',
+    leftCollapsed: localStorage.getItem('draftback.leftCollapsed') === '1',
+    rightCollapsed: localStorage.getItem('draftback.rightCollapsed') === '1',
+    readerZoom: Math.min(2.2, Math.max(0.6, parseFloat(localStorage.getItem('draftback.readerZoom')) || 1)),
     selectionFrame: null,
     nextRoundHintAt: 0,
     cachedAnchor: null,
@@ -230,7 +242,7 @@
     return tab;
   }
 
-  function draftKey(tabId) { return `mdturn.draft.${tabId}`; }
+  function draftKey(tabId) { return `draftback.draft.${tabId}`; }
 
   // localStorage 配额被大草稿占满时 setItem 会抛错;界面偏好这类小东西写不进去也不能让打开/关闭标签中断
   function storeLocal(key, value) {
@@ -283,12 +295,12 @@
       activeId: state.activeId,
       tabs: state.tabs.map((tab) => ({ id: tab.id, path: tab.review.sourceFile, kind: tab.kind })),
     };
-    storeLocal('mdturn.tabs', JSON.stringify(payload));
+    storeLocal('draftback.tabs', JSON.stringify(payload));
   }
 
   async function restoreTabs() {
     let saved;
-    try { saved = JSON.parse(localStorage.getItem('mdturn.tabs') || '{}'); }
+    try { saved = JSON.parse(localStorage.getItem('draftback.tabs') || '{}'); }
     catch { saved = {}; }
     const entries = Array.isArray(saved.tabs) ? saved.tabs.slice(0, 10) : [];
     for (const entry of entries) {
@@ -510,8 +522,8 @@
   }
 
   function syncEditorToSource(tab) {
-    if (state.editorView && window.MDTurnEditor && state.editorView.__mdturnFallback !== true) {
-      try { window.MDTurnEditor.setValue(state.editorView, editorBody(tab.source)); return; } catch (_) {}
+    if (state.editorView && window.DraftbackEditor && state.editorView.__draftbackFallback !== true) {
+      try { window.DraftbackEditor.setValue(state.editorView, editorBody(tab.source)); return; } catch (_) {}
     }
     destroyEditor(); // 退化编辑器或灌入失败:销毁后由 renderEditor 按新正文重建
   }
@@ -547,7 +559,7 @@
   function completionHistory() {
     if (state.announcedCompletions) return state.announcedCompletions;
     let saved = [];
-    try { saved = JSON.parse(localStorage.getItem('mdturn.announcedCompletions') || '[]'); } catch (_) {}
+    try { saved = JSON.parse(localStorage.getItem('draftback.announcedCompletions') || '[]'); } catch (_) {}
     state.announcedCompletions = new Set(Array.isArray(saved) ? saved.filter((item) => typeof item === 'string') : []);
     return state.announcedCompletions;
   }
@@ -566,7 +578,7 @@
     history.add(key);
     const recent = [...history].slice(-80);
     state.announcedCompletions = new Set(recent);
-    try { localStorage.setItem('mdturn.announcedCompletions', JSON.stringify(recent)); } catch (_) {}
+    try { localStorage.setItem('draftback.announcedCompletions', JSON.stringify(recent)); } catch (_) {}
     return true;
   }
 
@@ -832,7 +844,7 @@
     const zoom = Math.min(2.2, Math.max(0.6, next));
     if (zoom === state.readerZoom) return;
     state.readerZoom = zoom;
-    storeLocal('mdturn.readerZoom', String(zoom));
+    storeLocal('draftback.readerZoom', String(zoom));
     applyReaderZoom();
   }
 
@@ -1038,7 +1050,7 @@
   }
   function clearFind() {
     find.ranges = []; find.index = -1; find.query = '';
-    if (findSupported()) { CSS.highlights.delete('mdturn-find'); CSS.highlights.delete('mdturn-find-current'); }
+    if (findSupported()) { CSS.highlights.delete('draftback-find'); CSS.highlights.delete('draftback-find-current'); }
     nodes.findCount.textContent = '0 / 0'; nodes.findBar.classList.remove('no-match');
   }
   function textNodesOf(root) {
@@ -1074,17 +1086,17 @@
     const keepIndex = find.query === query ? find.index : -1;
     find.query = query; find.ranges = ranges;
     find.index = ranges.length ? Math.min(Math.max(keepIndex, 0), ranges.length - 1) : -1;
-    if (findSupported()) CSS.highlights.set('mdturn-find', new Highlight(...ranges));
+    if (findSupported()) CSS.highlights.set('draftback-find', new Highlight(...ranges));
     nodes.findBar.classList.toggle('no-match', !ranges.length);
     highlightCurrentFind(true);
   }
   function highlightCurrentFind(scroll) {
     if (!find.ranges.length || find.index < 0) {
-      if (findSupported()) CSS.highlights.delete('mdturn-find-current');
+      if (findSupported()) CSS.highlights.delete('draftback-find-current');
       nodes.findCount.textContent = `0 / ${find.ranges.length}`; return;
     }
     const current = find.ranges[find.index];
-    if (findSupported()) CSS.highlights.set('mdturn-find-current', new Highlight(current));
+    if (findSupported()) CSS.highlights.set('draftback-find-current', new Highlight(current));
     nodes.findCount.textContent = `${find.index + 1} / ${find.ranges.length}`;
     if (scroll) {
       const rect = current.getBoundingClientRect();
@@ -1138,7 +1150,7 @@
     finally { restoreDetailsAfterPrint(); }
   }
 
-  // 手机导出的批注批次(.mdturn-batch.json)拖进窗口即导入;结果以提示显示,会话标签随事件流自动刷新。
+  // 手机导出的批注批次(.draftback-batch.json)拖进窗口即导入;结果以提示显示,会话标签随事件流自动刷新。
   // 批次文件由页面读出内容再提交:拖放即授权,服务不必按路径去读受保护的「下载」文件夹。
   async function importBatchFile(file) {
     let batch;
@@ -1169,12 +1181,12 @@
       if (!hasFiles(event)) return;
       event.preventDefault(); depth = 0; nodes.dropOverlay.hidden = true;
       const files = Array.from(event.dataTransfer.files || []);
-      const batchFiles = files.filter((file) => /\.mdturn-batch\.json$/i.test(file.name));
+      const batchFiles = files.filter((file) => /\.draftback-batch\.json$/i.test(file.name));
       const docFiles = files.filter((file) => /\.md$/i.test(file.name)); // 服务端只认 .md,别的后缀要给提示而不是静默吞掉
       const markdown = !docFiles.length ? []
         : bridge && typeof bridge.pathsForFiles === 'function' ? bridge.pathsForFiles(docFiles) : docFiles.map((file) => file.path).filter(Boolean);
       batchFiles.forEach((file) => void importBatchFile(file));
-      if (!markdown.length && !batchFiles.length) { toast('只能打开 .md 文件或 .mdturn-batch.json 批注批次。', 'error'); return; }
+      if (!markdown.length && !batchFiles.length) { toast('只能打开 .md 文件或 .draftback-batch.json 批注批次。', 'error'); return; }
       if (markdown.length) void openPaths(markdown);
     });
   }
@@ -1245,21 +1257,21 @@
   function setLeftMode(mode) {
     state.leftMode = mode === 'files' ? 'files' : 'outline';
     state.leftCollapsed = false;
-    storeLocal('mdturn.leftMode', state.leftMode);
-    storeLocal('mdturn.leftCollapsed', '0');
+    storeLocal('draftback.leftMode', state.leftMode);
+    storeLocal('draftback.leftCollapsed', '0');
     renderLayoutState();
   }
 
   function toggleLeft(force) {
     state.leftCollapsed = typeof force === 'boolean' ? force : !state.leftCollapsed;
-    storeLocal('mdturn.leftCollapsed', state.leftCollapsed ? '1' : '0');
+    storeLocal('draftback.leftCollapsed', state.leftCollapsed ? '1' : '0');
     renderLayoutState();
     requestAnimationFrame(scheduleMarkerPositions);
   }
 
   function toggleRight(force) {
     state.rightCollapsed = typeof force === 'boolean' ? force : !state.rightCollapsed;
-    storeLocal('mdturn.rightCollapsed', state.rightCollapsed ? '1' : '0');
+    storeLocal('draftback.rightCollapsed', state.rightCollapsed ? '1' : '0');
     renderLayoutState();
     requestAnimationFrame(scheduleMarkerPositions);
   }
@@ -1629,10 +1641,10 @@
       button.addEventListener('click', () => {
         const tab = activeTab();
         setOutlineActive(item.id);
-        if (tab?.mode === 'edit' && window.MDTurnEditor && state.editorView && typeof window.MDTurnEditor.revealLine === 'function') {
+        if (tab?.mode === 'edit' && window.DraftbackEditor && state.editorView && typeof window.DraftbackEditor.revealLine === 'function') {
           // 编辑器里不含 Front Matter,大纲行号是按整篇源文算的,要减去 Front Matter 占的行数
           const frontMatterLines = (splitFrontMatter(tab.source).frontMatter.match(/\n/g) || []).length;
-          window.MDTurnEditor.revealLine(state.editorView, Math.max(1, item.lineStart - frontMatterLines));
+          window.DraftbackEditor.revealLine(state.editorView, Math.max(1, item.lineStart - frontMatterLines));
           return;
         }
         const target = document.getElementById(item.id);
@@ -1863,7 +1875,7 @@
     nodes.content.querySelectorAll('.note-pin').forEach((pin) => pin.remove());
     nodes.content.querySelectorAll('.legacy-note-block').forEach((block) => block.classList.remove('legacy-note-block'));
     clearMarkerOverlay();
-    if (globalThis.CSS && CSS.highlights) CSS.highlights.delete('mdturn-open');
+    if (globalThis.CSS && CSS.highlights) CSS.highlights.delete('draftback-open');
     const open = openAnnotations(tab);
     if (!open.length) return;
     const leaves = mappedLeafBlocks();
@@ -1897,7 +1909,7 @@
       });
       groups.get(key).notes.push(note);
     });
-    if (ranges.length && globalThis.Highlight && CSS.highlights) CSS.highlights.set('mdturn-open', new Highlight(...ranges));
+    if (ranges.length && globalThis.Highlight && CSS.highlights) CSS.highlights.set('draftback-open', new Highlight(...ranges));
     groups.forEach(({ block, range, notes }) => {
       if (!block) return;
       const button = document.createElement('button'); button.type = 'button'; button.className = 'note-pin';
@@ -1984,9 +1996,9 @@
     const note = tab.annotations.find((item) => item.id === noteId); if (!note) return;
     if (tab.mode === 'edit') {
       const line = Math.max(1, Number(note.lineStart) || 1);
-      if (window.MDTurnEditor && state.editorView && typeof window.MDTurnEditor.revealLine === 'function') {
-        window.MDTurnEditor.revealLine(state.editorView, line);
-      } else if (state.editorView && state.editorView.__mdturnFallback === true) {
+      if (window.DraftbackEditor && state.editorView && typeof window.DraftbackEditor.revealLine === 'function') {
+        window.DraftbackEditor.revealLine(state.editorView, line);
+      } else if (state.editorView && state.editorView.__draftbackFallback === true) {
         const value = state.editorView.value || '';
         const position = value.split('\n').slice(0, line - 1).reduce((total, part) => total + part.length + 1, 0);
         state.editorView.focus(); state.editorView.setSelectionRange(position, position);
@@ -2052,7 +2064,7 @@
     if (!options.keepState) state.dialog = null;
   }
 
-  function dialogPositionKey() { return 'mdturn.annotationDialogPosition'; }
+  function dialogPositionKey() { return 'draftback.annotationDialogPosition'; }
 
   function clampAnnotationDialog(left, top) {
     const panel = nodes.annotationDialogPanel;
@@ -2222,7 +2234,7 @@
     } catch (error) { toast(friendlyError(error, '更新批注状态'), 'error'); }
   }
 
-  const Patcher = window.MDTurnPatch || null;
+  const Patcher = window.DraftbackPatch || null;
   function splitFrontMatter(text) {
     return Patcher ? Patcher.splitFrontMatter(String(text || '')) : { frontMatter: '', body: String(text || '') };
   }
@@ -2238,7 +2250,7 @@
 
   function getEditorValue() {
     if (!state.editorView) return '';
-    if (window.MDTurnEditor && state.editorView.__mdturnFallback !== true) return window.MDTurnEditor.getValue(state.editorView);
+    if (window.DraftbackEditor && state.editorView.__draftbackFallback !== true) return window.DraftbackEditor.getValue(state.editorView);
     return state.editorView.value || '';
   }
 
@@ -2246,11 +2258,11 @@
     destroyEditor();
     nodes.codeEditor.replaceChildren();
     const doc = editorBody(tab.editorDraft != null ? tab.editorDraft : tab.source);
-    if (window.MDTurnEditor) {
-      state.editorView = window.MDTurnEditor.create(nodes.codeEditor, { doc, onChange: (value) => editorChanged(tab, withFrontMatter(tab, value)) });
+    if (window.DraftbackEditor) {
+      state.editorView = window.DraftbackEditor.create(nodes.codeEditor, { doc, onChange: (value) => editorChanged(tab, withFrontMatter(tab, value)) });
     } else {
       const textarea = document.createElement('textarea');
-      textarea.value = doc; textarea.className = 'fallback-editor'; textarea.__mdturnFallback = true;
+      textarea.value = doc; textarea.className = 'fallback-editor'; textarea.__draftbackFallback = true;
       textarea.addEventListener('input', () => editorChanged(tab, withFrontMatter(tab, textarea.value)));
       nodes.codeEditor.appendChild(textarea); state.editorView = textarea;
     }
@@ -2258,8 +2270,8 @@
   }
 
   function destroyEditor() {
-    if (state.editorView && window.MDTurnEditor && state.editorView.__mdturnFallback !== true) {
-      try { window.MDTurnEditor.destroy(state.editorView); } catch (_) {}
+    if (state.editorView && window.DraftbackEditor && state.editorView.__draftbackFallback !== true) {
+      try { window.DraftbackEditor.destroy(state.editorView); } catch (_) {}
     }
     state.editorView = null; state.editorTabId = null; nodes.codeEditor.replaceChildren();
   }
@@ -2324,9 +2336,9 @@
       if (result.review) tab.review = { ...tab.review, ...result.review };
       tab.dirty = false; tab.editorDraft = null; tab.saveRequestId = null; tab.renderedHash = null;
       clearDraft(tab);
-      if (state.editorTabId === tab.id && state.editorView && window.MDTurnEditor && state.editorView.__mdturnFallback !== true) {
+      if (state.editorTabId === tab.id && state.editorView && window.DraftbackEditor && state.editorView.__draftbackFallback !== true) {
         // 编辑器里的内容按回写后的正文重置,下次保存以这一版为原文。
-        try { window.MDTurnEditor.setValue(state.editorView, editorBody(content)); } catch (_) {}
+        try { window.DraftbackEditor.setValue(state.editorView, editorBody(content)); } catch (_) {}
       }
       updateSaveState(tab); renderTabs();
       toast(writeback.summary);
@@ -2344,12 +2356,12 @@
 
   // 块级局部回写:只把用户真改过的块写回文件,其余块保持原文字节(static/markdown-patch.js)。
   function patchForSave(tab, edited) {
-    const live = state.editorTabId === tab.id && state.editorView && window.MDTurnEditor && state.editorView.__mdturnFallback !== true;
-    if (!Patcher || !live || typeof window.MDTurnEditor.normalize !== 'function') {
+    const live = state.editorTabId === tab.id && state.editorView && window.DraftbackEditor && state.editorView.__draftbackFallback !== true;
+    if (!Patcher || !live || typeof window.DraftbackEditor.normalize !== 'function') {
       return { text: edited, summary: 'Markdown 已保存。', stats: null };
     }
     let normalized = null;
-    try { normalized = window.MDTurnEditor.normalize(state.editorView, editorBody(tab.source)); } catch (_) { normalized = null; }
+    try { normalized = window.DraftbackEditor.normalize(state.editorView, editorBody(tab.source)); } catch (_) { normalized = null; }
     if (typeof normalized !== 'string') return { text: edited, summary: 'Markdown 已保存。', stats: null };
     let result;
     try { result = Patcher.patch(md, tab.source, normalized, editorBody(edited)); }
@@ -2382,7 +2394,7 @@
     if (isPlain(tab)) {
       await setEditing(tab, true);
       tab.mode = 'edit'; persistTabs(); renderApp();
-      setTimeout(() => { if (window.MDTurnEditor && state.editorView) window.MDTurnEditor.focus(state.editorView); }, 60);
+      setTimeout(() => { if (window.DraftbackEditor && state.editorView) window.DraftbackEditor.focus(state.editorView); }, 60);
       return;
     }
     const review = tab.review;
@@ -2424,7 +2436,7 @@
     tab.mode = 'edit';
     if (tab.review.status === 'applying') { state.leftCollapsed = true; state.rightCollapsed = false; }
     persistTabs(); renderApp();
-    setTimeout(() => { if (window.MDTurnEditor && state.editorView) window.MDTurnEditor.focus(state.editorView); }, 60);
+    setTimeout(() => { if (window.DraftbackEditor && state.editorView) window.DraftbackEditor.focus(state.editorView); }, 60);
   }
 
   async function enterReadMode() {

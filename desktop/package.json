@@ -1,5 +1,5 @@
 {
-  "name": "mdturn-desktop",
+  "name": "draftback-desktop",
   "version": "1.0.0-beta.1",
   "private": true,
   "description": "Draftback (回稿) desktop app: you mark up the draft, the AI revises it, the draft comes back",
@@ -16,7 +16,7 @@
     "dist:zip": "npm run build:vendor && npm run build:helper && electron-builder --mac zip --arm64",
     "dist:beta": "npm run build:vendor && npm run build:helper && electron-builder --mac --arm64 --dir && electron-builder --mac dmg zip --arm64",
     "dist:win": "npm run build:vendor && electron-builder --win nsis --x64",
-    "build:helper": "bash ../mac-sync/scripts/build.sh ${MDTURN_HELPER_CONFIG:-Debug} || echo '同步辅助程序未构建(需要 Xcode 登录开发者账号),安装包里将不带同步'"
+    "build:helper": "bash ../mac-sync/scripts/build.sh ${DRAFTBACK_HELPER_CONFIG:-Debug} || echo '同步辅助程序未构建(需要 Xcode 登录开发者账号),安装包里将不带同步'"
   },
   "devDependencies": {
     "@milkdown/crepe": "7.22.1",
@@ -49,15 +49,15 @@
     "extraResources": [
       {
         "from": "../server.js",
-        "to": "mdturn-server/server.js"
+        "to": "draftback-server/server.js"
       },
       {
         "from": "../lib",
-        "to": "mdturn-server/lib"
+        "to": "draftback-server/lib"
       },
       {
         "from": "../static",
-        "to": "mdturn-server/static"
+        "to": "draftback-server/static"
       }
     ],
     "fileAssociations": [

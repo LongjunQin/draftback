@@ -15,8 +15,8 @@ const batches = require('../lib/batches');
 const PROJECT = path.resolve(__dirname, '..');
 
 function setup(t) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdread-batches-')));
-  const dataDir = path.join(root, '.mdread');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-batches-')));
+  const dataDir = path.join(root, '.draftback');
   const docDir = path.join(root, 'docs');
   fs.mkdirSync(docDir, { recursive: true });
   store.ensureDataDir({ dataDir });
@@ -98,9 +98,9 @@ test('CLI:mdreview import-batch 接收文件并提示下一步;拒收时非零�
   const doc = path.join(docDir, '方案.md');
   fs.writeFileSync(doc, '# 方案\n正文\n');
   const { review } = await store.openReview(doc, options);
-  const file = path.join(docDir, '方案.abcd1234.mdturn-batch.json');
+  const file = path.join(docDir, '方案.abcd1234.draftback-batch.json');
   fs.writeFileSync(file, JSON.stringify(makeBatch(review)));
-  const env = { ...process.env, MDREAD_DATA_DIR: dataDir };
+  const env = { ...process.env, DRAFTBACK_DATA_DIR: dataDir };
   const run = (...args) => spawnSync(process.execPath, ['mdreview.js', ...args], { cwd: PROJECT, env, encoding: 'utf8' });
 
   const ok = run('import-batch', file);
@@ -137,7 +137,7 @@ function request(port, pathname, options = {}) {
 }
 
 async function startServer(t, dataDir) {
-  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, MDREAD_DATA_DIR: dataDir, MDREAD_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: PROJECT, env: { ...process.env, DRAFTBACK_DATA_DIR: dataDir, DRAFTBACK_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += chunk; });
   t.after(async () => {
@@ -172,7 +172,7 @@ test('服务接口:/api/app/batch/import 接受批次内容(拖放)或文件路�
   assert.equal(byContent.json.review.status, 'ready_to_apply');
   assert.equal(store.readAnnotations(docA).annotations.length, 2);
 
-  const file = path.join(docDir, '乙.mdturn-batch.json');
+  const file = path.join(docDir, '乙.draftback-batch.json');
   fs.writeFileSync(file, JSON.stringify(makeBatch(reviewB)));
   const byPath = await request(port, '/api/app/batch/import', { method: 'POST', body: { path: file } });
   assert.equal(byPath.status, 200, byPath.text);

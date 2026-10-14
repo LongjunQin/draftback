@@ -18,27 +18,27 @@ function deliverOpenFiles(paths) {
   for (const listener of listeners) listener(markdownPaths.slice());
 }
 
-ipcRenderer.on('mdturn:open-files', (_event, paths) => deliverOpenFiles(paths));
-ipcRenderer.on('mdturn:command', (_event, command) => {
+ipcRenderer.on('draftback:open-files', (_event, paths) => deliverOpenFiles(paths));
+ipcRenderer.on('draftback:command', (_event, command) => {
   if (typeof command !== 'string') return;
   for (const listener of commandListeners) listener(command);
 });
-ipcRenderer.on('mdturn:activate-review', (_event, reviewId) => {
+ipcRenderer.on('draftback:activate-review', (_event, reviewId) => {
   if (typeof reviewId !== 'string') return;
   for (const listener of activateReviewListeners) listener(reviewId);
 });
 
-contextBridge.exposeInMainWorld('mdturnDesktop', Object.freeze({
+contextBridge.exposeInMainWorld('draftbackDesktop', Object.freeze({
   platform: process.platform,
-  pickMarkdown: () => ipcRenderer.invoke('mdturn:pick-markdown'),
-  revealPath: (targetPath) => ipcRenderer.invoke('mdturn:reveal-path', targetPath),
-  openExternal: (url) => ipcRenderer.invoke('mdturn:open-external', url),
-  notifyReviewComplete: (payload) => ipcRenderer.invoke('mdturn:notify-review-complete', payload),
-  exportPdf: (payload) => ipcRenderer.invoke('mdturn:export-pdf', payload),
-  print: () => ipcRenderer.invoke('mdturn:print'),
-  newDocument: (payload) => ipcRenderer.invoke('mdturn:new-document', payload),
-  exportHtml: (payload) => ipcRenderer.invoke('mdturn:export-html', payload),
-  exportDocx: (payload) => ipcRenderer.invoke('mdturn:export-docx', payload),
+  pickMarkdown: () => ipcRenderer.invoke('draftback:pick-markdown'),
+  revealPath: (targetPath) => ipcRenderer.invoke('draftback:reveal-path', targetPath),
+  openExternal: (url) => ipcRenderer.invoke('draftback:open-external', url),
+  notifyReviewComplete: (payload) => ipcRenderer.invoke('draftback:notify-review-complete', payload),
+  exportPdf: (payload) => ipcRenderer.invoke('draftback:export-pdf', payload),
+  print: () => ipcRenderer.invoke('draftback:print'),
+  newDocument: (payload) => ipcRenderer.invoke('draftback:new-document', payload),
+  exportHtml: (payload) => ipcRenderer.invoke('draftback:export-html', payload),
+  exportDocx: (payload) => ipcRenderer.invoke('draftback:export-docx', payload),
   // 拖放:沙盒渲染进程拿不到 File.path,由预加载脚本换算成绝对路径
   pathsForFiles(files) {
     const list = Array.from(files || []);

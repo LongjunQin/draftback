@@ -8,7 +8,7 @@ const test = require('node:test');
 const { markdownPathsFromArguments, normalizeMarkdownPath } = require('../open-files');
 
 test('Markdown arguments support spaces, Chinese names, uppercase extensions and deduplication', (context) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-open-files-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-open-files-'));
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const markdown = path.join(directory, '审阅 文档.MD');
   const ignored = path.join(directory, 'notes.txt');

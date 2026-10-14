@@ -34,7 +34,7 @@ struct DraftbackApp: App {
 
 /// 只做一件事:注册静默推送,CloudKit 的区变更通知到达时让文档库去拉取。
 final class AppDelegate: NSObject, UIApplicationDelegate {
-    static let cloudPushNotification = Notification.Name("mdturn.cloud.push")
+    static let cloudPushNotification = Notification.Name("draftback.cloud.push")
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         application.registerForRemoteNotifications()

@@ -36,7 +36,7 @@ struct ReaderWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> AnnotatingWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.userContentController.add(context.coordinator, name: "mdturn")
+        configuration.userContentController.add(context.coordinator, name: "draftback")
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.preferences.isTextInteractionEnabled = true
         let webView = AnnotatingWebView(frame: .zero, configuration: configuration)
@@ -45,7 +45,7 @@ struct ReaderWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .always
         webView.navigationDelegate = context.coordinator
         webView.onAnnotateRequested = { [weak webView] in
-            webView?.evaluateJavaScript("window.MDTurnReader && window.MDTurnReader.captureSelection()") { _, _ in }
+            webView?.evaluateJavaScript("window.DraftbackReader && window.DraftbackReader.captureSelection()") { _, _ in }
         }
         context.coordinator.bridge = ReaderBridge(webView: webView)
         context.coordinator.pendingLoad = document
@@ -71,7 +71,7 @@ struct ReaderWebView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ webView: AnnotatingWebView, coordinator: Coordinator) {
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "mdturn")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "draftback")
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
@@ -144,13 +144,13 @@ final class ReaderBridge {
             "annotations": document.highlightPayload,
             "assets": document.assets,
         ]
-        call("window.MDTurnReader.load(\(json(payload)))")
+        call("window.DraftbackReader.load(\(json(payload)))")
     }
 
-    func setAnnotations(_ notes: [[String: Any]]) { call("window.MDTurnReader.setAnnotations(\(json(notes)))") }
-    func focus(noteId: String) { call("window.MDTurnReader.focusNote(\(json(noteId)))") }
-    func scrollToHeading(_ id: String) { call("window.MDTurnReader.scrollToHeading(\(json(id)))") }
-    func clearSelection() { call("window.MDTurnReader.clearSelection()") }
+    func setAnnotations(_ notes: [[String: Any]]) { call("window.DraftbackReader.setAnnotations(\(json(notes)))") }
+    func focus(noteId: String) { call("window.DraftbackReader.focusNote(\(json(noteId)))") }
+    func scrollToHeading(_ id: String) { call("window.DraftbackReader.scrollToHeading(\(json(id)))") }
+    func clearSelection() { call("window.DraftbackReader.clearSelection()") }
 
     func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
         guard let webView else { return }
