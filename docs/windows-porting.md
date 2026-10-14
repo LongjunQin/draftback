@@ -1,6 +1,6 @@
 # Windows 11 x64 支持
 
-MDTurn 使用同一个仓库和同一套 Electron、Node 服务及 Web UI 构建 macOS 与 Windows 版本。
+回稿使用同一个仓库和同一套 Electron、Node 服务及 Web UI 构建 macOS 与 Windows 版本。
 Windows 支持是平台适配，不是独立 fork 或业务重写。
 
 ## 技术实现
@@ -27,7 +27,7 @@ node --test test/*.test.js
 npm --prefix desktop run dist:win
 ```
 
-安装包输出为 `desktop/dist/MDTurn-<version>-x64.exe`。首个 Beta 不做代码签名，SmartScreen
+安装包输出为 `desktop/dist/Draftback-<version>-x64.exe`。首个 Beta 不做代码签名，SmartScreen
 显示“未知发布者”属于预期行为。
 
 ## 验收重点

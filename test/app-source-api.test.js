@@ -70,7 +70,7 @@ async function fixture(t) {
       child.kill('SIGTERM');
       await new Promise((resolve) => child.once('exit', resolve));
     }
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
   const port = await waitForPort(store.getPaths({ dataDir }).port, child);
   return { root, dataDir, docRoot, port, stderr: () => stderr };

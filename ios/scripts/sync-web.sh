@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SRC="$ROOT/static"
-DEST="$ROOT/ios/MDTurn/Web/vendor"
+DEST="$ROOT/ios/Draftback/Web/vendor"
 mkdir -p "$DEST"
 for f in markdown-it.min.js katex.min.js katex.min.css texmath.min.js highlight.min.js highlight-github.min.css mermaid.min.js dompurify.min.js; do
   cp "$SRC/vendor/$f" "$DEST/$f"

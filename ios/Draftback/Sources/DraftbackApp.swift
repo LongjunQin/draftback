@@ -1,11 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// MDTurn iOS:SwiftUI 外壳 + WKWebView 内核(与 Mac 共用同一套渲染与批注锚点代码)。
+/// 回稿(Draftback)iOS:SwiftUI 外壳 + WKWebView 内核(与 Mac 共用同一套渲染与批注锚点代码)。
 /// 范围:打开本地 Markdown、阅读、划词批注、批注本地持久保存、导出批注批次与 PDF;
 /// 以及跨端规则第 12 节的 CloudKit 同步:接收 Mac 推来的审阅文档,把批注批次交回 Mac,收回执与新版。
 @main
-struct MDTurnApp: App {
+struct DraftbackApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = DocumentStore()
     @Environment(\.scenePhase) private var scenePhase

@@ -1,9 +1,9 @@
 #!/bin/bash
-# 把 MDTurn 测试版签名、构建并装到连着这台 Mac 的 iPhone 上(命令行完成,不用打开 Xcode)。
+# 把回稿(Draftback)测试版签名、构建并装到连着这台 Mac 的 iPhone 上(命令行完成,不用打开 Xcode)。
 #
 # 开发者账户激活前用 Xcode 里的免费个人团队签名:证书 7 天有效,过期后重跑本脚本即可。
-# 测试版用单独的包标识 org.mdturn.ios.dev、主屏幕名"MDTurn 测试",
-# 正式标识 org.mdturn.ios 留给开发者账户(免费团队先注册的标识,付费团队可能无法再用)。
+# 测试版用单独的包标识 app.draftback.ios.dev、主屏幕名"回稿 测试"(英文系统 "Draftback Beta"),
+# 正式标识 app.draftback.ios 留给 TestFlight / App Store。
 #
 # 用法:
 #   ios/scripts/install-device.sh              # 自动找第一台已配对、已开开发者模式的 iPhone
@@ -12,8 +12,9 @@
 set -euo pipefail
 IOS="$(cd "$(dirname "$0")/.." && pwd)"
 TEAM="${MDTURN_TEAM:-BG7Y59AT44}"
-BUNDLE_ID="${MDTURN_BUNDLE_ID:-org.mdturn.ios.dev}"
-DISPLAY_NAME="${MDTURN_DISPLAY_NAME:-MDTurn 测试}"
+BUNDLE_ID="${MDTURN_BUNDLE_ID:-app.draftback.ios.dev}"
+DISPLAY_NAME="${MDTURN_DISPLAY_NAME:-回稿 测试}"
+DISPLAY_NAME_EN="${MDTURN_DISPLAY_NAME_EN:-Draftback Beta}"
 CONFIGURATION="${MDTURN_CONFIGURATION:-Release}"
 DERIVED="$IOS/build/DerivedData-device"
 DEVICE="${1:-}"
@@ -38,13 +39,13 @@ echo "目标设备: $DEVICE  签名团队: $TEAM  包标识: $BUNDLE_ID"
 "$IOS/scripts/sync-web.sh"
 (cd "$IOS" && xcodegen generate --quiet)
 
-xcodebuild -project "$IOS/MDTurn.xcodeproj" -scheme MDTurn -configuration "$CONFIGURATION" \
+xcodebuild -project "$IOS/Draftback.xcodeproj" -scheme Draftback -configuration "$CONFIGURATION" \
   -destination "platform=iOS,id=$DEVICE" -derivedDataPath "$DERIVED" \
   -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
-  DEVELOPMENT_TEAM="$TEAM" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" MDTURN_DISPLAY_NAME="$DISPLAY_NAME" \
+  DEVELOPMENT_TEAM="$TEAM" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" DRAFTBACK_DISPLAY_NAME_ZH="$DISPLAY_NAME" DRAFTBACK_DISPLAY_NAME_EN="$DISPLAY_NAME_EN" \
   build -quiet
 
-APP="$DERIVED/Build/Products/$CONFIGURATION-iphoneos/MDTurn.app"
+APP="$DERIVED/Build/Products/$CONFIGURATION-iphoneos/Draftback.app"
 xcrun devicectl device install app --device "$DEVICE" "$APP"
 LAUNCH_LOG="$(mktemp)"
 if xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID" >"$LAUNCH_LOG" 2>&1; then
@@ -53,7 +54,7 @@ elif grep -q "not been explicitly trusted\|invalid code signature" "$LAUNCH_LOG"
   cat <<'TIP'
 已装好,但手机还没信任这个开发者证书,所以暂时打不开。在手机上:
   设置 → 通用 → VPN 与设备管理 → 开发者 App 下点 "Apple Development: …" → 信任
-然后点主屏幕上的「MDTurn 测试」即可。每台手机只需信任一次。
+然后点主屏幕上的「回稿 测试」即可。每台手机只需信任一次。
 TIP
 else
   echo "已装好,但没能从 Mac 上启动(手机可能锁屏了),直接在手机上点「${DISPLAY_NAME}」即可。原因:"

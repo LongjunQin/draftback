@@ -156,7 +156,7 @@ async function fixture(t, prefix = 'mdturn-events-') {
       child.kill('SIGTERM');
       await new Promise((resolve) => child.once('exit', resolve));
     }
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
   const port = await waitForPort(store.getPaths({ dataDir }).port, child);
   return { root, dataDir, docRoot, child, port, stderr: () => stderr };
@@ -371,6 +371,6 @@ test('CLI complete 的主动通知不可达时仍保持成功终态', async () =
     assert.equal(persisted.status, 'complete');
     assert.equal(persisted.finalHash, store.sha256File(file));
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

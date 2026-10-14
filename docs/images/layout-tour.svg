@@ -6,7 +6,7 @@
   </defs>
 
   <rect width="880" height="600" rx="20" fill="#f5f7fa"/>
-  <text x="440" y="48" text-anchor="middle" font-size="30" font-weight="700" fill="#1d1d1f">The MDTurn window at a glance</text>
+  <text x="440" y="48" text-anchor="middle" font-size="30" font-weight="700" fill="#1d1d1f">The Draftback window at a glance</text>
 
   <!-- Callout: tabs -->
   <text x="151" y="92" font-size="15" font-weight="700" fill="#0071e3">Multi-document tabs</text>

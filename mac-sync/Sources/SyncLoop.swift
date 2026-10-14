@@ -25,7 +25,7 @@ final class SyncLoop {
     }
 
     func run() async -> Never {
-        log.info("MDTurn Sync 启动,数据目录 \(server.dataDir.path),容器 \(CloudSchema.containerID)")
+        log.info("Draftback Sync 启动,数据目录 \(server.dataDir.path),容器 \(CloudSchema.containerID)")
         while true {
             if let pid = parentPid, kill(pid, 0) != 0, errno == ESRCH {
                 log.info("主进程已退出,随之退出")

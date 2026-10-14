@@ -1,4 +1,4 @@
-# MDTurn desktop shell
+# Draftback desktop shell
 
 This directory contains the shared Electron shell for macOS and Windows. The renderer, review API,
 and Markdown service are common to both platforms; only service startup, native menus, window chrome,

@@ -1,6 +1,6 @@
 import Foundation
 
-/// 与 MDTurn 本地服务(server.js)说话:取待推送队列、取正文与附件、报推送结果、送批次、报回执、心跳。
+/// 与回稿本地服务(server.js)说话:取待推送队列、取正文与附件、报推送结果、送批次、报回执、心跳。
 /// 端口从数据目录的 port 文件读(与 mdreview CLI 同一套规矩);服务不在时所有调用抛错,主循环下一轮再试。
 struct ServerClient {
     let dataDir: URL
@@ -20,7 +20,7 @@ struct ServerClient {
         case badPayload(String)
         var description: String {
             switch self {
-            case .serviceDown: return "MDTurn 本地服务未运行"
+            case .serviceDown: return "回稿本地服务未运行"
             case .http(let status, let body): return "HTTP \(status): \(body.prefix(200))"
             case .badPayload(let why): return "响应无法解析: \(why)"
             }

@@ -13,7 +13,7 @@ const PROJECT = path.resolve(__dirname, '..');
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdread-store-'));
   const dataDir = path.join(root, '.mdread');
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { root, dataDir, options: { dataDir } };
 }
 

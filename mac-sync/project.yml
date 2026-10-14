@@ -1,8 +1,8 @@
-# MDTurn Sync:Mac 上负责与 iCloud(CloudKit)打交道的无界面辅助程序(跨端规则第 12 节)。
+# Draftback Sync:Mac 上负责与 iCloud(CloudKit)打交道的无界面辅助程序(跨端规则第 12 节)。
 # 生成工程:mac-sync/scripts/build.sh(xcodegen generate + xcodebuild,自动签名)
-name: MDTurnSync
+name: DraftbackSync
 options:
-  bundleIdPrefix: org.mdturn
+  bundleIdPrefix: app.draftback
   deploymentTarget:
     macOS: "13.0"
   createIntermediateGroups: true
@@ -16,13 +16,13 @@ settings:
     DEVELOPMENT_TEAM: ""
     ENABLE_HARDENED_RUNTIME: YES
 targets:
-  MDTurnSync:
+  DraftbackSync:
     type: application
     platform: macOS
     sources:
       - path: Sources
     entitlements:
-      path: MDTurnSync.entitlements
+      path: DraftbackSync.entitlements
       properties:
         com.apple.developer.icloud-container-identifiers: [iCloud.org.mdturn]
         com.apple.developer.icloud-services: [CloudKit]
@@ -33,13 +33,13 @@ targets:
         com.apple.developer.icloud-container-development-container-identifiers: [iCloud.org.mdturn]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.mdturn.desktop.sync
-        PRODUCT_NAME: MDTurn Sync
+        PRODUCT_BUNDLE_IDENTIFIER: app.draftback.mac.sync
+        PRODUCT_NAME: Draftback Sync
         GENERATE_INFOPLIST_FILE: NO
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: MDTurn Sync
+        CFBundleDisplayName: Draftback Sync
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true

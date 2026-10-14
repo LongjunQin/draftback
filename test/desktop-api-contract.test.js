@@ -70,7 +70,7 @@ async function fixture(t) {
       child.kill('SIGTERM');
       await new Promise((resolve) => child.once('exit', resolve));
     }
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
   const port = await waitForPort(store.getPaths({ dataDir }).port, child);
   return { root, dataDir, docRoot, port, stderr: () => stderr };
@@ -89,7 +89,7 @@ test('/desktop 页面只在 loopback 上提供且拒绝写方法', async (t) => 
     const local = await request(f.port, pathname);
     assert.equal(local.status, 200, `${pathname} 应允许 loopback`);
     assert.match(local.headers['content-type'] || '', /^text\/html/);
-    assert.match(local.text, /MDTurn/);
+    assert.match(local.text, /回稿/);
   }
 
   const wrongMethod = await request(f.port, '/desktop', { method: 'POST', body: {} });

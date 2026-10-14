@@ -92,7 +92,7 @@
     try {
       response = await fetch(url, { cache: 'no-store', ...options });
     } catch (error) {
-      throw new ApiError('本地 MDTurn 服务不可达。', 0, 'service_unavailable', { cause: error && error.message });
+      throw new ApiError('本地回稿服务不可达。', 0, 'service_unavailable', { cause: error && error.message });
     }
     const type = response.headers.get('content-type') || '';
     let body = null;
@@ -102,7 +102,7 @@
     } else {
       const text = await response.text();
       if (!response.ok || type.includes('text/html')) {
-        throw new ApiError('服务返回了意外页面，请重启 MDTurn 后再试。', response.status, 'unexpected_response', { text: text.slice(0, 180) });
+        throw new ApiError('服务返回了意外页面，请重启回稿后再试。', response.status, 'unexpected_response', { text: text.slice(0, 180) });
       }
     }
     if (!response.ok) {
@@ -616,7 +616,7 @@
     if (first) {
       const title = tab.review.title || tab.review.file || '当前文档';
       toast(error
-        ? `《${title}》有远程更新，暂时未能同步，MDTurn 会自动重试。`
+        ? `《${title}》有远程更新，暂时未能同步，回稿会自动重试。`
         : `《${title}》有远程更新。未保存草稿已保护，保存后会立即同步。`);
     }
   }
@@ -896,7 +896,7 @@
 
   // ---------- 导出 HTML(单文件) ----------
   // 正文取当前渲染结果;样式只带 desktop.css 里 :root 变量与 .markdown-body 规则(浅色),
-  // 代码高亮与公式样式整份内联,公式字体内联成 data: URI;图片读回来内联。文件可脱离 MDTurn 单独打开与发送。
+  // 代码高亮与公式样式整份内联,公式字体内联成 data: URI;图片读回来内联。文件可脱离回稿单独打开与发送。
   async function fetchAsDataUrl(url) {
     const response = await fetch(url, { cache: 'no-store' });
     if (!response.ok) throw new Error(`${response.status}`);
@@ -954,7 +954,7 @@
     return [
       '<!doctype html>', '<html lang="zh-CN">', '<head>', '<meta charset="utf-8">',
       '<meta name="viewport" content="width=device-width, initial-scale=1">',
-      '<meta name="generator" content="MDTurn">',
+      '<meta name="generator" content="Draftback">',
       `<title>${escapeHtml(title)}</title>`,
       `<style>${vendor.join('\n')}</style>`,
       `<style>${collectExportCss()}</style>`,
@@ -991,7 +991,7 @@
     if (!tab) { toast('先打开一篇文档再导出。', 'error'); return; }
     if (tab.mode === 'edit') captureEditorValue(tab);
     if (tab.dirty) { toast('有未保存的修改,请先按 ⌘S 保存,再导出 Word。', 'error'); return; }
-    if (!bridge || typeof bridge.exportDocx !== 'function') { toast('导出 Word 需要在 MDTurn 应用里使用。', 'error'); return; }
+    if (!bridge || typeof bridge.exportDocx !== 'function') { toast('导出 Word 需要在回稿应用里使用。', 'error'); return; }
     try {
       const result = await bridge.exportDocx({ sourcePath: tab.review.sourceFile, suggestedName: tab.review.title || 'document' });
       if (result && result.ok) toast('Word 已导出。');
@@ -2210,7 +2210,7 @@
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status,
-          appliedNote: status === 'applied' ? '由我在 MDTurn 中手工修改并确认。' : '由我在 MDTurn 中确认本轮不修改。',
+          appliedNote: status === 'applied' ? '由我在回稿中手工修改并确认。' : '由我在回稿中确认本轮不修改。',
           expectedSourceHash: tab.sourceHash,
           expectedRevision: tab.revision,
         }),

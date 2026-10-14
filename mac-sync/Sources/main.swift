@@ -1,6 +1,6 @@
 import Foundation
 
-// MDTurn Sync:无界面,由 MDTurn.app 启动(也可手动跑,方便排查)。
+// Draftback Sync:无界面,由 Draftback.app(回稿)启动(也可手动跑,方便排查)。
 // 环境变量:MDREAD_DATA_DIR(默认 ~/.mdread)、MDTURN_PARENT_PID(主进程退出则随之退出)、MDTURN_SYNC_INTERVAL(秒,默认 15)
 // 参数:--once 只跑一轮就退出(排查用);--delete-records 名1,名2 删除云端记录后退出(排查用)
 

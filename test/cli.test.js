@@ -234,7 +234,7 @@ test('手工修改轮:complete 后 beginManualEdit 开 applying/manual;open 不�
 
   const open = await runNodeAsync(MDREVIEW, ['open', source, '--no-open'], env);
   assert.equal(open.status, 0, open.stderr);
-  assert.match(open.stdout, /用户正在 MDTurn 里手工修改/);
+  assert.match(open.stdout, /用户正在回稿里手工修改/);
   assert.match(open.stdout, /不要改这个文件/);
   const reviews = Object.values(readReviews(f.dataDir).reviews);
   assert.equal(reviews.filter((r) => r.status === 'applying').length, 1, 'open 不应再创建新会话');

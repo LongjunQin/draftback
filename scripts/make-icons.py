@@ -4,7 +4,7 @@
 用法: python3 scripts/make-icons.py branding/icon-1024.png
 
 产出:
-  ios/MDTurn/Assets.xcassets/AppIcon.appiconset/   iOS 单尺寸 1024(不带透明通道,系统自己切圆角)
+  ios/Draftback/Assets.xcassets/AppIcon.appiconset/   iOS 单尺寸 1024(不带透明通道,系统自己切圆角)
   desktop/build/icon.png                            macOS:824 圆角方块居中放在 1024 透明画布上,带投影(苹果规范)
   desktop/build/icon-source-fullbleed.png           原图备份
   desktop/build/icon.ico                            Windows:256/128/64/48/32/16 圆角版
@@ -54,9 +54,9 @@ def main(source):
     if src.size != (1024, 1024):
         sys.exit(f"源图必须是 1024×1024,现在是 {src.size}")
 
-    ios_dir = ROOT / "ios/MDTurn/Assets.xcassets/AppIcon.appiconset"
+    ios_dir = ROOT / "ios/Draftback/Assets.xcassets/AppIcon.appiconset"
     ios_dir.mkdir(parents=True, exist_ok=True)
-    (ROOT / "ios/MDTurn/Assets.xcassets/Contents.json").write_text(json.dumps({"info": {"author": "xcode", "version": 1}}, indent=2) + "\n")
+    (ROOT / "ios/Draftback/Assets.xcassets/Contents.json").write_text(json.dumps({"info": {"author": "xcode", "version": 1}}, indent=2) + "\n")
     src.save(ios_dir / "icon-1024.png", optimize=True)
     (ios_dir / "Contents.json").write_text(json.dumps({
         "images": [{"filename": "icon-1024.png", "idiom": "universal", "platform": "ios", "size": "1024x1024"}],

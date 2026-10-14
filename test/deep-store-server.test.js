@@ -19,7 +19,7 @@ function fixture(t) {
   const docRoot = path.join(root, 'docs');
   fs.mkdirSync(docRoot, { recursive: true });
   store.ensureDataDir({ dataDir });
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { root, dataDir, docRoot };
 }
 

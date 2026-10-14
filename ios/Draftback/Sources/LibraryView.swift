@@ -7,9 +7,10 @@ struct LibraryView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var importing = false
 
-    /// 「文件」App 里显示的文件夹名就是 App 的显示名(测试版是「MDTurn 测试」)。
+    /// 「文件」App 里显示的文件夹名就是 App 的显示名(测试版是「回稿 测试」)。
     private var appFolderName: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? "MDTurn"
+        (Bundle.main.localizedInfoDictionary?["CFBundleDisplayName"] as? String)
+            ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? "回稿"
     }
 
     private var markdownTypes: [UTType] {
@@ -55,14 +56,14 @@ struct LibraryView: View {
                             }
                         }
                     } header: {
-                        Text("MDTurn 文件夹")
+                        Text("\(appFolderName) 文件夹")
                     } footer: {
                         Text("「文件」App → 我的 iPhone → \(appFolderName) 里的 Markdown 会列在这里。")
                     }
                 }
                 Section("最近文件") {
                     if store.recents.isEmpty {
-                        Text("还没有打开过文件。从「文件」App 选择一篇 .md,或在其他 App 里分享到 MDTurn。").foregroundStyle(.secondary)
+                        Text("还没有打开过文件。从「文件」App 选择一篇 .md,或在其他 App 里分享到回稿。").foregroundStyle(.secondary)
                     }
                     ForEach(store.recents) { recent in
                         Button { store.open(recent: recent) } label: {
@@ -76,7 +77,7 @@ struct LibraryView: View {
                     }
                 }
             }
-            .navigationTitle("MDTurn")
+            .navigationTitle("回稿")
             .refreshable { store.refreshSync() }
             .onAppear { store.refreshLocalFiles() }
             .onChange(of: scenePhase) { _, phase in if phase == .active { store.refreshLocalFiles() } }

@@ -167,11 +167,15 @@ async function notifyReviewChangedBestEffort(review, reason) {
   }
 }
 
-function resolveMDTurnApp() {
+// 改名后是 Draftback.app(中文系统里显示「回稿」);旧版 MDTurn.app 仍兼容,方便过渡期
+function resolveDesktopApp() {
+  const home = process.env.HOME;
   const candidates = [
     process.env.MDTURN_APP_PATH,
+    '/Applications/Draftback.app',
+    home ? path.join(home, 'Applications', 'Draftback.app') : null,
     '/Applications/MDTurn.app',
-    process.env.HOME ? path.join(process.env.HOME, 'Applications', 'MDTurn.app') : null,
+    home ? path.join(home, 'Applications', 'MDTurn.app') : null,
   ].filter(Boolean);
   for (const candidate of candidates) {
     try {
@@ -195,7 +199,7 @@ async function commandOpen(args) {
   printReview(review);
   if (recovered) console.log('检测到旧会话冲突且批注已全部处理,已自动结束旧会话。');
   if (review.status === 'applying' && review.applyMode === 'manual') {
-    console.log('用户正在 MDTurn 里手工修改这篇文档,未创建新一轮。');
+    console.log('用户正在回稿里手工修改这篇文档,未创建新一轮。');
     console.log(`→ Agent 下一步: 不要改这个文件。以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交修改后返回;届时若还需要用户审阅,再重新 mdreview open。`);
     return;
   }
@@ -217,21 +221,21 @@ async function commandOpen(args) {
 
   if (process.platform !== 'darwin') {
     throw new ReviewStoreError('OPEN_UNSUPPORTED',
-      '当前系统不支持自动唤起 MDTurn,请手动在 MDTurn 应用中打开该文档(会话已创建,亦可用 --no-open 静默此提示)。', { httpStatus: 500 });
+      '当前系统不支持自动唤起回稿,请手动在回稿应用中打开该文档(会话已创建,亦可用 --no-open 静默此提示)。', { httpStatus: 500 });
   }
-  const appPath = resolveMDTurnApp();
+  const appPath = resolveDesktopApp();
   if (!appPath) {
     throw new ReviewStoreError('APP_NOT_FOUND',
-      '未找到 MDTurn.app。请把 MDTurn 安装到 /Applications(下载: https://github.com/LongjunQin/mdturn/releases)后重试;审阅会话已创建,安装后重新运行本命令即可。', { httpStatus: 500 });
+      '未找到回稿(Draftback.app)。请把它安装到 /Applications(下载: https://github.com/LongjunQin/mdturn/releases)后重试;审阅会话已创建,安装后重新运行本命令即可。', { httpStatus: 500 });
   }
   const appOpened = spawnSync('/usr/bin/open', ['-a', appPath, review.absPath], {
     encoding: 'utf8', timeout: 5000,
   });
   if (appOpened.error || appOpened.status !== 0) {
     const detail = (appOpened.stderr || appOpened.error?.message || '').trim();
-    throw new ReviewStoreError('APP_OPEN_FAILED', `无法打开 MDTurn${detail ? `: ${detail}` : ''}`, { httpStatus: 500 });
+    throw new ReviewStoreError('APP_OPEN_FAILED', `无法打开回稿${detail ? `: ${detail}` : ''}`, { httpStatus: 500 });
   }
-  console.log(notified ? '已在 MDTurn 中打开(App 已收到打开通知),等待用户审阅。' : '已在 MDTurn 中打开,等待用户审阅。');
+  console.log(notified ? '已在回稿中打开(App 已收到打开通知),等待用户审阅。' : '已在回稿中打开,等待用户审阅。');
 }
 
 async function commandStatus(args) {
@@ -250,7 +254,7 @@ async function commandStatus(args) {
   printReview(review);
 }
 
-// 阻塞等待用户在 MDTurn 里的下一个动作。设计给智能体后台挂起使用:命令退出即代表
+// 阻塞等待用户在回稿里的下一个动作。设计给智能体后台挂起使用:命令退出即代表
 // 用户有了新动作,智能体被唤醒后按输出分流,无需用户回到对话里通报。
 // 跨轮语义:wait 不会因为"启动时已处于的状态"而退出——上一轮 complete 后继续挂着,
 // 直到用户开始新一轮并提交批注、定稿、或手工改完;这样 open/complete 之后各挂一次
@@ -290,9 +294,9 @@ async function commandWait(args) {
     return;
   }
   if (initial.status === 'complete' && initial.outcome === 'approved') {
-    console.log('本轮用户已全文通过(无批注),继续等待:用户可能在 MDTurn 里开始新一轮审阅,也可能定稿并关闭。');
+    console.log('本轮用户已全文通过(无批注),继续等待:用户可能在回稿里开始新一轮审阅,也可能定稿并关闭。');
   } else if (initial.status === 'complete') {
-    console.log('本轮已闭环,继续等待:用户可能在 MDTurn 里开始新一轮审阅,也可能定稿并关闭。');
+    console.log('本轮已闭环,继续等待:用户可能在回稿里开始新一轮审阅,也可能定稿并关闭。');
   }
   let announced = initial.id;
   for (;;) {
@@ -309,7 +313,7 @@ async function commandWait(args) {
     if (status === 'reviewing') {
       if (announced !== review.id) { announced = review.id; console.log(`用户已开始新一轮审阅(会话 ${review.id}),继续等待其提交。`); }
     } else if (status === 'applying' && review.applyMode === 'manual') {
-      if (announced !== review.id) { announced = review.id; console.log(`用户正在 MDTurn 里手工修改(会话 ${review.id}),继续等待其提交;期间不要改这个文件。`); }
+      if (announced !== review.id) { announced = review.id; console.log(`用户正在回稿里手工修改(会话 ${review.id}),继续等待其提交;期间不要改这个文件。`); }
     } else if (status === 'ready_to_apply') {
       printReview(review);
       console.log(`→ 用户已完成批注。先读 ${absPath}.annotations.json 中 status=open 的批注(有歧义先向用户逐条确认,一次一个问题);修改源文件前必须先运行 mdreview begin-apply "${absPath}",否则触发版本冲突。`);
@@ -326,7 +330,7 @@ async function commandWait(args) {
       }
       if (review.outcome === 'approved') {
         printReview(review);
-        console.log('→ 用户已完成本轮审阅: 全文通过,没有批注,无需改稿。若用户后续还要修改,会在 MDTurn 里开始新一轮,可再挂一次 wait。');
+        console.log('→ 用户已完成本轮审阅: 全文通过,没有批注,无需改稿。若用户后续还要修改,会在回稿里开始新一轮,可再挂一次 wait。');
         return;
       }
       if (review.applyMode === 'manual') {
@@ -378,7 +382,7 @@ async function main() {
       const review = await completeReview(args.file, { expectedApplyMode: 'agent', summary: args.summary });
       printReview(review);
       if (!args.summary) console.log('提示: 下次可加 --summary "<本轮改了什么、哪些没采纳及原因>",它会随新版一起推到用户手机上。');
-      console.log(`→ 闭环完成(本轮): 批注已全部处理,MDTurn 会自动加载最新版并通知用户(手机也会收到新版)。用户接下来可能再审一轮或定稿——立即再以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交新批注或定稿时返回;不要主动去关 MDTurn 里的标签或移动 .annotations.json。`);
+      console.log(`→ 闭环完成(本轮): 批注已全部处理,回稿会自动加载最新版并通知用户(手机也会收到新版)。用户接下来可能再审一轮或定稿——立即再以后台任务挂起 mdreview wait "${review.absPath}",它会在用户提交新批注或定稿时返回;不要主动去关回稿里的标签或移动 .annotations.json。`);
       await notifyReviewChangedBestEffort(review, 'agent-complete');
       return;
     }
@@ -386,14 +390,14 @@ async function main() {
       if (!args.file) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
       const review = await sync.requestPush(args.file);
       printReview(review);
-      console.log('已登记重新推送;MDTurn 运行中时同步辅助程序会在 15 秒内上传。用 mdreview sync-status 查看进度。');
+      console.log('已登记重新推送;回稿运行中时同步辅助程序会在 15 秒内上传。用 mdreview sync-status 查看进度。');
       return;
     }
     if (args.command === 'sync-status') {
       const helper = sync.readHelperState();
       const reviews = await sync.listSyncStatus();
       if (args.json) { console.log(JSON.stringify({ helper, reviews }, null, 2)); return; }
-      if (!helper) console.log('同步辅助程序: 从未运行(MDTurn 0.7 起随 App 启动)。');
+      if (!helper) console.log('同步辅助程序: 从未运行(随回稿 App 启动;请确认回稿正在运行)。');
       else console.log(`同步辅助程序: ${helper.error ? `异常(${helper.error})` : '正常'};上次轮询 ${helper.lastPollAt};iCloud 账号 ${helper.account || (helper.accountStatus === 'available' ? '已登录' : '未知')}(${helper.accountStatus || '?'});环境 ${helper.environment || '?'}`);
       if (!reviews.length) console.log('没有参与同步的文档。');
       for (const item of reviews) {
@@ -462,7 +466,7 @@ async function main() {
     const suffix = error.code ? ` [${error.code}]` : '';
     fail(`${error.message}${suffix}`);
     if (error.code === 'USER_EDITING' && args.file) {
-      console.error(`→ 不要改这个文件。稍后重试 mdreview open "${path.resolve(args.file)}";用户在 MDTurn 里退出编辑模式后即可冻结。`);
+      console.error(`→ 不要改这个文件。稍后重试 mdreview open "${path.resolve(args.file)}";用户在回稿里退出编辑模式后即可冻结。`);
     }
     if (error.code === 'OPEN_ANNOTATIONS' && args.file) {
       console.error(`→ 回到 ${path.resolve(args.file)}.annotations.json 把剩余 open 批注逐条标为 applied/wontfix,再运行 mdreview complete。`);

@@ -114,7 +114,9 @@ function startOwnedService(options = {}) {
       ELECTRON_RUN_AS_NODE: '1',
       MDREAD_DATA_DIR: dataDir,
       MDREAD_HOST: '127.0.0.1',
-      MDREAD_PORT: '0',
+      // 优先用上次的端口:页面的本地存储(打开的标签、未保存草稿、阅读偏好)按"地址+端口"隔离,
+      // 端口每次随机就等于每次清空;占用时服务自己往后找 10 个,都不行再退回随机端口(见 ensureService)
+      MDREAD_PORT: preferredPortValue(options.preferredPort),
       // 服务自己盯着主进程:主进程崩溃/被强退时服务随之退出,不留孤儿
       MDTURN_PARENT_PID: String(process.pid),
     },
@@ -136,11 +138,16 @@ function openServiceLog(dataDir) {
     let size = 0;
     try { size = fs.statSync(file).size; } catch {}
     const fd = fs.openSync(file, size > 2 * 1024 * 1024 ? 'w' : 'a');
-    fs.writeSync(fd, `\n===== ${new Date().toISOString()} MDTurn 启动内置服务 =====\n`);
+    fs.writeSync(fd, `\n===== ${new Date().toISOString()} 回稿启动内置服务 =====\n`);
     return fd;
   } catch {
     return null;
   }
+}
+
+function preferredPortValue(value) {
+  const port = parsePort(value);
+  return port && port >= 1024 ? String(port) : '0';
 }
 
 function stopOwnedService(service) {
@@ -154,10 +161,7 @@ function stopOwnedService(service) {
   }
 }
 
-async function ensureService(options = {}) {
-  let service = await findHealthyService(options);
-  if (service) return service;
-
+async function startAndAwaitService(options) {
   const started = (options.startService || startOwnedService)(options);
   const ownedProcess = started.child;
   // 健康检查通过之前子进程只存在于这里;调用方可借此记下它,以便此时退出也能把它杀掉
@@ -173,17 +177,31 @@ async function ensureService(options = {}) {
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, options.pollIntervalMs || 250));
     if (ownedProcess && ownedProcess.mdturnSpawnError) {
-      throw new Error(`无法启动 MDTurn 内置服务: ${ownedProcess.mdturnSpawnError.message}`);
+      throw new Error(`无法启动回稿内置服务: ${ownedProcess.mdturnSpawnError.message}`);
     }
     if (ownedProcess && ownedProcess.exitCode !== null) {
-      throw new Error(`MDTurn 内置服务提前退出（代码 ${ownedProcess.exitCode}）。`);
+      const error = new Error(`回稿内置服务提前退出（代码 ${ownedProcess.exitCode}）。`);
+      error.earlyExit = true;
+      throw error;
     }
-    service = await findHealthyService(discoveryOptions);
+    const service = await findHealthyService(discoveryOptions);
     if (service) return { ...service, ...(ownedProcess ? { ownedProcess } : {}) };
   }
   if (ownedProcess) stopOwnedService({ ownedProcess });
   const seconds = Math.round(readyTimeoutMs / 100) / 10;
-  throw new Error(`MDTurn 内置服务在 ${seconds} 秒内没有就绪。`);
+  throw new Error(`回稿内置服务在 ${seconds} 秒内没有就绪。`);
+}
+
+async function ensureService(options = {}) {
+  const service = await findHealthyService(options);
+  if (service) return service;
+  try {
+    return await startAndAwaitService(options);
+  } catch (error) {
+    // 上次的端口(连同后面 10 个)都被别的程序占了,服务起不来:退回系统随机端口再试一次
+    if (!error.earlyExit || preferredPortValue(options.preferredPort) === '0') throw error;
+    return startAndAwaitService({ ...options, preferredPort: null });
+  }
 }
 
 module.exports = {

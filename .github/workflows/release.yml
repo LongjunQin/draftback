@@ -51,13 +51,13 @@ jobs:
         include:
           - os: macos-latest
             script: dist:dmg
-            artifact: MDTurn-mac
+            artifact: Draftback-mac
             files: |
               desktop/dist/*.dmg
               desktop/dist/*.dmg.blockmap
           - os: windows-latest
             script: dist:win
-            artifact: MDTurn-win
+            artifact: Draftback-win
             files: |
               desktop/dist/*.exe
               desktop/dist/*.exe.blockmap

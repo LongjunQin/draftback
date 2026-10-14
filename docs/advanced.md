@@ -1,14 +1,14 @@
-# MDTurn 进阶手册
+# 回稿进阶手册
 
 面向 Agent 编排者、高级用户与贡献者。日常使用看 [README](../README.md) 就够了。
 
 ## 架构与入口
 
-`md-read` 是 MDTurn 复用的本地审阅服务与 CLI。批注保存在文档旁的
+`md-read` 是回稿复用的本地审阅服务与 CLI。批注保存在文档旁的
 `<文档.md>.annotations.json`：
 
 ```text
-Agent 生成 MD → mdreview open → MDTurn 冻结审阅 → Agent 应用批注 → mdreview complete → MDTurn 自动刷新
+Agent 生成 MD → mdreview open → 回稿冻结审阅 → Agent 应用批注 → mdreview complete → 回稿自动刷新
 ```
 
 ## 电脑本地审阅
@@ -17,9 +17,9 @@ Agent 生成 MD → mdreview open → MDTurn 冻结审阅 → Agent 应用批注
 mdreview open "/绝对路径/方案.md"
 ```
 
-`mdreview open` 会创建或复用该文件的审阅会话、记录 SHA-256 版本指纹，并把文档打开到已安装的 MDTurn。未安装 MDTurn 时命令会报错并给出安装指引（会话仍已创建，安装后重跑即可）。`--no-open` 只创建或复用会话，不唤起 App。
+`mdreview open` 会创建或复用该文件的审阅会话、记录 SHA-256 版本指纹，并把文档打开到已安装的回稿。未安装回稿时命令会报错并给出安装指引（会话仍已创建，安装后重跑即可）。`--no-open` 只创建或复用会话，不唤起 App。
 
-服务由 MDTurn 启动时自动拉起、退出时带走，只监听 `127.0.0.1` loopback，不经过任何公网。
+服务由回稿启动时自动拉起、退出时带走，只监听 `127.0.0.1` loopback，不经过任何公网。
 
 页面始终在正文上方显示当前状态：
 
@@ -52,7 +52,7 @@ App 会直接开一轮 `applying/manual` 的手工修改轮，把写者身份记
 跨段选择会记录完整起止行，并高亮覆盖的全部段落；旧版本已经保存成错误单行范围的长批注，
 页面也会根据引用正文做兼容显示，但不会偷偷改写历史 sidecar。
 
-Agent 执行 `mdreview complete` 后会主动通知正在运行的 MDTurn，不需要高频轮询。
+Agent 执行 `mdreview complete` 后会主动通知正在运行的回稿，不需要高频轮询。
 前端仅保留 60 秒一次的轻量状态核对，用于 App 断网、睡眠或错过事件后的容错；
 它不会定时重载整篇正文。未保存草稿存在时，远程更新会被挂起而不是覆盖草稿。
 
@@ -96,7 +96,7 @@ Agent 的节奏固定为：`open` → 挂 `wait` → 改稿 → `complete` → �
 
 ## 内置服务
 
-本地服务由 MDTurn 桌面壳用 Electron 自带的 Node 运行时拉起（`ELECTRON_RUN_AS_NODE`），
+本地服务由回稿桌面壳用 Electron 自带的 Node 运行时拉起（`ELECTRON_RUN_AS_NODE`），
 macOS 与 Windows 走同一条路径：App 启动时先探测健康服务并复用，否则自己拉起并持有生命周期，
 退出时一并结束。开发时也可手工 `node server.js` 启动，App 会直接复用它。
 
@@ -141,7 +141,7 @@ iPhone 端「完成本轮」导出 `<文档>.<批次id>.mdturn-batch.json`(格�
 mdreview import-batch "<批次文件>.json"
 ```
 
-或直接把文件拖进 MDTurn 窗口。接收规则:按 `baseVersion`(文档 SHA-256)匹配审阅中的会话 → 会话仍在审阅中 → 版本一致 → 批次编号未见过 →
+或直接把文件拖进回稿窗口。接收规则:按 `baseVersion`(文档 SHA-256)匹配审阅中的会话 → 会话仍在审阅中 → 版本一致 → 批次编号未见过 →
 整批写入 sidecar(已存在的批注 id 跳过)并进入待改稿;任何一步不过都拒收并写回执(`~/.mdread/receipts/<批次id>.json`),
 sidecar 与状态不动。重复导入沿用上次回执。
 
@@ -153,7 +153,7 @@ sidecar 与状态不动。重复导入沿用上次回执。
 - 批注修改会保留原创建记录，并追加 `updatedAt / updatedBy / editCount` 审计字段。
 - JSON 写入采用跨进程锁、锁内重读、临时文件和原子替换；已有 JSON 损坏时停止写入，不会按空数据覆盖。
 - `.mdread` 权限为 `0700`，其中索引文件为 `0600`。
-- 未保存的 MDTurn 编辑草稿按 `reviewSessionId + sourceHash` 保存在 App 本地存储中；刷新或异常重开时只恢复匹配版本的草稿。
+- 未保存的回稿编辑草稿按 `reviewSessionId + sourceHash` 保存在 App 本地存储中；刷新或异常重开时只恢复匹配版本的草稿。
 
 ## 开发、验证与打包
 
@@ -183,18 +183,18 @@ iOS 工程(`ios/`,XcodeGen):
 
 ```bash
 ios/scripts/sync-web.sh && (cd ios && xcodegen generate)
-cd ios && xcodebuild -project MDTurn.xcodeproj -scheme MDTurn -destination 'platform=iOS Simulator,id=<模拟器UDID>' build
+cd ios && xcodebuild -project 回稿.xcodeproj -scheme 回稿 -destination 'platform=iOS Simulator,id=<模拟器UDID>' build
 xcrun simctl launch <UDID> org.mdturn.ios --open-sample   # 直接进入示例文档
 ```
 
 装到连着这台 Mac 的 iPhone(手机需已信任此电脑、开启开发者模式;Xcode 已登录 Apple ID):
 
 ```bash
-ios/scripts/install-device.sh            # 免费个人团队签名,包标识 org.mdturn.ios.dev,主屏名「MDTurn 测试」
+ios/scripts/install-device.sh            # 免费个人团队签名,包标识 org.mdturn.ios.dev,主屏名「回稿测试」
 ```
 
 免费签名 7 天有效,过期重跑即可;首次安装后要在手机「设置 → 通用 → VPN 与设备管理」里信任开发者证书。
-把文件放进手机应用文件夹(「文件」→ 我的 iPhone → MDTurn 测试):
+把文件放进手机应用文件夹(「文件」→ 我的 iPhone → 回稿测试):
 
 ```bash
 xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContainer \
@@ -207,7 +207,7 @@ xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContai
 
 - **新建 Markdown**(⌘N,或欢迎页/左栏「文件」里的按钮):先选位置和文件名,由本地服务创建文件(已存在绝不覆盖,而是直接打开它),建好即进入编辑。
 - **导出**在工具栏「导出」菜单和菜单栏「文件」里:PDF(⇧⌘E)、单文件 HTML、Word、打印(⌘P)。
-- 单文件 HTML:正文样式、代码高亮、公式样式与字体、同目录图片全部内联,可脱离 MDTurn 单独打开或发送。
+- 单文件 HTML:正文样式、代码高亮、公式样式与字体、同目录图片全部内联,可脱离回稿单独打开或发送。
 - Word 由 pandoc 转换,公式成为 Word 原生可编辑公式,图片与表格按 Word 结构落地。电脑上要先装 pandoc(`brew install pandoc`);
   没装时导出会给出安装提示。公开版再决定随 App 附带 pandoc 还是改纯 JS 转换器。
 
@@ -236,7 +236,7 @@ npm --prefix desktop run dist:win
 跑完整测试并构建 `.dmg` 与 `.exe`，以草稿 Release 形式挂出，人工确认后发布
 （见 `.github/workflows/release.yml`）。
 
-产物为 `desktop/dist/MDTurn-<版本>-x64.exe`（NSIS 安装器，支持自选目录、快捷方式、
+产物为 `desktop/dist/Draftback-<版本>-x64.exe`（NSIS 安装器，支持自选目录、快捷方式、
 卸载和 `.md` 文件关联）。Windows Beta 未做代码签名，安装时 SmartScreen 显示“未知发布者”
 属预期。Windows 版覆盖完整的本地审阅闭环，暂不含自动更新与 ARM64，
 边界详见 [windows-porting.md](windows-porting.md)。

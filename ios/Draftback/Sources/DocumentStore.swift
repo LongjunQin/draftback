@@ -79,7 +79,7 @@ final class DocumentStore: ObservableObject {
     @Published var current: OpenedDocument?
     @Published var lastError: String?
     @Published var pendingShare: URL?
-    /// App 自己文件夹里的 Markdown(「文件」→ 我的 iPhone → MDTurn),首页直接列出,不必再走文件选择器。
+    /// App 自己文件夹里的 Markdown(「文件」→ 我的 iPhone → 回稿),首页直接列出,不必再走文件选择器。
     @Published var localFiles: [URL] = []
 
     /// Mac 推来的文档(跨端规则第 12 节),按最近更新排序
@@ -107,7 +107,7 @@ final class DocumentStore: ObservableObject {
 
     // MARK: 目录
 
-    /// 用户自己的文档:「文件」App → 我的 iPhone → MDTurn。
+    /// 用户自己的文档:「文件」App → 我的 iPhone → 回稿。
     private var documentsDirectory: URL {
         fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }

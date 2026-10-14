@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="540" viewBox="0 0 880 540" font-family="-apple-system, PingFang SC, sans-serif">
   <rect width="880" height="540" rx="20" fill="#f5f7fa"/>
-  <text x="440" y="48" text-anchor="middle" font-size="30" font-weight="700" fill="#1d1d1f">Why MDTurn?</text>
+  <text x="440" y="48" text-anchor="middle" font-size="30" font-weight="700" fill="#1d1d1f">Why Draftback?</text>
   <text x="440" y="77" text-anchor="middle" font-size="16" fill="#515154">Same AI, completely different outcome</text>
 
-  <!-- Left: without MDTurn -->
+  <!-- Left: without Draftback -->
   <rect x="30" y="104" width="390" height="372" rx="18" fill="#ffffff" stroke="#f1a06d" stroke-width="2"/>
   <path d="M30 122 Q30 104 48 104 H402 Q420 104 420 122 V170 H30 Z" fill="#fff0e6"/>
   <circle cx="68" cy="137" r="18" fill="#e8590c"/>
   <path d="M68 126 V141" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
   <circle cx="68" cy="148" r="2.5" fill="#ffffff"/>
-  <text x="99" y="145" font-size="22" font-weight="700" fill="#e8590c">Without MDTurn</text>
+  <text x="99" y="145" font-size="22" font-weight="700" fill="#e8590c">Without Draftback</text>
 
   <path d="M55 190 H258 Q270 190 270 202 V227 Q270 239 258 239 H94 L79 251 V239 H55 Q43 239 43 227 V202 Q43 190 55 190 Z" fill="#fff7f2" stroke="#f1a06d" stroke-width="1.5"/>
   <text x="156" y="221" text-anchor="middle" font-size="15" font-weight="600" fill="#1d1d1f">“Fix the third paragraph…”</text>
@@ -42,12 +42,12 @@
   <circle cx="440" cy="290" r="25" fill="#0071e3"/>
   <text x="440" y="297" text-anchor="middle" font-size="17" font-weight="700" fill="#ffffff">VS</text>
 
-  <!-- Right: with MDTurn -->
+  <!-- Right: with Draftback -->
   <rect x="460" y="104" width="390" height="372" rx="18" fill="#ffffff" stroke="#8bcba3" stroke-width="2"/>
   <path d="M460 122 Q460 104 478 104 H832 Q850 104 850 122 V170 H460 Z" fill="#e5f7eb"/>
   <circle cx="498" cy="137" r="18" fill="#1aa260"/>
   <path d="M489 137 L496 144 L508 130" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="529" y="145" font-size="22" font-weight="700" fill="#1aa260">With MDTurn</text>
+  <text x="529" y="145" font-size="22" font-weight="700" fill="#1aa260">With Draftback</text>
 
   <!-- Precise annotation example -->
   <rect x="480" y="190" width="146" height="61" rx="9" fill="#f8fafc" stroke="#b9c6d4" stroke-width="1.5"/>

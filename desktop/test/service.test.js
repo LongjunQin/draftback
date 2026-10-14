@@ -188,3 +188,36 @@ test('startup reports an owned service that exits early', async (context) => {
     pollIntervalMs: 5,
   }), /提前退出（代码 7）/);
 });
+
+test('优先用上次的端口;那个端口起不来时退回随机端口再试一次', async (context) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mdturn-preferred-'));
+  fs.writeFileSync(path.join(tempDir, 'server.js'), '// fixture\n');
+  context.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const ports = [];
+  const children = [];
+  const spawnFake = (command, args, spawnOptions) => {
+    ports.push(spawnOptions.env.MDREAD_PORT);
+    const child = new (require('node:events').EventEmitter)();
+    child.exitCode = ports.length === 1 ? 1 : null; // 第一次(上次的端口)起不来,第二次(随机端口)正常
+    child.killed = false;
+    child.kill = () => { child.killed = true; return true; };
+    children.push(child);
+    return child;
+  };
+  await assert.rejects(ensureService({
+    serverDir: tempDir,
+    dataDir: path.join(tempDir, 'data'),
+    portFiles: [],
+    scanDefault: false,
+    preferredPort: 54114,
+    spawn: spawnFake,
+    readyTimeoutMs: 60,
+    pollIntervalMs: 5,
+  }), /没有就绪/);
+  assert.deepEqual(ports, ['54114', '0']);
+  assert.equal(children[1].killed, true, '第二次也没就绪时要把它杀掉');
+
+  const started = startOwnedService({ serverDir: tempDir, dataDir: path.join(tempDir, 'data'), preferredPort: 80, spawn: spawnFake });
+  assert.equal(ports.at(-1), '0', '1024 以下的端口不用');
+  assert.ok(started.child);
+});

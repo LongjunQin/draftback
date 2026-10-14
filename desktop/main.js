@@ -16,6 +16,23 @@ const { markdownPathsFromArguments, normalizeMarkdownPath } = require('./open-fi
 const { ensureService, stopOwnedService, ownedDataDirectory, requestHealth } = require('./service');
 const { spawn } = require('child_process');
 const { exportDocx, findPandoc } = require('./export-docx');
+const { migrateFromLegacyNames } = require('./user-data-migration');
+
+// 产品名:英文 Draftback(包名、数据目录),中文界面一律叫「回稿」(Finder / Dock 里的名字由 Info.plist 本地化决定)。
+// 用户数据目录显式固定为 Draftback,并在任何东西碰它之前,把旧名字(MDTurn)目录里的设置和本地存储复制过来。
+const DISPLAY_NAME = '回稿';
+app.setName('Draftback');
+if (process.platform === 'win32') app.setAppUserModelId('app.draftback.mac');
+{
+  const userDataDir = path.join(app.getPath('appData'), 'Draftback');
+  try {
+    const migration = migrateFromLegacyNames(app.getPath('appData'), userDataDir);
+    if (migration.migrated) console.log(`[回稿] 已从旧版数据目录迁移: ${migration.copied.join(', ')}`);
+  } catch (error) {
+    console.error('[回稿] 旧版数据目录迁移失败(不影响使用):', error && error.message);
+  }
+  app.setPath('userData', userDataDir);
+}
 
 // 用户设置(外观等),存在 userData/settings.json;读写失败都不影响启动。
 const APPEARANCES = ['system', 'light', 'dark'];
@@ -47,12 +64,12 @@ let pendingOpenFiles = [];
 let connecting = null;
 let activeService = null;
 let pendingOwnedProcess = null; // 已 spawn、尚未通过健康检查的内置服务子进程
-let syncHelper = null; // MDTurn Sync.app(原生辅助程序,负责与 iCloud 同步;跨端规则第 12 节)
+let syncHelper = null; // Draftback Sync.app(原生辅助程序,负责与 iCloud 同步;跨端规则第 12 节)
 
-// 打包后在 MDTurn.app/Contents/Helpers/ 里;开发时用 mac-sync/scripts/build.sh 的产物;也可用环境变量指定
+// 打包后在 Draftback.app/Contents/Helpers/ 里;开发时用 mac-sync/scripts/build.sh 的产物;也可用环境变量指定
 function syncHelperExecutable() {
   if (process.platform !== 'darwin') return null;
-  const relative = path.join('MDTurn Sync.app', 'Contents', 'MacOS', 'MDTurn Sync');
+  const relative = path.join('Draftback Sync.app', 'Contents', 'MacOS', 'Draftback Sync');
   const candidates = [
     process.env.MDTURN_SYNC_HELPER,
     app.isPackaged ? path.join(process.resourcesPath, '..', 'Helpers', relative) : null,
@@ -94,7 +111,7 @@ function startServiceWatch() {
     serviceMisses += 1;
     if (serviceMisses < 3) return;
     serviceMisses = 0;
-    console.error(`[MDTurn] 内置服务(端口 ${activeService.port})连续 3 次健康检查失败,重启`);
+    console.error(`[回稿] 内置服务(端口 ${activeService.port})连续 3 次健康检查失败,重启`);
     stopOwnedService(activeService);
     activeService = null;
     stopSyncHelper();
@@ -109,9 +126,6 @@ function stopSyncHelper() {
   }
   syncHelper = null;
 }
-
-app.setName('MDTurn');
-if (process.platform === 'win32') app.setAppUserModelId('org.mdturn.desktop');
 
 function queueOpenFiles(paths) {
   const validPaths = paths
@@ -193,14 +207,14 @@ async function showServiceError(error) {
   const message = escapeHtml(error && error.message ? error.message : '本地审阅服务不可用。');
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
-    <title>MDTurn · 服务未就绪</title><style>
+    <title>${DISPLAY_NAME} · 服务未就绪</title><style>
     :root{color-scheme:light dark}body{margin:0;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     background:#f5f5f7;color:#1d1d1f;display:grid;min-height:100vh;place-items:center}.card{width:min(560px,calc(100vw - 64px));
     padding:36px;border:1px solid #d2d2d7;border-radius:18px;background:#fff;box-shadow:0 18px 70px #0001}h1{font-size:24px;margin:0 0 12px}
     p{line-height:1.7;margin:8px 0;color:#515154}.detail{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
     padding:12px;border-radius:9px;background:#f5f5f7;overflow-wrap:anywhere}.hint{margin-top:18px;color:#6e6e73}
     @media(prefers-color-scheme:dark){body{background:#1c1c1e;color:#f5f5f7}.card{background:#2c2c2e;border-color:#48484a}.detail{background:#1c1c1e}p,.hint{color:#aeaeb2}}
-    </style></head><body><main class="card"><h1>本地服务没有就绪</h1><p>MDTurn 无法连接本地审阅服务。</p>
+    </style></head><body><main class="card"><h1>本地服务没有就绪</h1><p>${DISPLAY_NAME}无法连接本地审阅服务。</p>
     <p class="detail">${message}</p><p class="hint">请从“窗口”菜单选择“重新连接本地服务”重试。</p></main></body></html>`;
   await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 }
@@ -215,7 +229,10 @@ async function connectAndLoad() {
         resourcesPath: process.resourcesPath,
         executablePath: process.execPath,
         onSpawn: (child) => { pendingOwnedProcess = child; },
+        preferredPort: readSettings().servicePort,
       });
+      // 记下这次的端口,下次优先用它:页面本地存储(标签、草稿、偏好)按端口隔离
+      if (readSettings().servicePort !== service.port) writeSettings({ servicePort: service.port });
       if (!service.ownedProcess && activeService && activeService.ownedProcess && activeService.port === service.port) {
         service.ownedProcess = activeService.ownedProcess;
       }
@@ -253,7 +270,7 @@ function installNavigationGuards(window) {
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
   const windowOptions = {
-    title: 'MDTurn',
+    title: DISPLAY_NAME,
     width: 1440,
     height: 960,
     minWidth: 980,
@@ -285,7 +302,7 @@ function createWindow() {
       defaultId: 0,
       cancelId: 0,
       message: '有尚未保存的 Markdown 修改',
-      detail: '关闭后这些修改会丢失(下次启动可能从草稿恢复)。先回到 MDTurn 按 ⌘S 保存,或放弃修改。',
+      detail: '关闭后这些修改会丢失(下次启动可能从草稿恢复)。先回到${DISPLAY_NAME}按 ⌘S 保存,或放弃修改。',
     });
     if (choice === 1) event.preventDefault();
   });
@@ -307,7 +324,7 @@ function createWindow() {
 
 function installIpc() {
   ipcMain.handle('mdturn:pick-markdown', async (event) => {
-    if (!isTrustedRenderer(event)) throw new Error('拒绝非 MDTurn 页面调用文件选择器。');
+    if (!isTrustedRenderer(event)) throw new Error('拒绝非${DISPLAY_NAME}页面调用文件选择器。');
     return pickMarkdownFiles();
   });
   ipcMain.handle('mdturn:reveal-path', async (event, targetPath) => {
@@ -423,7 +440,7 @@ function installIpc() {
     const title = typeof payload.title === 'string' ? payload.title.slice(0, 180) : '';
     if (!reviewId || !title || !ElectronNotification.isSupported()) return false;
     const notification = new ElectronNotification({
-      title: 'MDTurn · 修改已完成',
+      title: `${DISPLAY_NAME} · 修改已完成`,
       body: `《${title}》已更新到最新版本。`,
       silent: false,
     });
@@ -443,17 +460,17 @@ function installMenu() {
   const template = [];
   if (process.platform === 'darwin') {
     template.push({
-      label: 'MDTurn',
+      label: DISPLAY_NAME,
       submenu: [
-        { role: 'about' },
+        { role: 'about', label: `关于${DISPLAY_NAME}` },
         { type: 'separator' },
-        { role: 'services' },
+        { role: 'services', label: '服务' },
         { type: 'separator' },
-        { role: 'hide' },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
+        { role: 'hide', label: `隐藏${DISPLAY_NAME}` },
+        { role: 'hideOthers', label: '隐藏其他' },
+        { role: 'unhide', label: '全部显示' },
         { type: 'separator' },
-        { role: 'quit' },
+        { role: 'quit', label: `退出${DISPLAY_NAME}` },
       ],
     });
   }

@@ -6,7 +6,7 @@
   </defs>
 
   <rect width="880" height="470" rx="20" fill="#f5f7fa"/>
-  <text x="440" y="48" text-anchor="middle" font-size="30" font-weight="700" fill="#1d1d1f">What is MDTurn?</text>
+  <text x="440" y="48" text-anchor="middle" font-size="30" font-weight="700" fill="#1d1d1f">What is Draftback?</text>
   <text x="440" y="77" text-anchor="middle" font-size="16" fill="#515154">Draft → Annotate → Apply, one clean review loop</text>
 
   <!-- Step 1 -->

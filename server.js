@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /*
- * md-read —— MDTurn 的本机冻结审阅服务。
+ * md-read —— 回稿(Draftback,原名 MDTurn)的本机冻结审阅服务。
  *
  * 只监听 loopback:桌面壳加载 /desktop,CLI 与 App 通过 /api/* 协作。
  */
@@ -135,7 +135,7 @@ function readBody(req) {
     req.on('end', () => {
       if (settled) return;
       if (tooLarge) {
-        return fail(new store.ReviewStoreError('BODY_TOO_LARGE', '内容超过 32 MB，MDTurn 暂不支持这么大的文档。', { httpStatus: 413 }));
+        return fail(new store.ReviewStoreError('BODY_TOO_LARGE', '内容超过 32 MB，回稿暂不支持这么大的文档。', { httpStatus: 413 }));
       }
       try {
         const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
@@ -442,7 +442,7 @@ async function handleReviewAnnotations(req, res, q, review) {
   return sendJson(res, 405, { error: 'method_not_allowed', message: 'Method not allowed' });
 }
 
-// 跨端同步(跨端规则第 12 节):随 App 打包的原生辅助程序 MDTurn Sync.app 通过这些接口取待推送项、
+// 跨端同步(跨端规则第 12 节):随 App 打包的原生辅助程序 Draftback Sync.app 通过这些接口取待推送项、
 // 报推送结果、送来手机批次、报回执已发;云端(CloudKit)的读写都在辅助程序里,这里只管会话上的同步状态。
 async function handleSyncApi(req, res, pathname, q) {
   if (pathname === '/api/app/sync/outbox') {
@@ -765,7 +765,7 @@ let ownedPortInode = null;
 function banner(port) {
   const line = '─'.repeat(54);
   console.log(`\n${line}\n  📖  md-read 已启动  ${HOST}:${port}\n${line}`);
-  console.log(`  MDTurn: http://localhost:${port}/desktop`);
+  console.log(`  回稿: http://localhost:${port}/desktop`);
   console.log('  停止: Ctrl + C\n');
 }
 async function publishPort(port) {

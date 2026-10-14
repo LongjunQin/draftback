@@ -1,10 +1,10 @@
 {
   "name": "mdturn-desktop",
-  "version": "0.7.5",
+  "version": "1.0.0-beta.1",
   "private": true,
-  "description": "MDTurn desktop shell for local Markdown review on macOS and Windows",
+  "description": "Draftback (回稿) desktop app: you mark up the draft, the AI revises it, the draft comes back",
   "main": "main.js",
-  "author": "MDTurn contributors",
+  "author": "Draftback contributors",
   "license": "MIT",
   "scripts": {
     "start": "npm run build:vendor && electron .",
@@ -27,8 +27,8 @@
     "esbuild": "0.28.1"
   },
   "build": {
-    "appId": "org.mdturn.desktop",
-    "productName": "MDTurn",
+    "appId": "app.draftback.mac",
+    "productName": "Draftback",
     "afterPack": "scripts/after-pack.mjs",
     "asar": true,
     "npmRebuild": false,
@@ -41,6 +41,7 @@
       "open-files.js",
       "preload.js",
       "service.js",
+      "user-data-migration.js",
       "export-docx.js",
       "dock-icon.png",
       "package.json"
@@ -89,7 +90,9 @@
               "NSTemporaryExceptionAllowsInsecureHTTPSLoads": false
             }
           }
-        }
+        },
+        "LSHasLocalizedDisplayName": true,
+        "CFBundleDisplayName": "Draftback"
       },
       "target": [
         {
@@ -106,7 +109,21 @@
         }
       ],
       "signIgnore": [
-        "Helpers/MDTurn Sync\\.app"
+        "Helpers/Draftback Sync\\.app"
+      ],
+      "extraResources": [
+        {
+          "from": "build/localization/en.lproj",
+          "to": "en.lproj"
+        },
+        {
+          "from": "build/localization/zh-Hans.lproj",
+          "to": "zh-Hans.lproj"
+        },
+        {
+          "from": "build/localization/zh-Hans.lproj",
+          "to": "zh_CN.lproj"
+        }
       ]
     },
     "win": {
@@ -125,15 +142,15 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "MDTurn"
+      "shortcutName": "Draftback"
     },
     "dmg": {
       "sign": false
     },
     "extraFiles": [
       {
-        "from": "../mac-sync/build/MDTurn Sync.app",
-        "to": "Helpers/MDTurn Sync.app",
+        "from": "../mac-sync/build/Draftback Sync.app",
+        "to": "Helpers/Draftback Sync.app",
         "filter": [
           "**/*"
         ]
