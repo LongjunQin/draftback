@@ -21,6 +21,8 @@ struct ReaderView: View {
     @State private var exportingPDF = false
     @State private var message: String?
     @State private var hasSelection = false
+    /// 回稿卡「显示改动」开着:对比是只读视图,这时不能批注
+    @State private var showingChanges = false
     @State private var confirmNewVersion = false
     @State private var handOffCount = 0
     @State private var clock = Date()
@@ -62,7 +64,8 @@ struct ReaderView: View {
             if store.isOffline { offlineLine }
             if let notice = document.notice { noticeBanner(notice) } else if let banner = status.banner { bannerView(banner) }
             ReaderWebView(document: document, reloadToken: $reloadToken, contentVersion: document.contentVersion,
-                          fontScale: fontScale, annotationEnabled: status.canAnnotate, onEvent: { handle($0, status: status) }, onReady: { bridge = $0 })
+                          fontScale: fontScale, annotationEnabled: status.canAnnotate && !showingChanges, cardKey: document.cardKey,
+                          onEvent: { handle($0, status: status) }, onReady: { bridge = $0 })
             bottomBar(status)
         }
         .onChange(of: document.notice) { _, notice in
@@ -70,6 +73,9 @@ struct ReaderView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { if document.notice == notice { document.notice = nil } }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { clock = $0 }
+        // 正文或回稿卡重画后网页回到干净稿
+        .onChange(of: document.contentVersion) { _, _ in showingChanges = false }
+        .onChange(of: document.cardKey) { _, _ in showingChanges = false }
         .navigationTitle(document.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -126,7 +132,7 @@ struct ReaderView: View {
         .overlay { if exportingPDF { ProgressView("正在生成 PDF…").padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         .sensoryFeedback(.success, trigger: handOffCount)
         #if DEBUG
-        // 仅调试版:模拟器自动化验证用(--export-batch 导出、--resubmit-batch 重发、--show-notes 打开批注列表、--demo-select 选中一段、--demo-annotate 再点「批注这段」)
+        // 仅调试版:模拟器自动化验证用(--export-batch 导出、--resubmit-batch 重发、--show-notes 打开批注列表、--demo-select 选中一段、--demo-annotate 再点「批注这段」、--demo-changes 点「显示改动」)
         .onAppear {
             let args = CommandLine.arguments
             if args.contains("--export-batch") { store.submitBatch(for: document) }
@@ -134,6 +140,7 @@ struct ReaderView: View {
             if args.contains("--show-notes") { showNotes = true }
             if args.contains("--demo-select") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { bridge?.debugSelectParagraph(2) } }
             if args.contains("--demo-annotate") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { bridge?.requestAnnotation() } }
+            if args.contains("--demo-changes") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { bridge?.toggleChanges() } }
         }
         #endif
     }
@@ -220,8 +227,13 @@ struct ReaderView: View {
                     Label("写总体意见", systemImage: "text.badge.plus")
                 }
             }
-            if let summary = document.sync?.summary, !summary.isEmpty {
-                Button { message = summary } label: { Label("改稿摘要", systemImage: "text.quote") }
+            if document.returnCard != nil {
+                Button { bridge?.scrollToTop() } label: { Label("回稿卡", systemImage: "arrow.uturn.backward.circle") }
+            }
+            if document.changesBase != nil {
+                Button { bridge?.toggleChanges() } label: {
+                    Label(showingChanges ? "隐藏改动" : "显示改动", systemImage: showingChanges ? "eye.slash" : "arrow.left.arrow.right")
+                }
             }
             if !document.submittedNotes.isEmpty {
                 Button { store.resubmitBatch(for: document) } label: {
@@ -243,7 +255,7 @@ struct ReaderView: View {
 
     private func bottomBar(_ status: ReaderStatus) -> some View {
         HStack(spacing: 10) {
-            if hasSelection && status.canAnnotate {
+            if hasSelection && status.canAnnotate && !showingChanges {
                 Button { bridge?.requestAnnotation() } label: {
                     Label("批注这段", systemImage: "text.bubble")
                         .font(.subheadline.weight(.semibold))
@@ -329,8 +341,10 @@ struct ReaderView: View {
         case .ready: break
         case .rendered(let outline): document.outline = outline
         case .selectionState(let active): hasSelection = active
+        case .changesState(let showing): showingChanges = showing
         case .selection(let anchor, let quote):
             guard status.canAnnotate else { message = status.blockedReason ?? "现在不能批注。"; return }
+            guard !showingChanges else { message = "对比是只读的。先点「隐藏改动」回到正文再批注。"; return }
             composer = Composer(anchor: anchor, quote: quote, scope: nil, editingNoteId: nil, initialComment: "")
         case .noSelection: message = "没有识别到有效的文字选区,请重新选择。"
         case .error(let text): message = text

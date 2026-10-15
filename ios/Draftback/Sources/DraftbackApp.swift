@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 
 /// 回稿(Draftback)iOS:SwiftUI 外壳 + WKWebView 内核(与 Mac 共用同一套渲染与批注锚点代码)。
 /// 范围:打开本地 Markdown、阅读、划词批注、批注本地持久保存、导出批注批次与 PDF;
@@ -30,6 +31,7 @@ struct DraftbackApp: App {
                         }
                     }
                     #endif
+                    if let docId = AppDelegate.pendingOpenDocId { AppDelegate.pendingOpenDocId = nil; store.openSynced(docId: docId) }
                     if args.contains("--open-sample") { store.openSample() }
                     if let index = args.firstIndex(of: "--open-local"), index + 1 < args.count {
                         store.openLocal(named: args[index + 1])
@@ -46,17 +48,42 @@ struct DraftbackApp: App {
                 // 静默推送不保证到达:前台时每 20 秒自己拉一次(没变化时只是一次极小的增量查询)
                 .onReceive(Timer.publish(every: 20, on: .main, in: .common).autoconnect()) { _ in if scenePhase == .active { store.refreshSync() } }
                 .onReceive(NotificationCenter.default.publisher(for: AppDelegate.cloudPushNotification)) { _ in store.refreshSync() }
+                // 点「回稿了」通知:直接打开那一篇
+                .onReceive(NotificationCenter.default.publisher(for: AppDelegate.openDocumentNotification)) { note in
+                    if let docId = note.userInfo?["docId"] as? String { AppDelegate.pendingOpenDocId = nil; store.openSynced(docId: docId) }
+                }
         }
     }
 }
 
-/// 只做一件事:注册静默推送,CloudKit 的区变更通知到达时让文档库去拉取。
-final class AppDelegate: NSObject, UIApplicationDelegate {
+/// 注册静默推送(CloudKit 的区变更通知到达时让文档库去拉取);「回稿了」本地通知的展示与点击。
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static let cloudPushNotification = Notification.Name("draftback.cloud.push")
+    static let openDocumentNotification = Notification.Name("draftback.open-document")
+    /// 冷启动时点通知:界面还没起来,先记下,界面出现时再开
+    static var pendingOpenDocId: String?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
         application.registerForRemoteNotifications()
         return true
+    }
+
+    /// App 在前台也显示横幅(正在看的那篇,文档库根本不会发)
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let docId = response.notification.request.content.userInfo["docId"] as? String {
+            Self.pendingOpenDocId = docId
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: Self.openDocumentNotification, object: nil, userInfo: ["docId": docId])
+            }
+        }
+        completionHandler()
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {

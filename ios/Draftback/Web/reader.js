@@ -5,9 +5,10 @@
  * 与原生侧的约定:
  *   原生 → 页面:window.DraftbackReader.load({ markdown, annotations, assets, fontScale })、setAnnotations(list)、
  *                 captureSelection()(编辑菜单的「批注」与底栏「批注这段」触发)、scrollToLine(n)、focusNote(id)、clearSelection()、
- *                 setFontScale(x)
+ *                 setFontScale(x)、toggleChanges()、scrollToTop();load 还可带 returnCard 与 previousMarkdown(回稿卡与「显示改动」)
  *   页面 → 原生:webkit.messageHandlers.draftback.postMessage({ type, ... })
- *                 type = ready | rendered { outline } | selection { anchor, quote } | selectionState { active } | error { message }
+ *                 type = ready | rendered { outline } | selection { anchor, quote } | selectionState { active } |
+ *                        changesState { showing } | changesCount { count } | error { message }
  */
 (() => {
   'use strict';
@@ -133,10 +134,8 @@
       if (width && width <= 12) cell.classList.add('md-cell-short');
     });
   }
-  async function render(markdown) {
-    const target = document.createElement('div');
-    target.innerHTML = sanitize(md.render(blankFrontMatter(markdown)));
-    adoptBareInlineRuns(target);
+  // 渲染后的统一处理:短单元格不折行、本地图片换成随文档到达的数据、站外链接才可点、Mermaid 代码换成图表占位
+  function decorate(target) {
     keepShortCellsTogether(target);
     target.querySelectorAll('img[src]').forEach((image) => {
       const src = image.getAttribute('src') || '';
@@ -157,6 +156,14 @@
       const el = document.createElement('div'); el.className = 'mermaid'; el.textContent = code.textContent;
       parent.replaceWith(el); diagrams.push(el);
     });
+    return diagrams;
+  }
+
+  async function render(markdown) {
+    const target = document.createElement('div');
+    target.innerHTML = sanitize(md.render(blankFrontMatter(markdown)));
+    adoptBareInlineRuns(target);
+    const diagrams = decorate(target);
     content.replaceChildren(...target.childNodes);
     empty.hidden = true;
     if (diagrams.length && window.mermaid) { try { await window.mermaid.run({ nodes: diagrams }); } catch (error) { console.warn('mermaid', error); } }
@@ -253,6 +260,125 @@
     } catch (error) { post({ type: 'error', message: `锚点失败:${error.message}` }); return null; }
   }
 
+  // ---------- 回稿卡与「显示改动」(UI 方案 4.4;2026-10-15 用户定:默认干净稿,同一个按钮显示 / 隐藏改动) ----------
+  // 原生给:returnCard { title, meta, summary, note } 与 previousMarkdown(手机换新版前留的上一版)。
+  // 对比用与 Mac 对比视图同一套算法(desktop-diff.js);对比视图只读,在正文之外单独画,批注锚点不受影响。
+  const cardEl = document.getElementById('returnCard');
+  const changesEl = document.getElementById('changes');
+  const Diff = window.DraftbackDiff;
+  const dmp = window.diff_match_patch ? new window.diff_match_patch() : null;
+  const changes = { previous: null, current: '', showing: false, painted: false, result: null, toggle: null, count: null };
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function escapeHtml(value) { return String(value).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])); }
+
+  function diffResult() {
+    if (changes.result || changes.previous == null || !Diff || !dmp) return changes.result;
+    try { changes.result = Diff.diffDocuments(md, dmp, changes.previous, changes.current); } catch (error) { post({ type: 'error', message: `对比失败:${error.message}` }); changes.result = null; }
+    return changes.result;
+  }
+
+  function renderReturnCard(card) {
+    cardEl.replaceChildren();
+    changes.toggle = null;
+    if (!card) { cardEl.hidden = true; return; }
+    const head = el('div', 'rc-head');
+    head.append(el('span', 'rc-icon', '↩'), el('h2', 'rc-title', card.title || '稿子回来了'));
+    cardEl.append(head);
+    if (card.meta) cardEl.append(el('div', 'rc-meta', card.meta));
+    if (card.summary) {
+      const summary = el('p', 'rc-summary clamped', card.summary);
+      cardEl.append(summary);
+      const more = el('button', 'rc-more', '展开'); more.type = 'button'; more.hidden = true;
+      more.addEventListener('click', () => {
+        const open = summary.classList.toggle('clamped') === false;
+        more.textContent = open ? '收起' : '展开';
+      });
+      cardEl.append(more);
+      requestAnimationFrame(() => { more.hidden = summary.scrollHeight <= summary.clientHeight + 2; });
+    }
+    if (changes.previous != null && Diff && dmp) {
+      if (card.note) cardEl.append(el('div', 'rc-note', card.note));
+      const actions = el('div', 'rc-actions');
+      const toggle = el('button', 'rc-toggle'); toggle.type = 'button';
+      toggle.addEventListener('click', () => setShowingChanges(!changes.showing));
+      actions.append(toggle);
+      const count = el('span', 'rc-count'); actions.append(count);
+      cardEl.append(actions);
+      changes.toggle = toggle; changes.countEl = count;
+      paintToggle();
+      // 改了几处:正文画完再算,不挡首屏
+      setTimeout(() => {
+        const result = diffResult();
+        if (result && changes.countEl === count) { changes.count = result.changes; count.textContent = result.changes ? `改了 ${result.changes} 处` : '没有改动'; post({ type: 'changesCount', count: result.changes }); }
+      }, 300);
+    }
+    cardEl.hidden = false;
+  }
+
+  function paintToggle() {
+    if (!changes.toggle) return;
+    changes.toggle.textContent = changes.showing ? '隐藏改动' : '显示改动';
+    changes.toggle.classList.toggle('showing', changes.showing);
+    changes.toggle.setAttribute('aria-pressed', String(changes.showing));
+  }
+
+  function changeBlock(text, className) {
+    const box = el('div', className);
+    box.innerHTML = sanitize(md.render(blankFrontMatter(text)));
+    decorate(box);
+    return box;
+  }
+  function inlineBlock(item) {
+    const box = el('div', 'diff-replace');
+    const body = el(item.source ? 'pre' : 'p', 'diff-inline');
+    body.innerHTML = item.inline.map(([op, text]) => (op === 0 ? escapeHtml(text) : op < 0 ? `<del class="diff-del">${escapeHtml(text)}</del>` : `<ins class="diff-ins">${escapeHtml(text)}</ins>`)).join('');
+    box.append(body);
+    return box;
+  }
+  async function paintChanges() {
+    const result = diffResult();
+    if (!result) { changesEl.replaceChildren(el('p', 'diff-empty', '没能算出改动。')); return; }
+    const refsNew = Diff.referenceDefinitions(result.newBlocks), refsOld = Diff.referenceDefinitions(result.oldBlocks);
+    const frag = document.createDocumentFragment();
+    const legend = el('div', 'diff-legend');
+    legend.append(el('span', 'legend-insert', '新增'), el('span', 'legend-delete', '删除'), el('span', 'legend-replace', '改过'));
+    frag.append(legend);
+    for (const hunk of result.hunks) {
+      if (hunk.kind === 'equal') { frag.append(changeBlock(refsNew ? `${hunk.text}\n\n${refsNew}` : hunk.text, 'diff-equal')); continue; }
+      for (const item of hunk.items) {
+        const node = el('div', `diff-change diff-${item.kind}-item`);
+        if (item.kind === 'insert') node.append(changeBlock(refsNew ? `${item.newText}\n\n${refsNew}` : item.newText, 'diff-insert'));
+        else if (item.kind === 'delete') node.append(changeBlock(refsOld ? `${item.oldText}\n\n${refsOld}` : item.oldText, 'diff-delete'));
+        else if (item.inline) node.append(inlineBlock(item));
+        else node.append(changeBlock(item.oldText, 'diff-delete'), changeBlock(item.newText, 'diff-insert'));
+        frag.append(node);
+      }
+    }
+    changesEl.replaceChildren(frag);
+    const diagrams = Array.from(changesEl.querySelectorAll('.mermaid'));
+    if (diagrams.length && window.mermaid) { try { await window.mermaid.run({ nodes: diagrams }); } catch (_) {} }
+    changes.painted = true;
+  }
+
+  async function setShowingChanges(showing) {
+    if (showing && (changes.previous == null || !Diff || !dmp)) return;
+    window.getSelection()?.removeAllRanges();
+    if (showing && !changes.painted) await paintChanges();
+    changes.showing = showing;
+    changesEl.hidden = !showing;
+    content.hidden = showing;
+    paintToggle();
+    if (showing) changesEl.querySelector('.diff-change')?.scrollIntoView({ block: 'center' });
+    else cardEl.scrollIntoView({ block: 'start' });
+    post({ type: 'changesState', showing });
+  }
+
   // 选区有没有:有就立刻报(底栏换成「批注这段」),没了等 0.2 秒再报(拖动选区时不闪)
   let selectionActive = false, selectionTimer = null;
   function selectionInContent() {
@@ -281,6 +407,11 @@
   window.DraftbackReader = Object.freeze({
     load(payload) {
       setFontScale(payload.fontScale);
+      changes.previous = typeof payload.previousMarkdown === 'string' ? payload.previousMarkdown : null;
+      changes.current = String(payload.markdown || '');
+      changes.showing = false; changes.painted = false; changes.result = null; changes.count = null;
+      changesEl.hidden = true; changesEl.replaceChildren(); content.hidden = false;
+      renderReturnCard(payload.returnCard || null);
       state.annotations = Array.isArray(payload.annotations) ? payload.annotations : [];
       state.assets = payload.assets && typeof payload.assets === 'object' ? payload.assets : {};
       return render(String(payload.markdown || ''));
@@ -293,8 +424,10 @@
       const target = leafBlocks().find((el) => Number(el.dataset.lineEnd) >= line) || null;
       target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     },
-    focusNote(id) { renderMarkers(id); },
+    focusNote(id) { if (changes.showing) void setShowingChanges(false); renderMarkers(id); },
     setFontScale,
+    toggleChanges() { return setShowingChanges(!changes.showing); },
+    scrollToTop() { (cardEl.hidden ? content : cardEl).scrollIntoView({ block: 'start' }); },
     outline,
   });
   post({ type: 'ready' });

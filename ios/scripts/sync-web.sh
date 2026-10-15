@@ -11,4 +11,7 @@ for f in markdown-it.min.js katex.min.js katex.min.css texmath.min.js highlight.
 done
 rm -rf "$DEST/fonts" && cp -R "$SRC/vendor/fonts" "$DEST/fonts"
 cp "$SRC/desktop-anchor.js" "$DEST/desktop-anchor.js"
+# 回稿卡「显示改动」:与 Mac 对比视图同一套对比算法(纯函数)与字级差异库
+cp "$SRC/desktop-diff.js" "$DEST/desktop-diff.js"
+cp "$SRC/vendor/diff-match-patch.js" "$DEST/diff-match-patch.js"
 echo "已同步渲染内核到 $DEST"

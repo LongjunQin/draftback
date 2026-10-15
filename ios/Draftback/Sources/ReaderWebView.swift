@@ -25,6 +25,8 @@ enum ReaderEvent {
     case selection(anchor: [String: Any], quote: String)
     /// 正文里有没有选中文字(底栏左槽据此换成「批注这段」;选区消失 0.2 秒后才报 false)
     case selectionState(Bool)
+    /// 回稿卡「显示改动」开着没有(开着时不能批注:对比是只读视图)
+    case changesState(Bool)
     case noSelection
     case error(String)
 }
@@ -38,6 +40,8 @@ struct ReaderWebView: UIViewRepresentable {
     let fontScale: Double
     /// 这一轮能不能批注:决定系统菜单里有没有「批注」
     let annotationEnabled: Bool
+    /// 回稿卡相关状态(轮次、状态、上一版):变了就重画网页
+    let cardKey: String
     let onEvent: (ReaderEvent) -> Void
     let onReady: (ReaderBridge) -> Void
 
@@ -60,6 +64,7 @@ struct ReaderWebView: UIViewRepresentable {
         context.coordinator.bridge = ReaderBridge(webView: webView)
         context.coordinator.bridge?.fontScale = fontScale
         context.coordinator.lastFontScale = fontScale
+        context.coordinator.lastCardKey = cardKey
         context.coordinator.pendingLoad = document
         if let webDirectory = Bundle.main.url(forResource: "Web", withExtension: nil) {
             let page = webDirectory.appendingPathComponent("reader.html")
@@ -78,8 +83,9 @@ struct ReaderWebView: UIViewRepresentable {
             context.coordinator.bridge?.fontScale = fontScale
             context.coordinator.bridge?.setFontScale(fontScale)
         }
-        if context.coordinator.lastContentVersion != contentVersion {
+        if context.coordinator.lastContentVersion != contentVersion || context.coordinator.lastCardKey != cardKey {
             context.coordinator.lastContentVersion = contentVersion
+            context.coordinator.lastCardKey = cardKey
             context.coordinator.lastReloadToken = reloadToken
             if context.coordinator.pendingLoad == nil { context.coordinator.bridge?.load(document) } else { context.coordinator.pendingLoad = document }
             return
@@ -102,6 +108,7 @@ struct ReaderWebView: UIViewRepresentable {
         var lastReloadToken = 0
         var lastContentVersion = 0
         var lastFontScale = 1.0
+        var lastCardKey = ""
 
         init(onEvent: @escaping (ReaderEvent) -> Void) { self.onEvent = onEvent }
 
@@ -119,6 +126,8 @@ struct ReaderWebView: UIViewRepresentable {
                 onEvent(.rendered(outline: items))
             case "selectionState":
                 onEvent(.selectionState(body["active"] as? Bool ?? false))
+            case "changesState":
+                onEvent(.changesState(body["showing"] as? Bool ?? false))
             case "selection":
                 if let anchor = body["anchor"] as? [String: Any] {
                     onEvent(.selection(anchor: anchor, quote: body["quote"] as? String ?? ""))
@@ -174,6 +183,8 @@ final class ReaderBridge {
             "annotations": document.highlightPayload,
             "assets": document.assets,
             "fontScale": fontScale,
+            "returnCard": document.returnCard ?? NSNull(),
+            "previousMarkdown": document.changesBase ?? NSNull(),
         ]
         call("window.DraftbackReader.load(\(json(payload)))")
     }
@@ -185,6 +196,10 @@ final class ReaderBridge {
     /// 底栏「批注这段」:和系统菜单的「批注」走同一条路
     func requestAnnotation() { call("window.DraftbackReader.captureSelection()") }
     func setFontScale(_ scale: Double) { call("window.DraftbackReader.setFontScale(\(scale))") }
+    /// 回稿卡「显示改动 / 隐藏改动」
+    func toggleChanges() { call("window.DraftbackReader.toggleChanges()") }
+    /// 「…」里的「回稿卡」:滚到正文最上方
+    func scrollToTop() { call("window.DraftbackReader.scrollToTop()") }
     #if DEBUG
     /// 仅调试版:模拟器截图时选中第 n 段
     func debugSelectParagraph(_ index: Int) {

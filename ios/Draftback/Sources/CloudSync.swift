@@ -41,6 +41,15 @@ struct SyncedDocument: Identifiable, Codable, Equatable {
     var canAnnotate: Bool { phoneState == "reviewing" }
 }
 
+/// 手机换新版前留下的上一版正文(回稿卡「显示改动」在本机对比用)。
+/// reviewId 与现在这一版相同 = 同一轮的原稿与完成稿;不同 = 手机错过了中间几版,只能和手机上的上一版比。
+struct PreviousVersion: Codable, Equatable {
+    var hash: String
+    var reviewId: String
+    var round: Int
+    var savedAt: Date
+}
+
 /// Mac 对某个批次的回执。
 struct SyncReceipt: Codable, Equatable {
     var batchId: String
@@ -101,12 +110,16 @@ final class CloudSyncEngine: ObservableObject {
     #if DEBUG
     /// 仅调试版:模拟器截图用的演示稿件(--demo-drafts)。不连 iCloud,只写本机镜像目录。
     private(set) var demoMode = false
-    func seedDemo(_ items: [(doc: SyncedDocument, markdown: String)]) {
+    func seedDemo(_ items: [(doc: SyncedDocument, markdown: String)], previous: [String: String] = [:]) {
         demoMode = true
         for item in items {
             let dir = directory(for: item.doc.docId)
             try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
             try? item.markdown.write(to: contentURL(for: item.doc.docId), atomically: true, encoding: .utf8)
+            try? fileManager.removeItem(at: previousInfoURL(for: item.doc.docId))
+            if let old = previous[item.doc.docId] {
+                keepPrevious(docId: item.doc.docId, data: Data(old.utf8), hash: Hashing.sha256(old), prior: item.doc)
+            }
         }
         documents = items.map(\.doc)
         saveIndex()
@@ -120,6 +133,23 @@ final class CloudSyncEngine: ObservableObject {
 
     func directory(for docId: String) -> URL { root.appendingPathComponent(docId, isDirectory: true) }
     func contentURL(for docId: String) -> URL { directory(for: docId).appendingPathComponent("content.md") }
+    func previousURL(for docId: String) -> URL { directory(for: docId).appendingPathComponent("previous.md") }
+    private func previousInfoURL(for docId: String) -> URL { directory(for: docId).appendingPathComponent("previous.json") }
+    func previousVersion(for docId: String) -> PreviousVersion? {
+        guard let data = try? Data(contentsOf: previousInfoURL(for: docId)) else { return nil }
+        return try? JSONDecoder().decode(PreviousVersion.self, from: data)
+    }
+    /// 换新版前把旧正文留一份;只留最近一版
+    private func keepPrevious(docId: String, data: Data, hash: String, prior: SyncedDocument?) {
+        let info = PreviousVersion(hash: hash, reviewId: prior?.reviewId ?? "", round: prior?.round ?? 0, savedAt: Date())
+        guard let json = try? JSONEncoder().encode(info) else { return }
+        do {
+            try data.write(to: previousURL(for: docId), options: .atomic)
+            try json.write(to: previousInfoURL(for: docId), options: .atomic)
+        } catch {
+            try? fileManager.removeItem(at: previousInfoURL(for: docId))
+        }
+    }
     func receipt(for batchId: String) -> SyncReceipt? {
         guard let data = try? Data(contentsOf: stateDir.appendingPathComponent("receipts/\(batchId).json")) else { return nil }
         return try? JSONDecoder().decode(SyncReceipt.self, from: data)
@@ -228,9 +258,13 @@ final class CloudSyncEngine: ObservableObject {
         }
         var available = (record["contentAvailable"] as? Int64 ?? 0) == 1
         let target = contentURL(for: docId)
+        let prior = documents.first(where: { $0.docId == docId })
         if available, let asset = record["content"] as? CKAsset, let source = asset.fileURL {
-            let existing = (try? Data(contentsOf: target)).map { Hashing.sha256($0) }
+            let existingData = try? Data(contentsOf: target)
+            let existing = existingData.map { Hashing.sha256($0) }
             if existing != contentHash {
+                // 换新版前把旧正文留一份:回稿卡「显示改动」在本机对比,不用 Mac 再推原稿
+                if let existingData, let existing { keepPrevious(docId: docId, data: existingData, hash: existing, prior: prior) }
                 try? fileManager.removeItem(at: target)
                 try? fileManager.copyItem(at: source, to: target)
             }

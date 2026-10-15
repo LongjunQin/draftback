@@ -5,6 +5,7 @@ import Combine
 import UniformTypeIdentifiers
 import CloudKit
 import Network
+import UserNotifications
 
 /// 当前打开的文档(内存态)。
 final class OpenedDocument: ObservableObject, Identifiable {
@@ -69,6 +70,31 @@ final class OpenedDocument: ObservableObject, Identifiable {
     /// Mac 上改了名:标题跟着变(正文与批注身份不动)
     func retitle(_ title: String) { if !title.isEmpty && title != name { name = title } }
 
+    /// 手机换新版前留下的上一版(回稿卡「显示改动」在本机对比);只有指纹核对过、且和现在这版不同才有
+    var previous: (markdown: String, info: PreviousVersion)?
+
+    /// 回稿卡(UI 方案 4.4):稿子回来了、正文就是这一轮的完成稿时才有;直到下一轮开始都在
+    var returnCard: [String: Any]? {
+        guard let sync, sync.phoneState == "completed", sync.outcome != "approved",
+              contentReviewId == sync.reviewId, hash == sync.contentHash else { return nil }
+        var card: [String: Any] = ["title": "第 \(sync.round) 轮回稿"]
+        var meta: [String] = []
+        if let pushedAt = sync.pushedAt {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "M/d HH:mm"
+            meta.append(formatter.string(from: pushedAt))
+        }
+        meta.append(sync.applyMode == "manual" ? "你在 Mac 上自己改的" : "AI 改的")
+        card["meta"] = meta.joined(separator: " · ")
+        if !sync.summary.isEmpty { card["summary"] = sync.summary }
+        if let previous, previous.info.reviewId != sync.reviewId { card["note"] = "手机上没有这一轮的原稿,对比的是手机上的上一版。" }
+        return card
+    }
+    /// 有回稿卡、又有上一版,才能「显示改动」
+    var changesBase: String? { returnCard == nil ? nil : previous?.markdown }
+    /// 回稿卡相关状态一变就要重画网页(如回稿后定稿:卡片收起)
+    var cardKey: String { "\(sync?.reviewId ?? "")|\(sync?.phoneState ?? "")|\(previous?.info.hash ?? "")" }
+
     /// 当前版本上还没导出的批注:可改可删,"完成本轮"时打包。
     var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash, reviewId: roundId) } }
     /// 当前版本上已提交(导出 / 上传)的批注:锁定,等 Mac 接收。
@@ -114,6 +140,8 @@ final class DocumentStore: ObservableObject {
     @Published private(set) var seen: [String: String] = [:]
     /// 从列表移除的稿件:文档标识 → 移除时的发布签名;Mac 再推新的发布就重新出现
     @Published private(set) var hidden: [String: String] = [:]
+    /// 已经发过「回稿了」通知的:文档标识 → 会话标识|completed(同一次回稿只通知一次)
+    private var notified: [String: String] = [:]
     /// 每篇 Mac 推来的稿子在手机上这一轮还没交的批注数(首页副标题用)
     @Published private(set) var localOpenCounts: [String: Int] = [:]
     /// App 在前台:只有前台时打开着的稿子才算"看过"
@@ -158,10 +186,11 @@ final class DocumentStore: ObservableObject {
         }
         seen = object["seen"] as? [String: String] ?? [:]
         hidden = object["hidden"] as? [String: String] ?? [:]
+        notified = object["notified"] as? [String: String] ?? [:]
     }
 
     private func saveSeen() {
-        let object: [String: Any] = ["version": 1, "seen": seen, "hidden": hidden]
+        let object: [String: Any] = ["version": 1, "seen": seen, "hidden": hidden, "notified": notified]
         if let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: seenFile, options: .atomic)
         }
@@ -172,6 +201,64 @@ final class DocumentStore: ObservableObject {
         guard seen[doc.docId] != key else { return }
         seen[doc.docId] = key
         saveSeen()
+        updateBadge()
+        // 看过了:这篇的「回稿了」通知从通知中心收掉
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["return-\(doc.docId)"])
+    }
+
+    // MARK: 稿子回来的通知与图标角标(UI 方案 4.4;手机拉到新版时自己发,不需要 Mac 改动)
+
+    /// 第一次打开 Mac 推来的稿子时问一次通知权限(系统只弹一次)
+    func requestNotificationPermissionIfNeeded() {
+        let key = "draftback.notifications.asked.v1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
+            Task { @MainActor in self.updateBadge() }
+        }
+    }
+
+    /// 角标 = 新推来还没打开的一轮 + 回稿还没看的(打开就消)
+    func updateBadge() {
+        let count = synced.filter { doc in
+            guard !isHidden(doc) else { return false }
+            let row = DraftStatus.row(for: doc, seen: seen[doc.docId])
+            return row.isNew || row.unread
+        }.count
+        UNUserNotificationCenter.current().setBadgeCount(count) { _ in }
+    }
+
+    private func notifyReturns(old: [SyncedDocument], new docs: [SyncedDocument]) {
+        // 第一次拉取(刚装、刚登录 iCloud)不补发旧稿子的通知
+        guard !old.isEmpty else { return }
+        var changed = false
+        for doc in docs where doc.phoneState == "completed" && doc.outcome != "approved" && !isHidden(doc) {
+            let key = "\(doc.reviewId)|completed"
+            if notified[doc.docId] == key || seen[doc.docId] == key { continue }
+            notified[doc.docId] = key
+            changed = true
+            // 正在看这篇:不打扰
+            if isActive, current?.sync?.docId == doc.docId { continue }
+            let content = UNMutableNotificationContent()
+            content.title = "《\(doc.title.replacingOccurrences(of: ".md", with: ""))》回稿了"
+            let firstLine = doc.summary.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+            content.body = firstLine.isEmpty ? "第 \(doc.round) 轮改完了,点开看看。" : String(firstLine.prefix(80))
+            content.sound = .default
+            content.userInfo = ["docId": doc.docId]
+            content.threadIdentifier = doc.docId
+            let request = UNNotificationRequest(identifier: "return-\(doc.docId)", content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request) { _ in }
+        }
+        if changed { saveSeen() }
+    }
+
+    /// 点通知:直接打开那一篇;冷启动时稿件列表还没到,先记下,到了再开
+    private var pendingOpenDocId: String?
+    func openSynced(docId: String) {
+        guard let doc = synced.first(where: { $0.docId == docId }) else { pendingOpenDocId = docId; return }
+        pendingOpenDocId = nil
+        if current?.sync?.docId == docId { return }
+        openSynced(doc)
     }
 
     private static func hiddenKey(_ doc: SyncedDocument) -> String { "\(doc.reviewId)|\(doc.phoneState)|\(doc.revision ?? -1)" }
@@ -495,13 +582,27 @@ final class DocumentStore: ObservableObject {
         let key = "synced:\(doc.docId)"
         let document = OpenedDocument(url: url, markdown: markdown, assets: Self.collectAssets(markdown: markdown, around: url),
                                       notes: loadNotes(forKey: key), securityScoped: false, storageKey: key, sync: doc)
+        document.previous = loadPrevious(doc.docId, currentHash: document.hash)
         current = document
         markSeen(doc)
+        requestNotificationPermissionIfNeeded()
+    }
+
+    /// 读上一版:指纹核对过、且和现在这版不同才算
+    private func loadPrevious(_ docId: String, currentHash: String) -> (markdown: String, info: PreviousVersion)? {
+        guard let info = cloud.previousVersion(for: docId), info.hash != currentHash,
+              let data = try? Data(contentsOf: cloud.previousURL(for: docId)), Hashing.sha256(data) == info.hash,
+              let markdown = String(data: data, encoding: .utf8) else { return nil }
+        return (markdown, info)
     }
 
     private func syncedDocumentsChanged(_ docs: [SyncedDocument]) {
+        let old = synced
         synced = docs
         recountLocalOpen()
+        notifyReturns(old: old, new: docs)
+        updateBadge()
+        if let pending = pendingOpenDocId, docs.contains(where: { $0.docId == pending }) { openSynced(docId: pending) }
         guard let document = current, let sync = document.sync, let latest = docs.first(where: { $0.docId == sync.docId }) else { return }
         // 正在看的这篇状态变了:前台时算看过(后台收到的回稿要等你真看到)
         if isActive { markSeen(latest) }
@@ -534,8 +635,10 @@ final class DocumentStore: ObservableObject {
             document.newerVersionAvailable = true
             return
         }
+        document.previous = loadPrevious(latest.docId, currentHash: Hashing.sha256(markdown))
         document.replaceContent(markdown: markdown, assets: Self.collectAssets(markdown: markdown, around: url), sync: latest)
-        document.notice = latest.summary.isEmpty ? "已更新到第 \(latest.round) 轮新版" : "已更新到第 \(latest.round) 轮新版 · 点此看改稿摘要"
+        // 稿子回来:正文最上方有回稿卡,不再闪一条提示;其他情况(恢复、新一轮的正文变了)提示一句
+        document.notice = document.returnCard != nil ? nil : "已换成第 \(latest.round) 轮的正文"
     }
 
     /// Mac 的回执到了:对应批次的批注标为"Mac 已接收"或"未被采用(原因)"(跨端规则 6.5、6.6)
@@ -630,7 +733,12 @@ final class DocumentStore: ObservableObject {
             doc("demo-annual", "年度总结.md", round: 4, state: "finalized", minutes: 60 * 26),
             doc("demo-draft", "旧草稿.md", round: 1, state: "cancelled", minutes: 60 * 24 * 5),
         ]
-        cloud.seedDemo(items)
+        // 产品方案:手机上留着这一轮的原稿,回稿卡能「显示改动」
+        let planOriginal = items[1].markdown
+            .replacingOccurrences(of: "Mac 管原文、轮次和最终状态。", with: "Mac 管原文和轮次。")
+            .replacingOccurrences(of: "点「交给 AI」才打包上传。", with: "点「完成本轮」才打包上传,上传失败会自动重试。")
+            + "\n## 以后再说\n\n多台 Mac 对一台手机,首版不做。\n"
+        cloud.seedDemo(items, previous: ["demo-plan": planOriginal])
         seen = ["demo-plan": "seen-before", "demo-interview": DraftStatus.seenKey(for: items[2].doc)]
         hidden = [:]
         saveSeen()

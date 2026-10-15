@@ -217,7 +217,7 @@ struct ReaderStatus: Equatable {
                                     canAnnotate: false, blockedReason: "这一轮已通过。要接着改,先在 Mac 上开下一轮。")
             }
             return ReaderStatus(subtitle: "\(round)回稿", subtitleTone: .back, statusLine: "稿子回来了",
-                                statusDetail: sync.summary.isEmpty ? "要接着改,在 Mac 上开下一轮" : "「…」里看改稿摘要",
+                                statusDetail: "要接着改,在 Mac 上开下一轮",
                                 canAnnotate: false, blockedReason: "稿子回来了。要接着改,先在 Mac 上开下一轮。")
         case "restored":
             return ReaderStatus(subtitle: "已恢复到改稿前", subtitleTone: .back, statusLine: "已恢复到\(round)改稿前", statusDetail: "要接着改,在 Mac 上开下一轮",
