@@ -348,11 +348,10 @@ test('审查修补:留底只写了原稿、meta 没写就崩溃,重放沿用同�
   const { doc, review, finalHash } = await returnedDoc(f);
   const batch = nextRoundBatch(review, finalHash);
   const reserveId = `r${crypto.randomBytes(12).toString('hex')}`;
-  // 造半成品:有 review-id 标记与原稿,没有 meta
+  // 造半成品:有原稿,没有 meta(目录名带会话标识)
   const versionId = await versionStore.allocateVersionId(review.docId, reserveId, f.options);
   const dir = versionStore.versionDir(review.docId, versionId, f.options);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'review-id'), reserveId);
   fs.writeFileSync(path.join(dir, 'original.md'), fs.readFileSync(doc));
   assert.equal(versionStore.findVersionByReviewId(doc, reserveId, f.options).partial, true);
   fs.writeFileSync(path.join(f.dataDir, 'imports', `${batch.batchId}.json`), JSON.stringify({ batchId: batch.batchId, docId: review.docId, intent: 'next-round',
@@ -362,4 +361,36 @@ test('审查修补:留底只写了原稿、meta 没写就崩溃,重放沿用同�
   const next = await store.getReviewById(reserveId, f.options);
   assert.equal(next.versionId, versionId, '沿用半成品目录');
   assert.ok(versionStore.readMetaFor(review.docId, versionId, f.options), 'meta 补上了');
+});
+
+test('审查复核:留底目录刚建、什么都没写就崩溃,决定拒收时也能清掉', async (t) => {
+  const f = setup(t);
+  const { doc, review, finalHash } = await returnedDoc(f);
+  const batch = nextRoundBatch(review, finalHash);
+  const reserveId = `r${crypto.randomBytes(12).toString('hex')}`;
+  const versionId = await versionStore.allocateVersionId(review.docId, reserveId, f.options);
+  const dir = versionStore.versionDir(review.docId, versionId, f.options);
+  fs.mkdirSync(dir, { recursive: true }); // 空目录
+  fs.writeFileSync(path.join(f.dataDir, 'imports', `${batch.batchId}.json`), JSON.stringify({ batchId: batch.batchId, docId: review.docId, intent: 'next-round',
+    previousReviewId: review.id, reviewId: reserveId, absPath: doc, baseVersion: finalHash, batch, acceptedIds: ['p1', 'p2'], skippedIds: [], stage: 'reserved', createdAt: new Date().toISOString() }));
+  fs.writeFileSync(doc, '# 方案\n\n崩溃后在外面改过。\n'); // 重放时正文已变 → 拒收
+  const replayed = await batches.importBatch(batch, f.options);
+  assert.equal(replayed.receipt.accepted, false);
+  assert.equal(fs.existsSync(dir), false, '空的半成品目录被清掉');
+});
+
+test('审查复核:一篇的归档读不了,推送队列照常列出别的文档;权限修好后重新判断', async (t) => {
+  const f = setup(t);
+  const { review } = await returnedDoc(f);
+  const current = await store.getReviewById(review.id, f.options);
+  const finalFile = path.join(versionStore.versionDir(current.docId, current.versionId, f.options), 'final.md');
+  const intact = sync.pushSignature(current, f.options);
+  fs.chmodSync(finalFile, 0o000);
+  t.after(() => { try { fs.chmodSync(finalFile, 0o600); } catch {} });
+  if (process.getuid && process.getuid() === 0) return; // root 读得了无权限文件,这条测不了
+  assert.notEqual(sync.pushSignature(current, f.options), intact, '读不了算不可用');
+  await sync.listOutbox(f.options); // 不抛错
+  await sync.listSyncStatus(f.options);
+  fs.chmodSync(finalFile, 0o600);
+  assert.equal(sync.pushSignature(current, f.options), intact, '权限修好后(只改了状态改变时间)重新判断为可用');
 });

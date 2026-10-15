@@ -203,7 +203,10 @@ final class CloudSyncEngine: ObservableObject {
     }
     /// 回执落盘后、批注改完前 App 被杀:启动时把还没标「已应用」的回执再应用一遍(应用本身幂等)
     private func receiptAppliedURL(_ batchId: String) -> URL { stateDir.appendingPathComponent("receipts/\(batchId).applied") }
-    func markReceiptApplied(_ batchId: String) { try? Data().write(to: receiptAppliedURL(batchId), options: .atomic) }
+    @discardableResult
+    func markReceiptApplied(_ batchId: String) -> Bool {
+        do { try Data().write(to: receiptAppliedURL(batchId), options: .atomic); return true } catch { return false }
+    }
     func unappliedReceipts() -> [SyncReceipt] {
         let dir = stateDir.appendingPathComponent("receipts")
         let names = (try? fileManager.contentsOfDirectory(atPath: dir.path)) ?? []

@@ -70,8 +70,11 @@ final class SyncLoop {
             }
             try await ensureContainerGeneration()
             try await cloud.ensureZone()
-            worked = try await pushOutbox() || worked
+            // 推和收互不拖累:推送队列出错时照样收手机交来的批次,错误最后再报
+            var pushError: Error?
+            do { worked = try await pushOutbox() || worked } catch { pushError = error }
             worked = try await pullBatches() || worked
+            if let pushError { throw pushError }
             consecutiveFailures = 0
         } catch {
             consecutiveFailures += 1

@@ -804,7 +804,9 @@ final class DocumentStore: ObservableObject {
             if saveFinalizeRequests() { cloud.markReceiptApplied(receipt.batchId) } else { finalizeRequests = before }
             return
         }
-        // 一条批注都没认领到(比如批注文件读不到):不标已应用,启动时再来
+        // 定稿回执、请求已经不在了(上次已经应用、「已应用」标记没存上;或原因看过已收起):没有要改的,补标已应用
+        if receipt.intent == "finalize" { cloud.markReceiptApplied(receipt.batchId); return }
+        // 批注文件读不到:不标已应用,启动时再来
         if applyReceiptToNotes(receipt) { cloud.markReceiptApplied(receipt.batchId) }
     }
 
@@ -839,18 +841,22 @@ final class DocumentStore: ObservableObject {
                 notes[index].raw["receiptAt"] = ISO8601DateFormatter().string(from: receipt.receivedAt ?? Date())
             }
         }
-        // 已经应用过(批注都已是收下 / 拒收的终局)也算应用成功
-        let alreadyApplied = { (notes: [Note]) in notes.contains { $0.submittedBatchId == receipt.batchId && ($0.isReceived || $0.isRejected) } }
+        // 读得到批注、却没有这批的(已经应用过,或这批批注已被删掉):没有要改的,算应用成功
         if let document = current, document.storageKey == key {
             var notes = document.notes
             mutate(&notes)
-            guard matched || alreadyApplied(notes) else { return false }
+            guard matched else { return true }
             document.notes = notes
             return persistNotes(document)
         }
+        let file = annotationsFile(forKey: key)
+        if fileManager.fileExists(atPath: file.path) {
+            // 文件在却读不出来:不当成「没有这批」,留着回执下次再来
+            guard let data = try? Data(contentsOf: file), (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else { return false }
+        }
         var notes = loadNotes(forKey: key)
         mutate(&notes)
-        guard matched || alreadyApplied(notes) else { return false }
+        guard matched else { return true }
         let object: [String: Any] = ["version": 1, "annotations": notes.map { $0.raw }]
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) else { return false }
         do { try data.write(to: annotationsFile(forKey: key), options: .atomic); return true } catch { return false }
@@ -907,7 +913,7 @@ final class DocumentStore: ObservableObject {
             let item = SyncedDocument(docId: id, reviewId: "r_\(id)_\(round)", title: title, round: round, status: "", applyMode: "",
                                       phoneState: state, contentHash: Hashing.sha256(markdown), summary: summary, openCount: 0,
                                       pushedAt: now.addingTimeInterval(-minutes * 60), pusher: "Mac", contentAvailable: true,
-                                      updatedAt: now, revision: 1, outcome: outcome, agentState: agent)
+                                      updatedAt: now, revision: 1, outcome: outcome, agentState: agent, macProtocol: 3)
             return (item, markdown)
         }
         var items = [
