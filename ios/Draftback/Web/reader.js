@@ -417,31 +417,44 @@
     post({ type: 'changesState', showing });
   }
 
-  // 逐条结果点一条:在正文里找到那句引文,滚过去并闪一下;找不到(被改掉了)告诉原生
-  // 在正文里找一段引文(空白差异不算),返回范围;whole 为真时要整句都找到
-  function rangeForQuote(quote, whole) {
+  // 在正文里找一段引文,返回所有出现处的范围。引文与正文用同一种规范化(连续空白算一个空格),
+  // 再按对照表换回原文偏移;whole 为假时只比前 40 个字(逐条结果定位用)
+  function rangesForQuote(quote, whole) {
     const wanted = String(quote || '').replace(/\s+/g, ' ').trim();
-    if (!wanted) return null;
+    if (!wanted) return [];
     const probe = whole ? wanted : wanted.slice(0, 40);
     const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
-    const nodes = []; let text = '';
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) { nodes.push({ node, start: text.length }); text += node.data; }
-    const flat = text.replace(/\s/g, ' ');
-    const at = flat.indexOf(probe);
-    if (at < 0) return null;
-    const point = (offset) => {
-      for (let i = nodes.length - 1; i >= 0; i -= 1) if (nodes[i].start <= offset) return { node: nodes[i].node, offset: Math.min(offset - nodes[i].start, nodes[i].node.data.length) };
-      return null;
+    const nodes = []; let raw = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) { nodes.push({ node, start: raw.length }); raw += node.data; }
+    let flat = ''; const map = []; let lastSpace = true;
+    for (let i = 0; i < raw.length; i += 1) {
+      const space = /\s/.test(raw[i]);
+      if (space && lastSpace) continue;
+      flat += space ? ' ' : raw[i]; map.push(i); lastSpace = space;
+    }
+    // 起点取「从这里开始」的节点,终点取「到这里为止」的节点(落在两个节点交界时不跨进下一段)
+    const startPoint = (offset) => {
+      const hit = nodes.find((item) => offset >= item.start && offset < item.start + item.node.data.length);
+      return hit ? { node: hit.node, offset: offset - hit.start } : null;
     };
-    const start = point(at), end = point(at + probe.length);
-    if (!start || !end) return null;
-    const range = document.createRange(); range.setStart(start.node, start.offset); range.setEnd(end.node, end.offset);
-    return range;
+    const endPoint = (offset) => {
+      const hit = nodes.find((item) => offset > item.start && offset <= item.start + item.node.data.length);
+      return hit ? { node: hit.node, offset: offset - hit.start } : null;
+    };
+    const ranges = [];
+    for (let at = flat.indexOf(probe); at >= 0; at = flat.indexOf(probe, at + 1)) {
+      const start = startPoint(map[at]), end = endPoint(map[at + probe.length - 1] + 1);
+      if (!start || !end) continue;
+      const range = document.createRange(); range.setStart(start.node, start.offset); range.setEnd(end.node, end.offset);
+      ranges.push(range);
+    }
+    return ranges;
   }
 
+  // 逐条结果点一条:在正文里找到那句引文,滚过去并闪一下;找不到(被改掉了)告诉原生
   function locateQuote(quote) {
     if (changes.showing) void setShowingChanges(false);
-    const range = rangeForQuote(quote, false);
+    const range = rangesForQuote(quote, false)[0];
     if (!range) { post({ type: 'locateFailed' }); return false; }
     range.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     if (globalThis.CSS && CSS.highlights && globalThis.Highlight) {
@@ -502,12 +515,21 @@
     setFontScale,
     toggleChanges() { return setShowingChanges(!changes.showing); },
     locateQuote(quote) { return locateQuote(quote); },
-    // 「复制到本轮」:引文在本轮正文里还在就重新算锚点;找不到返回 null(原生改成总体意见)
-    anchorForQuote(quote) {
+    // 「复制到本轮」:引文在本轮正文里还在就重新算锚点。出现不止一处时按原来所在的章节挑;
+    // 找不到、或挑不出唯一一处,返回 null(原生改成总体意见,不默认挂到第一处)
+    anchorForQuote(quote, headingPath) {
       if (!state.rendered) return null;
-      const range = rangeForQuote(quote, true);
-      if (!range) return null;
-      const result = anchorForRange(range, String(quote));
+      let ranges = rangesForQuote(quote, true);
+      if (ranges.length > 1) {
+        const wanted = JSON.stringify((Array.isArray(headingPath) ? headingPath : []).map((text) => String(text).replace(/\s+/g, ' ').trim()));
+        ranges = ranges.filter((range) => {
+          const element = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+          const block = element && element.closest('[data-line-start]');
+          return block && JSON.stringify(headingPathFor(block).map((text) => text.replace(/\s+/g, ' ').trim())) === wanted;
+        });
+      }
+      if (ranges.length !== 1) return null;
+      const result = anchorForRange(ranges[0], String(quote));
       return result ? result.anchor : null;
     },
     scrollToTop() { (cardEl.hidden ? content : cardEl).scrollIntoView({ block: 'start' }); },

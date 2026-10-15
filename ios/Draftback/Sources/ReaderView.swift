@@ -25,6 +25,8 @@ struct ReaderView: View {
     @State private var showingChanges = false
     @State private var showResults = false
     @State private var confirmFinalize: ReaderStatus.Primary?
+    /// 弹确认框时那一轮的身份与指纹(确认前 Mac 推来新一轮就作废)
+    @State private var finalizeTarget: (reviewId: String, hash: String)?
     @State private var confirmNewVersion = false
     @State private var handOffCount = 0
     @State private var clock = Date()
@@ -87,6 +89,8 @@ struct ReaderView: View {
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { clock = $0 }
         // 正文或回稿卡重画后网页回到干净稿
         .onChange(of: document.contentVersion) { _, _ in showingChanges = false }
+        // 回执改了批注的状态或归属(比如新一轮快照先到、回执后到):正文高亮跟着重画
+        .onChange(of: document.notes) { _, _ in reloadToken += 1 }
         .onChange(of: document.cardKey) { _, _ in showingChanges = false }
         .navigationTitle(document.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -144,7 +148,10 @@ struct ReaderView: View {
         }
         .confirmationDialog(confirmFinalize == .approve ? "通过并定稿?" : "定稿?", isPresented: Binding(get: { confirmFinalize != nil }, set: { if !$0 { confirmFinalize = nil } }),
                             titleVisibility: .visible) {
-            Button(confirmFinalize == .approve ? "通过 · 定稿" : "定稿") { store.requestFinalize(for: document); confirmFinalize = nil }
+            Button(confirmFinalize == .approve ? "通过 · 定稿" : "定稿") {
+                if let target = finalizeTarget { store.requestFinalize(for: document, expected: target) }
+                confirmFinalize = nil
+            }
             Button("取消", role: .cancel) { confirmFinalize = nil }
         } message: {
             Text(confirmFinalize == .approve
@@ -371,6 +378,7 @@ struct ReaderView: View {
         case .resend, .reexport:
             store.resubmitBatch(for: document)
         case .finalize, .approve:
+            if let reviewId = document.sync?.reviewId { finalizeTarget = (reviewId, document.hash) }
             confirmFinalize = primary
         case .handOffDisabled, .handedOff, .busy:
             break
@@ -415,7 +423,7 @@ struct ReaderView: View {
         }
         if note.isDocumentScope || note.quote.isEmpty { finish(nil); return }
         guard let bridge else { finish(nil); return }
-        bridge.anchorForQuote(note.quote) { anchor in DispatchQueue.main.async { finish(anchor) } }
+        bridge.anchorForQuote(note.quote, headingPath: note.headingPath) { anchor in DispatchQueue.main.async { finish(anchor) } }
     }
 
     private func exportPDF() {

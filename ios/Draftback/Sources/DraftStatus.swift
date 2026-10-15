@@ -314,6 +314,8 @@ struct ReaderStatus: Equatable {
         let canFinalize = sync.phoneState == "completed" || sync.phoneState == "restored"
         var status = ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: line, statusDetail: "划词就开始\(next)",
                                   primary: canFinalize ? .finalize : nil, canAnnotate: true)
+        // 交出的这批被 Mac 拒收了:底栏说清楚,点开看原因(可以复制到本轮再交)
+        if input.rejected > 0 { status.statusLine = "\(input.rejected) 条被 Mac 拒收"; status.statusDetail = "点这里看原因"; status.statusTap = .openNotes }
         if case .rejected(let reason) = input.finalize { status.statusLine = "没有定稿"; status.statusDetail = reason; status.statusTap = .dismissFinalize }
         return status
     }

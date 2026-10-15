@@ -648,9 +648,11 @@ final class DocumentStore: ObservableObject {
         AnnotationBatch(batchId: request.batchId, documentName: request.title, baseVersion: request.baseVersion, completedAt: request.completedAt,
                         device: UIDevice.current.name, annotationsJSON: "[]", docId: request.docId, reviewId: request.reviewId, intent: "finalize")
     }
-    /// 手机定稿:先记「定稿在途」并落盘,再存快照、上传
-    func requestFinalize(for document: OpenedDocument) {
+    /// 手机定稿:先记「定稿在途」并落盘,再存快照、上传。expected 是弹确认框时那一轮的身份与指纹:
+    /// 确认前 Mac 推来了新的一轮(或正文变了),这次确认作废,不替你给没看过的一轮定稿
+    func requestFinalize(for document: OpenedDocument, expected: (reviewId: String, hash: String)) {
         guard let sync = document.sync, sync.supportsIntents else { lastError = "Mac 上的回稿需要更新,才能在手机上定稿。"; return }
+        guard sync.reviewId == expected.reviewId, document.hash == expected.hash else { lastError = "确认期间这篇有了新的一轮,这次没有定稿。先看看新的一轮。"; return }
         let request = FinalizeRequest(batchId: UUID().uuidString.lowercased(), docId: sync.docId, reviewId: sync.reviewId, baseVersion: document.hash,
                                       completedAt: ISO8601DateFormatter().string(from: Date()), title: document.name)
         let before = finalizeRequests
@@ -796,10 +798,13 @@ final class DocumentStore: ObservableObject {
     private func apply(receipt: SyncReceipt) {
         // 定稿请求没有批注可挂:按批次编号认领;接受就清掉,拒收记下原因给界面
         if let entry = finalizeRequests.first(where: { $0.value.batchId == receipt.batchId }) {
+            let before = finalizeRequests
             if receipt.accepted { finalizeRequests[entry.key] = nil } else { finalizeRequests[entry.key]?.rejectedReason = Self.rejectionText(receipt) }
-            if saveFinalizeRequests() { cloud.markReceiptApplied(receipt.batchId) }
+            // 存不进去就退回内存里的状态、不标已应用:下次启动重放这张回执
+            if saveFinalizeRequests() { cloud.markReceiptApplied(receipt.batchId) } else { finalizeRequests = before }
             return
         }
+        // 一条批注都没认领到(比如批注文件读不到):不标已应用,启动时再来
         if applyReceiptToNotes(receipt) { cloud.markReceiptApplied(receipt.batchId) }
     }
 
@@ -817,8 +822,10 @@ final class DocumentStore: ObservableObject {
     @discardableResult
     private func applyReceiptToNotes(_ receipt: SyncReceipt) -> Bool {
         let key = "synced:\(receipt.docId)"
+        var matched = false
         let mutate: (inout [Note]) -> Void = { notes in
             for index in notes.indices where notes[index].submittedBatchId == receipt.batchId && (notes[index].isSubmitted || notes[index].isRejected) {
+                matched = true
                 if receipt.accepted && receipt.acceptedIds.contains(notes[index].id) {
                     notes[index].raw["status"] = "received"
                     notes[index].raw.removeValue(forKey: "rejectedReason")
@@ -832,14 +839,18 @@ final class DocumentStore: ObservableObject {
                 notes[index].raw["receiptAt"] = ISO8601DateFormatter().string(from: receipt.receivedAt ?? Date())
             }
         }
+        // 已经应用过(批注都已是收下 / 拒收的终局)也算应用成功
+        let alreadyApplied = { (notes: [Note]) in notes.contains { $0.submittedBatchId == receipt.batchId && ($0.isReceived || $0.isRejected) } }
         if let document = current, document.storageKey == key {
             var notes = document.notes
             mutate(&notes)
+            guard matched || alreadyApplied(notes) else { return false }
             document.notes = notes
             return persistNotes(document)
         }
         var notes = loadNotes(forKey: key)
         mutate(&notes)
+        guard matched || alreadyApplied(notes) else { return false }
         let object: [String: Any] = ["version": 1, "annotations": notes.map { $0.raw }]
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) else { return false }
         do { try data.write(to: annotationsFile(forKey: key), options: .atomic); return true } catch { return false }

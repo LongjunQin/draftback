@@ -286,3 +286,80 @@ test('"最新一轮"一个定义:第 1 轮之后我自己改了一次,针对手�
   const ok = await batches.importBatch(finalizeBatch(done, base), f.options);
   assert.equal(ok.receipt.accepted, true, ok.receipt.message);
 });
+
+test('审查修补:开轮后、迟到批注接管前崩溃,重放补接管,迟到批注随新一轮交出', async (t) => {
+  const f = setup(t);
+  const { doc, review, finalHash } = await returnedDoc(f);
+  // Mac 上交出后才写的、留待下一轮的批注
+  await store.mutateAnnotations(doc, (data) => { data.annotations.push({ id: 'late1', comment: '交出后才写的', status: 'open', reviewSessionId: review.id }); }, f.options);
+  const batch = nextRoundBatch(review, finalHash);
+  const reserveId = `r${crypto.randomBytes(12).toString('hex')}`;
+  await store.withReviewTransaction(doc, () => store.openReviewLocked(doc, { ...f.options, reserveReviewId: reserveId, openedByBatch: batch.batchId }), f.options);
+  // 造"接管前崩溃":把迟到批注改回旧轮
+  await store.mutateAnnotations(doc, (data) => { const late = data.annotations.find((n) => n.id === 'late1'); late.reviewSessionId = review.id; delete late.lateFromReviewId; }, f.options);
+  fs.writeFileSync(path.join(f.dataDir, 'imports', `${batch.batchId}.json`), JSON.stringify({ batchId: batch.batchId, docId: review.docId, intent: 'next-round',
+    previousReviewId: review.id, reviewId: reserveId, absPath: doc, baseVersion: finalHash, batch, acceptedIds: ['p1', 'p2'], skippedIds: [], stage: 'reserved', createdAt: new Date().toISOString() }));
+  const replayed = await batches.importBatch(batch, f.options);
+  assert.equal(replayed.receipt.accepted, true, replayed.receipt.message);
+  const next = await store.getReviewById(reserveId, f.options);
+  assert.ok(next.memberAnnotationIds.includes('late1'), '迟到批注随新一轮交出');
+  assert.equal(store.readAnnotations(doc).annotations.find((n) => n.id === 'late1').reviewSessionId, reserveId);
+});
+
+test('审查修补:定稿日志落盘后、定稿前正文被改 → 重放复核后拒收,不定稿', async (t) => {
+  const f = setup(t);
+  const { doc, review, finalHash } = await returnedDoc(f);
+  const batch = finalizeBatch(review, finalHash);
+  fs.writeFileSync(path.join(f.dataDir, 'imports', `${batch.batchId}.json`), JSON.stringify({ batchId: batch.batchId, docId: review.docId, intent: 'finalize', reviewId: review.id,
+    absPath: doc, baseVersion: finalHash, batch, acceptedIds: [], skippedIds: [], stage: 'finalizing', createdAt: new Date().toISOString() }));
+  fs.writeFileSync(doc, '# 方案\n\n崩溃后在外面改过。\n');
+  const replayed = await batches.importBatch(batch, f.options);
+  assert.equal(replayed.receipt.accepted, false);
+  assert.equal(replayed.receipt.reason, 'version-mismatch');
+  assert.notEqual((await store.getReviewById(review.id, f.options)).outcome, 'finalized');
+});
+
+test('审查修补:我自己改之后,Mac 上也不能再给旧的第 1 轮定稿(最新一轮同一个定义)', async (t) => {
+  const f = setup(t);
+  const { doc, review } = await returnedDoc(f);
+  const manual = await store.beginManualEdit(doc, f.options);
+  fs.writeFileSync(doc, '# 方案\n\n我自己又改了一句。\n');
+  await store.completeReview(doc, { ...f.options, expectedApplyMode: 'manual', expectedReviewId: manual.id });
+  await assert.rejects(() => store.finalizeReview(review.id, f.options), (e) => e.code === 'INVALID_STATE');
+});
+
+test('审查修补:归档坏了只推状态,修好后签名变、补推正文', async (t) => {
+  const f = setup(t);
+  const { review } = await returnedDoc(f);
+  const current = await store.getReviewById(review.id, f.options);
+  const finalFile = path.join(versionStore.versionDir(current.docId, current.versionId, f.options), 'final.md');
+  const good = fs.readFileSync(finalFile);
+  const intact = sync.pushSignature(current, f.options);
+  fs.writeFileSync(finalFile, '坏了');
+  const broken = sync.pushSignature(current, f.options);
+  assert.notEqual(broken, intact, '归档坏了签名要变');
+  assert.equal((await sync.readPushPayload(review.id, f.options)).contentAvailable, false, '载荷同样判断为不可用');
+  fs.writeFileSync(finalFile, good);
+  assert.equal(sync.pushSignature(current, f.options), intact, '修好后签名回到可用,与上次推的不同就会补推');
+});
+
+test('审查修补:留底只写了原稿、meta 没写就崩溃,重放沿用同一个目录(重新分配轮号),不留半成品', async (t) => {
+  const f = setup(t);
+  const { doc, review, finalHash } = await returnedDoc(f);
+  const batch = nextRoundBatch(review, finalHash);
+  const reserveId = `r${crypto.randomBytes(12).toString('hex')}`;
+  // 造半成品:有 review-id 标记与原稿,没有 meta
+  const versionId = await versionStore.allocateVersionId(review.docId, reserveId, f.options);
+  const dir = versionStore.versionDir(review.docId, versionId, f.options);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'review-id'), reserveId);
+  fs.writeFileSync(path.join(dir, 'original.md'), fs.readFileSync(doc));
+  assert.equal(versionStore.findVersionByReviewId(doc, reserveId, f.options).partial, true);
+  fs.writeFileSync(path.join(f.dataDir, 'imports', `${batch.batchId}.json`), JSON.stringify({ batchId: batch.batchId, docId: review.docId, intent: 'next-round',
+    previousReviewId: review.id, reviewId: reserveId, absPath: doc, baseVersion: finalHash, batch, acceptedIds: ['p1', 'p2'], skippedIds: [], stage: 'reserved', createdAt: new Date().toISOString() }));
+  const replayed = await batches.importBatch(batch, f.options);
+  assert.equal(replayed.receipt.accepted, true, replayed.receipt.message);
+  const next = await store.getReviewById(reserveId, f.options);
+  assert.equal(next.versionId, versionId, '沿用半成品目录');
+  assert.ok(versionStore.readMetaFor(review.docId, versionId, f.options), 'meta 补上了');
+});

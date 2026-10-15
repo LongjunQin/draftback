@@ -39,7 +39,7 @@ struct Note: Identifiable, Equatable {
     var headingPath: [String] { raw["headingPath"] as? [String] ?? [] }
 
     static func == (lhs: Note, rhs: Note) -> Bool {
-        lhs.id == rhs.id && lhs.comment == rhs.comment && lhs.status == rhs.status
+        lhs.id == rhs.id && lhs.comment == rhs.comment && lhs.status == rhs.status && lhs.acceptedReviewId == rhs.acceptedReviewId
     }
 
     static func make(anchor: [String: Any]?, quote: String, comment: String, scope: String?) -> Note {

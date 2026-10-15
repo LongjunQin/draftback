@@ -81,6 +81,16 @@ final class IntentTests: XCTestCase {
         XCTAssertEqual(rejected.primary, .finalize, "可以再试")
     }
 
+    func testTerminalShowsRejectedBatch() {
+        var input = ReaderStatus.Inputs(sync: sync("completed"), annotationAllowed: true, newerVersionAvailable: false, latestRound: nil, open: 0,
+                                        supportsIntents: true, macOpenCount: 0, finalize: nil, nextRoundInFlight: 0)
+        input.rejected = 2
+        let status = ReaderStatus.make(input)
+        XCTAssertEqual(status.statusLine, "2 条被 Mac 拒收", "交出的这批被拒:底栏说清楚")
+        XCTAssertEqual(status.statusTap, .openNotes)
+        XCTAssertTrue(status.canAnnotate, "还能接着批或复制到本轮")
+    }
+
     func testApproveOnlyWhenNothingToHandOff() {
         XCTAssertEqual(status(sync("reviewing")).primary, .approve, "一条批注都没有:通过 · 定稿")
         XCTAssertEqual(status(sync("reviewing", openCount: 2)).primary, .handOffDisabled, "Mac 上有批注:不能直接通过")
