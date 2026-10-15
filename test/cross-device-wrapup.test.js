@@ -100,3 +100,50 @@ test('整体快照恢复:轮次号、版本序号、发布序号不倒退,latest
   const { review: third } = await store.openReview(doc, f.options);
   assert.equal(third.round, before.nextRound);
 });
+
+test('换 iCloud 账号:第一次知道账号时,以前推过的文档记到这个账号;换账号后旧账号的文档不进推送队列,换回来接着推', async (t) => {
+  const f = setup(t);
+  const { review } = await finishedDoc(f, '账号.md');
+  await sync.markPushed(review.id, {}, f.options); // 升级前推过、没记账号
+  await sync.writeHelperState({ account: 'acctA', accountStatus: 'available' }, f.options);
+  assert.equal((await store.getReviewById(review.id, f.options)).sync.account, 'acctA', '第一次知道账号:推过的文档记到这个账号');
+  // 文档又有了新内容(要再推)
+  await store.mutateReviews((data) => { data.reviews[review.id].sync.pushedSignature = 'stale'; }, f.options);
+  assert.equal((await sync.listOutbox(f.options)).length, 1);
+  await sync.writeHelperState({ account: 'acctB', accountStatus: 'available' }, f.options);
+  assert.equal((await sync.listOutbox(f.options)).length, 0, '换成别的账号:属于原账号的文档不推');
+  const status = (await sync.listSyncStatus(f.options)).find((item) => item.reviewId === review.id);
+  assert.equal(status.otherAccount, true);
+  assert.equal(status.needsPush, false);
+  assert.match(sync.describeSync(status, status.needsPush), /另一个 iCloud 账号/);
+  // 新账号下新开的文档记到新账号
+  const { review: fresh } = await finishedDoc(f, '新账号.md');
+  await sync.markPushed(fresh.id, {}, f.options);
+  assert.equal((await store.getReviewById(fresh.id, f.options)).sync.account, 'acctB');
+  await sync.writeHelperState({ account: 'acctA', accountStatus: 'available' }, f.options);
+  const outbox = await sync.listOutbox(f.options);
+  assert.ok(outbox.some((item) => item.reviewId === review.id), '换回原账号:接着推');
+  assert.ok(!outbox.some((item) => item.reviewId === fresh.id), '新账号的文档不推进原账号');
+});
+
+test('云端清理:定稿或作废满 30 天、推过、当前账号的最新一轮才列出,带上它的批次;清过的不再列', async (t) => {
+  const f = setup(t);
+  const { review } = await finishedDoc(f, '清理.md');
+  await sync.writeHelperState({ account: 'acctA' }, f.options);
+  await store.finalizeReview(review.id, f.options);
+  await sync.markPushed(review.id, {}, f.options);
+  fs.mkdirSync(path.join(f.dataDir, 'receipts'), { recursive: true });
+  fs.writeFileSync(path.join(f.dataDir, 'receipts', 'b1.json'), JSON.stringify({ batchId: 'b1', docId: review.docId, accepted: true }));
+  const day = 86400000;
+  assert.deepEqual(await sync.listCloudCleanup({ ...f.options, now: Date.now() + 29 * day }), [], '不满 30 天不清');
+  const due = await sync.listCloudCleanup({ ...f.options, now: Date.now() + 31 * day });
+  assert.equal(due.length, 1);
+  assert.equal(due[0].docId, review.docId);
+  assert.deepEqual(due[0].batchIds, ['b1']);
+  await sync.markCloudCleaned(review.id, f.options);
+  assert.deepEqual(await sync.listCloudCleanup({ ...f.options, now: Date.now() + 31 * day }), [], '清过的不再列');
+  // 回稿了但没定稿:不清
+  const { review: open } = await finishedDoc(f, '没定稿.md');
+  await sync.markPushed(open.id, {}, f.options);
+  assert.deepEqual((await sync.listCloudCleanup({ ...f.options, now: Date.now() + 31 * day })).map((item) => item.reviewId), []);
+});

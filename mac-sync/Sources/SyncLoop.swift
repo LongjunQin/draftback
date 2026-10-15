@@ -11,7 +11,15 @@ final class SyncLoop {
     let interval: TimeInterval
     private let tempDir: URL
     private let containerMarker: URL
+    private let accountMarker: URL
     private var consecutiveFailures = 0
+    /// 当前 iCloud 账号(用户记录名的指纹):换账号时旧账号的文档不往新账号推(跨端规则第 9 节)。
+    /// 10 分钟核对一次;系统发「账号变了」通知、或账号暂时不可用时立刻作废重查
+    private var accountKey: String?
+    private var accountCheckedAt = Date.distantPast
+    private var reportedAccount: String?
+    private let accountChanged = AccountChangeFlag()
+    private var lastCleanup = Date.distantPast
 
     init(dataDir: URL, parentPid: Int32?, interval: TimeInterval, log: Logger) {
         let stateDir = dataDir.appendingPathComponent("sync", isDirectory: true)
@@ -19,11 +27,53 @@ final class SyncLoop {
         server = ServerClient(dataDir: dataDir)
         cloud = CloudStore(stateDir: stateDir)
         containerMarker = stateDir.appendingPathComponent("container")
+        accountMarker = stateDir.appendingPathComponent("account")
         self.parentPid = parentPid
         self.interval = interval
         self.log = log
         tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("draftback-sync-\(getpid())", isDirectory: true)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let flag = accountChanged
+        NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: nil) { _ in flag.set() }
+    }
+
+    /// 核对当前账号;和上次记下的不同(换了账号):清掉变更令牌(那是旧账号区的),记下新账号
+    private func ensureAccount() async throws -> String {
+        if accountChanged.take() { accountKey = nil }
+        if let accountKey, Date().timeIntervalSince(accountCheckedAt) < 600 { return accountKey }
+        let key = String(Hashing.sha256(try await cloud.userRecordName()).prefix(16))
+        let previous = (try? String(contentsOf: accountMarker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let previous, !previous.isEmpty, previous != key {
+            cloud.clearToken()
+            log.info("iCloud 账号换了:属于原账号的文档不推到这个账号,换回原账号后接着同步")
+        }
+        if previous != key { try key.write(to: accountMarker, atomically: true, encoding: .utf8) }
+        accountKey = key
+        accountCheckedAt = Date()
+        return key
+    }
+
+    /// 云端清理(跨端规则第 9 节):定稿或作废满 30 天的文档,删掉云端的文档、附件、批次、回执记录;每小时看一次。
+    /// 手机上的本地副本留着
+    private func cleanupCloud() async {
+        guard Date().timeIntervalSince(lastCleanup) > 3600 else { return }
+        lastCleanup = Date()
+        do {
+            for item in try await server.cleanupList() {
+                guard let docId = item["docId"] as? String, let reviewId = item["reviewId"] as? String else { continue }
+                var names = [docId]
+                if let record = try await cloud.fetch([docId])[docId], let json = record["attachments"] as? String,
+                   let list = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
+                    names += list.compactMap { $0["recordName"] as? String }
+                }
+                for batchId in (item["batchIds"] as? [String]) ?? [] { names += [batchId, CloudSchema.receiptName(batchId: batchId)] }
+                try await cloud.deleteIgnoringMissing(names)
+                try await server.markCloudCleaned(reviewId: reviewId)
+                log.info("云端清理:\(item["title"] as? String ?? docId) 定稿或作废满 30 天,删掉云端 \(names.count) 条记录")
+            }
+        } catch {
+            log.error("云端清理失败(一小时后再试): \(Describe.error(error))")
+        }
     }
 
     func run() async -> Never {
@@ -64,16 +114,22 @@ final class SyncLoop {
             heartbeat["accountStatus"] = describe(status)
             heartbeat["environment"] = environmentName()
             guard status == .available else {
+                accountKey = nil // 登出 / 受限期间可能换了账号:恢复后重新核对
                 heartbeat["error"] = "iCloud 账号不可用(\(describe(status))),请在系统设置里登录 iCloud"
                 try? await server.heartbeat(heartbeat)
                 return false
             }
             try await ensureContainerGeneration()
+            let account = try await ensureAccount()
+            heartbeat["account"] = account
+            // 账号刚知道或换了:先告诉服务,再取推送队列(队列按账号过滤,不能让旧账号的文档推进新账号)
+            if reportedAccount != account { try await server.heartbeat(heartbeat); reportedAccount = account }
             try await cloud.ensureZone()
             // 推和收互不拖累:推送队列出错时照样收手机交来的批次,错误最后再报
             var pushError: Error?
             do { worked = try await pushOutbox() || worked } catch { pushError = error }
             worked = try await pullBatches() || worked
+            await cleanupCloud()
             if let pushError { throw pushError }
             consecutiveFailures = 0
         } catch {
@@ -386,4 +442,12 @@ enum Describe {
         if let underlying = ck.userInfo[NSUnderlyingErrorKey] as? NSError { parts.append("underlying: \(underlying.domain) \(underlying.code) \(underlying.userInfo)") }
         return parts.joined(separator: " | ")
     }
+}
+
+/// 系统「iCloud 账号变了」通知可能在别的线程到:只记一个标记,主循环下一轮取走
+final class AccountChangeFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.lock(); value = true; lock.unlock() }
+    func take() -> Bool { lock.lock(); defer { lock.unlock() }; let current = value; value = false; return current }
 }

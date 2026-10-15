@@ -115,15 +115,23 @@ final class CloudSyncEngine: ObservableObject {
 
     /// 收到回执时回调(DocumentStore 据此更新批注状态)
     var onReceipt: ((SyncReceipt) -> Void)?
+    /// 换了 iCloud 账号、本地镜像换成那个账号的之后回调(正开着的旧账号稿件要关掉)
+    var onAccountSwitched: (() -> Void)?
 
     private let container = CKContainer(identifier: CloudSchema.containerID)
     private var database: CKDatabase { container.privateCloudDatabase }
     private let zoneID = CKRecordZone.ID(zoneName: CloudSchema.zoneName, ownerName: CKCurrentUserDefaultName)
     private let root: URL       // …/Draftback/synced
     private let stateDir: URL   // …/Draftback/sync
+    private let dataDirectory: URL
     private let fileManager = FileManager.default
+    /// 当前 iCloud 账号(用户记录名的指纹,跨端规则第 9 节)。换账号时整份本地镜像与待上传队列收起来,
+    /// 放出新账号的那一份;原账号登回来再换回去。系统通知账号变了、或账号暂时不可用时作废重查
+    private var accountKey: String?
+    private var accountMarker: URL { dataDirectory.appendingPathComponent("sync-account") }
 
     init(dataDirectory: URL) {
+        self.dataDirectory = dataDirectory
         root = dataDirectory.appendingPathComponent("synced", isDirectory: true)
         stateDir = dataDirectory.appendingPathComponent("sync", isDirectory: true)
         // 云端容器换了(改名):本地镜像、变更令牌、回执全部作废,重新从新容器拉;没上传的批次保留,会投到新容器
@@ -142,6 +150,12 @@ final class CloudSyncEngine: ObservableObject {
         }
         documents = loadIndex()
         pendingUploads = outboxFiles().count
+        NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                self?.accountKey = nil
+                await self?.refresh()
+            }
+        }
     }
 
     #if DEBUG
@@ -234,6 +248,44 @@ final class CloudSyncEngine: ObservableObject {
 
     // MARK: 刷新(启动、回到前台、收到静默推送时调用)
 
+    /// 核对当前账号;和上次记下的不同就换镜像。查不到(离线)就抛错:这一轮不上传、不拉取,免得投进别的账号
+    private func ensureAccount() async throws {
+        if accountKey != nil { return }
+        let key = String(Hashing.sha256(try await container.userRecordID().recordName).prefix(16))
+        let previous = (try? String(contentsOf: accountMarker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let previous, !previous.isEmpty, previous != key { switchAccount(from: previous, to: key) }
+        if previous != key { try? key.write(to: accountMarker, atomically: true, encoding: .utf8) }
+        accountKey = key
+    }
+
+    func switchAccount(from old: String, to new: String) {
+        let shelf = dataDirectory.appendingPathComponent("accounts", isDirectory: true)
+        let oldShelf = shelf.appendingPathComponent(old, isDirectory: true)
+        let newShelf = shelf.appendingPathComponent(new, isDirectory: true)
+        try? fileManager.createDirectory(at: oldShelf, withIntermediateDirectories: true)
+        // 收起原账号的镜像(文档、正文、附件)与同步状态(变更令牌、待上传批次、回执)
+        for (dir, name) in [(root, "synced"), (stateDir, "sync")] {
+            let target = oldShelf.appendingPathComponent(name, isDirectory: true)
+            try? fileManager.removeItem(at: target)
+            try? fileManager.moveItem(at: dir, to: target)
+        }
+        // 放回新账号以前收起的那一份;没有就从空的开始
+        for (dir, name) in [(root, "synced"), (stateDir, "sync")] {
+            let stored = newShelf.appendingPathComponent(name, isDirectory: true)
+            if fileManager.fileExists(atPath: stored.path) { try? fileManager.moveItem(at: stored, to: dir) }
+        }
+        for dir in [root, stateDir, stateDir.appendingPathComponent("outbox"), stateDir.appendingPathComponent("receipts")] {
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        try? CloudSchema.containerID.write(to: stateDir.appendingPathComponent("container"), atomically: true, encoding: .utf8)
+        UserDefaults.standard.removeObject(forKey: subscribedKey) // 订阅跟着账号走:新账号要重新订阅
+        subscriptionVerified = false
+        documents = loadIndex()
+        pendingUploads = outboxFiles().count
+        lastError = nil
+        onAccountSwitched?()
+    }
+
     func refresh() async {
         #if DEBUG
         if demoMode { return }
@@ -244,9 +296,11 @@ final class CloudSyncEngine: ObservableObject {
         do {
             accountStatus = try await container.accountStatus()
             guard accountStatus == .available else {
+                accountKey = nil // 登出期间可能换了账号:恢复后重新核对
                 lastError = "未登录 iCloud,收不到 Mac 推来的文档。请在系统设置里登录与 Mac 相同的 Apple ID。"
                 return
             }
+            try await ensureAccount()
             await subscribeIfNeeded()
             await retryOutbox()
             try await pull()
@@ -294,7 +348,10 @@ final class CloudSyncEngine: ObservableObject {
                 if try apply(record: modification.record) { touched = true }
             }
             for deletion in page.deletions where deletion.recordType == CloudSchema.reviewDocument {
-                remove(docId: deletion.recordID.recordName)
+                // Mac 的云端清理(定稿或作废满 30 天):手机上的副本留着,用户自己删;别的删除照旧移出
+                let docId = deletion.recordID.recordName
+                if let local = documents.first(where: { $0.docId == docId }), ["finalized", "cancelled"].contains(local.phoneState) { continue }
+                remove(docId: docId)
                 touched = true
             }
             saveToken(page.changeToken)
@@ -423,6 +480,8 @@ final class CloudSyncEngine: ObservableObject {
         let queued = stateDir.appendingPathComponent("outbox/\(batch.batchId).json")
         try? data.write(to: queued, options: .atomic)
         pendingUploads = outboxFiles().count
+        // 先核对账号:换了账号(或查不到)就留在队列里,不投进别的账号;核对时会把这批随原账号一起收起来
+        guard (try? await ensureAccount()) != nil, fileManager.fileExists(atPath: queued.path) else { return false }
         let uploaded = await upload(batchData: data)
         if uploaded {
             try? fileManager.removeItem(at: queued)

@@ -109,6 +109,13 @@ struct ServerClient {
     func resetPushes() async throws -> [String: Any] {
         try await postJSON("/api/app/sync/reset", [:])
     }
+    /// 云端清理:定稿或作废满 30 天的文档清单;删完报回去
+    func cleanupList() async throws -> [[String: Any]] {
+        (try await getJSON("/api/app/sync/cleanup")["items"] as? [[String: Any]]) ?? []
+    }
+    func markCloudCleaned(reviewId: String) async throws {
+        _ = try await postJSON("/api/app/sync/cleaned", ["reviewId": reviewId])
+    }
     func heartbeat(_ state: [String: Any]) async throws {
         try await postJSON("/api/app/sync/heartbeat", state)
     }

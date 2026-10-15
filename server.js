@@ -556,6 +556,11 @@ async function handleSyncApi(req, res, pathname, q) {
     if (!allowMethods(req, res, ['GET'])) return;
     return sendJson(res, 200, await sync.readPushPayload(q.get('r')));
   }
+  // 云端清理:定稿或作废满 30 天的文档清单(辅助程序每小时取一次,删完报 cleaned)
+  if (pathname === '/api/app/sync/cleanup') {
+    if (!allowMethods(req, res, ['GET'])) return;
+    return sendJson(res, 200, { items: await sync.listCloudCleanup() });
+  }
   if (!allowMethods(req, res, ['POST'])) return;
   const body = await readBody(req);
   if (pathname === '/api/app/sync/pushed') {
@@ -570,6 +575,10 @@ async function handleSyncApi(req, res, pathname, q) {
   if (pathname === '/api/app/sync/error') {
     const review = await sync.markPushError(body.reviewId, body.error);
     return sendJson(res, 200, { ok: true, sync: review.sync });
+  }
+  if (pathname === '/api/app/sync/cleaned') {
+    if (!body || typeof body.reviewId !== 'string') return sendJson(res, 400, { error: 'bad_request', message: '缺少 reviewId。' });
+    return sendJson(res, 200, { ok: true, review: await sync.markCloudCleaned(body.reviewId) });
   }
   if (pathname === '/api/app/sync/heartbeat') {
     return sendJson(res, 200, { ok: true, helper: await sync.writeHelperState(body || {}) });

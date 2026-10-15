@@ -31,6 +31,8 @@ final class CloudStore {
     }
 
     func accountStatus() async throws -> CKAccountStatus { try await container.accountStatus() }
+    /// 当前 iCloud 账号在这个容器里的用户记录名(只拿来算指纹分账号,不外传原文)
+    func userRecordName() async throws -> String { try await container.userRecordID().recordName }
 
     func ensureZone() async throws {
         if zoneReady { return }
@@ -97,6 +99,19 @@ final class CloudStore {
     func delete(_ names: [String]) async throws {
         guard !names.isEmpty else { return }
         _ = try await database.modifyRecords(saving: [], deleting: names.map(recordID), savePolicy: .allKeys, atomically: true)
+    }
+
+    /// 云端清理用:不要求整批成功(有的记录可能早就没了),记录不存在不算错;每次最多 300 条
+    func deleteIgnoringMissing(_ names: [String]) async throws {
+        var start = 0
+        while start < names.count {
+            let chunk = Array(names[start..<min(start + 300, names.count)])
+            start += chunk.count
+            let result = try await database.modifyRecords(saving: [], deleting: chunk.map(recordID), savePolicy: .allKeys, atomically: false)
+            for (_, outcome) in result.deleteResults {
+                if case .failure(let error) = outcome, (error as? CKError)?.code != .unknownItem { throw error }
+            }
+        }
     }
 
     // MARK: 增量拉取(服务端变更令牌落盘;处理失败时不推进令牌,下一轮重拉)

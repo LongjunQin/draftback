@@ -181,6 +181,11 @@ final class DocumentStore: ObservableObject {
         loadRecents()
         refreshLocalFiles()
         cloud.onReceipt = { [weak self] receipt in self?.apply(receipt: receipt) }
+        // 换了 iCloud 账号:列表换成那个账号的;正开着的原账号稿件关掉(它的批注、待上传都随原账号收着)
+        cloud.onAccountSwitched = { [weak self] in
+            guard let self, let docId = self.current?.sync?.docId else { return }
+            if !self.cloud.documents.contains(where: { $0.docId == docId }) { self.current = nil }
+        }
         cloud.$documents.receive(on: RunLoop.main).sink { [weak self] docs in self?.syncedDocumentsChanged(docs) }.store(in: &cancellables)
         cloud.$lastError.receive(on: RunLoop.main).sink { [weak self] error in self?.syncError = error }.store(in: &cancellables)
         cloud.$pendingUploads.receive(on: RunLoop.main).sink { [weak self] count in self?.pendingUploads = count }.store(in: &cancellables)
