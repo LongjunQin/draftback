@@ -209,15 +209,23 @@ async function main() {
     await sleep(800);
     assert.equal(await cdp.evaluate(`document.querySelector('#compareView').hidden`), true, '稿子回来不自动打开对比视图');
     assert.equal(await cdp.evaluate(`document.querySelector('#documentContent').textContent.includes('第二段要被删掉')`), false, '正文是改完的干净稿');
-    await cdp.evaluate(`document.querySelector('#returnCard .return-actions .primary-button').click()`);
+    const cardButton = `document.querySelector('#returnCard [data-compare-style="card"]')`;
+    assert.equal(await cdp.evaluate(`${cardButton}.textContent`), '显示改动');
+    await cdp.evaluate(`${cardButton}.click()`);
     await waitUntil('点「显示改动」打开对比视图', () => cdp.evaluate(`!document.querySelector('#compareView').hidden && document.querySelectorAll('#compareContent .diff-change').length === 4`), 20_000);
+    // 同一个按钮是开关:开着时写「隐藏改动」,再点关掉回到干净稿(2026-10-15 用户提)
+    await waitUntil('按钮变成「隐藏改动」', () => cdp.evaluate(`${cardButton}.textContent === '隐藏改动' && ${cardButton}.getAttribute('aria-pressed') === 'true'`));
+    await cdp.evaluate(`${cardButton}.click()`);
+    await waitUntil('再点关掉对比视图', () => cdp.evaluate(`document.querySelector('#compareView').hidden && ${cardButton}.textContent === '显示改动'`));
+    await cdp.evaluate(`${cardButton}.click()`);
+    await waitUntil('第三次点又打开', () => cdp.evaluate(`!document.querySelector('#compareView').hidden`), 20_000);
     await key(cdp, 'Escape', 'Escape', 27);
-    await waitUntil('关闭', () => cdp.evaluate(`document.querySelector('#compareView').hidden`));
+    await waitUntil('Esc 关闭,按钮变回', () => cdp.evaluate(`document.querySelector('#compareView').hidden && ${cardButton}.textContent === '显示改动'`));
 
     // 页面没有 <link rel=icon>,Chrome 自动请求 /favicon.ico 得到 404,这条资源错误不算脚本问题
     const errors = cdp.exceptions.concat(cdp.consoleMessages.filter((m) => m.type === 'error').map((m) => m.text)).filter((text) => !/favicon|ERR_|net::|Failed to load resource.*404/.test(text));
     assert.deepEqual(errors, [], `页面不应有脚本异常或 console.error: ${errors.join(' | ')}`);
-    console.log('PASS: 回稿卡(事件数据、计数、逐条结果、改动处数)、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、点「显示改动」看对比。');
+    console.log('PASS: 回稿卡(事件数据、计数、逐条结果、改动处数)、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、「显示改动 / 隐藏改动」开关。');
   } finally {
     if (chrome) await stopChild(chrome.child);
     if (server) await stopChild(server.child);

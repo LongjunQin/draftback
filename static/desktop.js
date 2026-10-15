@@ -1653,6 +1653,7 @@
       renderCompareToggle(activeTab());
       nodes.readerPane.classList.toggle('compare-open', open);
       nodes.annotate.hidden = true;
+      syncCompareButtons();
       if (open) { toggleTimeline(false); window.getSelection()?.removeAllRanges(); }
       else { nodes.readerScroll.setAttribute('tabindex', '-1'); nodes.readerScroll.focus({ preventScroll: true }); }
     },
@@ -2362,6 +2363,42 @@
     return button;
   }
 
+  // 回稿卡与历史里的「显示改动」是开关:对比视图开着这一轮时写「隐藏改动」,再点就关掉、回到干净稿(2026-10-15 用户提)
+  function compareShowing(tab, versionId) {
+    const view = Compare.isOpen() ? Compare.current() : null;
+    return Boolean(view && tab && view.tabId === tab.id && view.versionId === versionId);
+  }
+  function toggleCompareFor(tab, round) {
+    if (compareShowing(tab, round.versionId)) { Compare.close(); return; }
+    void openCompareFor(tab, round);
+  }
+  function paintCompareButton(button) {
+    const showing = compareShowing(activeTab(), button.dataset.compareVersion);
+    const restored = button.dataset.compareKind === 'restored';
+    const label = restored ? (showing ? '隐藏对比' : '对比恢复前后') : (showing ? '隐藏改动' : '显示改动');
+    if (button.dataset.compareStyle === 'card') {
+      // 卡上的按钮:显示改动是主按钮(实底),隐藏改动降成次按钮,一眼看出现在是哪种状态
+      button.classList.toggle('primary-button', !showing);
+      button.classList.toggle('secondary-button', showing);
+      button.replaceChildren(icon(showing ? 'ph-eye-slash' : 'ph-git-diff'), document.createTextNode(label));
+    } else {
+      button.textContent = label;
+    }
+    button.setAttribute('aria-pressed', String(showing));
+  }
+  function compareButton(tab, round, style) {
+    const target = { versionId: round.versionId, round: round.round, kind: round.kind === 'restored' ? 'restored' : 'review' };
+    const button = smallButton('', () => toggleCompareFor(tab, target), style === 'card' ? 'primary-button' : '');
+    button.dataset.compareVersion = round.versionId;
+    button.dataset.compareKind = target.kind;
+    button.dataset.compareStyle = style;
+    paintCompareButton(button);
+    return button;
+  }
+  function syncCompareButtons() {
+    document.querySelectorAll('[data-compare-version]').forEach(paintCompareButton);
+  }
+
   function renderReturnCard(tab, card) {
     const root = nodes.returnCard;
     root.replaceChildren();
@@ -2408,9 +2445,8 @@
     }
     const actions = el('div', 'return-actions');
     if (card.canCompare && version) {
-      const button = smallButton('', () => openCompareFor(tab, { versionId: version.versionId, round: version.round, kind: version.kind }), 'primary-button');
-      button.append(icon('ph-git-diff'), document.createTextNode(card.kind === 'restored' ? '对比恢复前后' : '显示改动'));
-      button.title = '打开独立的只读对比视图(⇧⌘D)';
+      const button = compareButton(tab, { versionId: version.versionId, round: version.round, kind: card.kind === 'restored' ? 'restored' : version.kind }, 'card');
+      button.title = '打开或关上只读的对比视图(⇧⌘D)';
       actions.appendChild(button);
     }
     if (card.canRetryPublish && version) actions.appendChild(smallButton('重试发布', () => retryPublish(tab, version.versionId), 'secondary-button'));
@@ -2483,7 +2519,7 @@
     if (round.summary) body.appendChild(el('p', 'round-summary', round.summary));
     if (round.degraded && !round.active) body.appendChild(el('p', 'round-degraded', round.degradedText));
     const actions = el('div', 'round-actions');
-    if (round.canCompare) actions.appendChild(smallButton(round.kind === 'restored' ? '对比恢复前后' : '显示改动', () => openCompareFor(tab, round)));
+    if (round.canCompare) actions.appendChild(compareButton(tab, round, 'history'));
     if (round.canRetryPublish) actions.appendChild(smallButton('重试发布', () => retryPublish(tab, round.versionId)));
     if (round.canRestore) {
       const blocked = ACTIVE_REVIEW.has(tab.review.status) ? '这篇还有进行中的一轮,先走完或作废再恢复' : tab.mode !== 'read' || tab.dirty ? '先退出编辑再恢复' : '';
