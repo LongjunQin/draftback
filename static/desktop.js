@@ -172,6 +172,7 @@
       review: {
         id: document.id, status: 'plain', sourceFile: document.absPath, absPath: document.absPath,
         file: document.file, title: document.title || document.file, directory: document.directory,
+        docId: payload.docId || null, // 会话被清理后仍能按文档身份看历史、对比、恢复
       },
       source: { content: String(source.content || ''), hash: source.hash, revision: 0 },
       annotations: [],
@@ -680,8 +681,12 @@
     applyBundleToTab(tab, normalized, { forceSource: options.forceSource === true });
     await refreshRecents();
     if (isVerifiedAgentCompletion(tab.review, options, priorStatus, priorMode)) {
-      // 稿子回来是一个时刻:正在看这篇就默认打开对比视图(等版本记录到了再开,见 maybeAutoCompare)
-      if (tab.id === state.activeId && tab.mode === 'read') { tab.autoCompare = completionKey(tab.review); renderNotes(tab); }
+      // 稿子回来是一个时刻:正在看这篇就默认打开对比视图一次(等版本记录到了再开,见 maybeAutoCompare);
+      // 只在从非完成态转入时触发,同一次完成再刷新不重开——用户关掉了就是关掉了
+      const key = completionKey(tab.review);
+      if (tab.id === state.activeId && tab.mode === 'read' && priorStatus !== 'complete' && key && !autoComparedKeys().has(key)) {
+        autoComparedKeys().add(key); tab.autoCompare = key; renderNotes(tab);
+      }
       await announceAgentCompletion(tab.review);
     }
   }
@@ -870,6 +875,8 @@
     if (command === 'export-html') { void exportHtml(); return; }
     if (command === 'export-docx') { void exportDocx(); return; }
     if (command === 'new') { void newDocument(); return; }
+    const dialogOpen = !nodes.annotationDialog.hidden || !nodes.confirmDialog.hidden;
+    if (command.startsWith('compare-') && dialogOpen) return; // 对话框开着时菜单发来的对比命令也不动它背后的视图
     if (command === 'compare-toggle') { toggleCompare(); return; }
     if (command === 'compare-prev' || command === 'compare-next') {
       if (!Compare.isOpen()) { toggleCompare(); return; }
@@ -1955,6 +1962,15 @@
       nodes.openNotesList.appendChild(emptyBlock(tab
         ? '还没有批注。划词写下第一条,就开始第 1 轮审阅并锁定原文;批注会交给 AI。'
         : '打开文档后，这里会显示当前轮次的批注。'));
+      // 普通文档也可能有历史(会话被 90 天清理,版本记录还在):按文档身份显示
+      if (tab && tab.review.docId) {
+        void ensureVersions(tab);
+        state.renderingHistory = true; nodes.historySection.open = !!tab.historyOpen; state.renderingHistory = false;
+        const grouped = History.buildRounds({ review: tab.review, versions: tab.versions || [], annotations: [] });
+        nodes.historyNotesCount.textContent = grouped.rounds.length ? `${grouped.rounds.length} 轮` : '0';
+        if (!grouped.rounds.length) nodes.historyNotesList.appendChild(emptyBlock('还没有历史。'));
+        else grouped.rounds.forEach((round) => nodes.historyNotesList.appendChild(roundGroup(tab, round)));
+      }
       return;
     }
     void ensureVersions(tab);
@@ -1993,14 +2009,19 @@
   }
 
   async function ensureVersions(tab, options = {}) {
-    if (!tab || isPlain(tab) || !tab.review.docId) { if (tab) tab.versions = []; return; }
+    if (!tab || !tab.review.docId) { if (tab) tab.versions = []; return; }
     const key = versionsKey(tab.review);
     if (!options.force && (tab.versionsKey === key || Date.now() < tab.versionsRetryAt)) return;
     tab.versionsKey = key;
+    // 请求代次:状态变化会连发请求,只有最后一次的响应才能落盘,晚到的旧响应不覆盖新归档
+    const seq = (tab.versionsSeq || 0) + 1;
+    tab.versionsSeq = seq;
     try {
       const result = await requestJson(`/api/app/document/versions?docId=${encodeURIComponent(tab.review.docId)}&detail=1`);
+      if (tab.versionsSeq !== seq) return;
       tab.versions = Array.isArray(result.versions) ? result.versions : [];
     } catch (error) {
+      if (tab.versionsSeq !== seq) return;
       tab.versions = tab.versions || [];
       tab.versionsKey = '';
       tab.versionsRetryAt = Date.now() + 10_000;
@@ -2129,6 +2150,7 @@
   function roundGroup(tab, round) {
     const details = document.createElement('details');
     details.className = 'round-group'; details.dataset.kind = round.kind;
+    if (round.versionId) details.dataset.versionId = round.versionId;
     if (round.degraded) details.dataset.degraded = '1';
     details.open = tab.openRounds.has(round.key);
     details.addEventListener('toggle', () => { if (details.open) tab.openRounds.add(round.key); else tab.openRounds.delete(round.key); });
@@ -2144,6 +2166,7 @@
     if (round.degraded && !round.active) body.appendChild(el('p', 'round-degraded', round.degradedText));
     const actions = el('div', 'round-actions');
     if (round.canCompare) actions.appendChild(smallButton(round.kind === 'restored' ? '对比恢复前后' : '显示改动', () => openCompareFor(tab, round)));
+    if (round.canRetryPublish) actions.appendChild(smallButton('重试发布', () => retryPublish(tab, round.versionId)));
     if (round.canRestore) {
       const blocked = ACTIVE_REVIEW.has(tab.review.status) ? '这篇还有进行中的一轮,先走完或作废再恢复' : tab.mode !== 'read' || tab.dirty ? '先退出编辑再恢复' : '';
       const label = round.kind === 'restored' ? '恢复到恢复前的稿子' : '恢复到这轮改稿前';
@@ -2197,7 +2220,7 @@
     if (Compare.isOpen()) { Compare.close(); return; }
     const tab = activeTab();
     if (!tab) return;
-    if (isPlain(tab)) { toast('普通文档没有轮次,没有可对比的改动。'); return; }
+    if (isPlain(tab) && !tab.review.docId) { toast('普通文档没有轮次,没有可对比的改动。'); return; }
     const versions = tab.versions || [];
     const card = History.returnCard({ review: tab.review, versions, annotations: tab.annotations });
     let target = card.show && card.canCompare && card.version ? { versionId: card.version.versionId, round: card.version.round, kind: card.version.kind } : null;
@@ -2205,6 +2228,8 @@
     if (!target) { toast('还没有可对比的轮次:稿子回来后才有原稿与完成稿。'); return; }
     void openCompareFor(tab, target);
   }
+
+  function autoComparedKeys() { if (!state.autoCompared) state.autoCompared = new Set(); return state.autoCompared; }
 
   function maybeAutoCompare(tab, card) {
     if (!tab.autoCompare || !tab.versions || activeTab() !== tab || tab.mode !== 'read') return;
@@ -2227,7 +2252,7 @@
     try {
       const result = await requestJson('/api/app/document/restore', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ docId: tab.review.docId, toVersionId: round.versionId, expectedCurrentHash: tab.sourceHash, expectedLatestReviewId: tab.review.id, clientRequestId: requestId('restore') }),
+        body: JSON.stringify({ docId: tab.review.docId, toVersionId: round.versionId, expectedCurrentHash: tab.sourceHash, expectedLatestReviewId: isPlain(tab) ? undefined : tab.review.id, clientRequestId: requestId('restore') }),
       });
       Compare.close();
       await openReviewId(result.reviewId);
@@ -2254,7 +2279,7 @@
     const root = nodes.timelinePopover;
     root.replaceChildren();
     root.appendChild(el('div', 'timeline-title', '轮次时间线'));
-    if (!tab || isPlain(tab)) { root.appendChild(el('div', 'timeline-empty', '普通文档没有轮次。划词写下第一条批注就开始第 1 轮。')); return; }
+    if (!tab || (isPlain(tab) && !tab.review.docId)) { root.appendChild(el('div', 'timeline-empty', '普通文档没有轮次。划词写下第一条批注就开始第 1 轮。')); return; }
     const entries = History.timeline({ review: tab.review, versions: tab.versions || [] });
     if (!entries.length) { root.appendChild(el('div', 'timeline-empty', '还没有轮次记录。')); return; }
     entries.forEach((entry) => {
@@ -2268,8 +2293,7 @@
         item.addEventListener('click', () => {
           tab.historyOpen = true; tab.openRounds.add(entry.versionId);
           toggleTimeline(false); toggleRight(false); renderNotes(tab);
-          const group = nodes.historyNotesList.querySelector(`.round-group[data-kind]`);
-          const target = Array.from(nodes.historyNotesList.querySelectorAll('.round-group')).find((node) => node.open) || group;
+          const target = nodes.historyNotesList.querySelector(`.round-group[data-version-id="${CSS.escape(entry.versionId)}"]`);
           if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
       }
@@ -3006,6 +3030,7 @@
       if (event.key === 'Escape') {
         if (event.isComposing || event.keyCode === 229) return; // 输入法在取消候选词,不是要关东西
         if (!nodes.annotationDialog.hidden) dismissAnnotationDialog();
+        else if (!nodes.confirmDialog.hidden) { /* 确认框在最上层:Esc 不碰它背后的东西 */ }
         else if (!nodes.timelinePopover.hidden) toggleTimeline(false);
         else if (Compare.isOpen()) Compare.close();
         else if (!nodes.findBar.hidden) closeFind();

@@ -1221,6 +1221,8 @@ button.review-state:hover { filter: brightness(.97); }
 .diff-delete .markdown-body, .diff-delete h1, .diff-delete h2, .diff-delete h3, .diff-delete h4, .diff-delete strong { color: var(--muted); }
 .diff-inline-block { margin: .8em 0; }
 .diff-inline { margin: 0; font: inherit; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.diff-source-block { font-size: 12.5px; color: var(--muted); }
+.diff-insert .diff-source-block { color: var(--text); }
 .diff-inline-block.source .diff-inline { padding: 12px 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; line-height: 1.55; }
 .diff-inline-block[data-block-type="table"] .diff-inline { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
 .diff-inline-block[data-heading="1"] .diff-inline { font-size: 29px; font-weight: 700; line-height: 1.35; color: var(--text-strong); }

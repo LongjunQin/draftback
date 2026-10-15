@@ -132,7 +132,7 @@ test('事件类型:零批注通过只有原稿;作废固化当时成员且只推
   meta = JSON.parse(fs.readFileSync(path.join(versionDirOf(f, cancelled), 'meta.json'), 'utf8'));
   assert.equal(meta.kind, 'cancelled');
   assert.deepEqual(meta.memberAnnotationIds, ['c1']);
-  assert.equal(meta.annotations[0].status, 'open', '固化的是作废那一刻的记录');
+  assert.equal(meta.annotations[0].status, 'cancelled', '固化的是作废之后的状态(Codex 审查:历史里不显示成「还没有处理」)');
   assert.equal(store.readAnnotations(doc).annotations[0].status, 'cancelled');
 
   // 独立手工修改:不写就提交 → 没有版本事件

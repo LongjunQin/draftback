@@ -65,10 +65,12 @@
       const end = Math.min(rawEnd, lines.length);
       if (start < cursor || end <= start) continue;
       pushGap(cursor, start);
-      // markdown-it 的 map 常把块后面的空行也算进去;把尾部空行剥出来当空隙,块身份更稳
+      // markdown-it 的 map 常把块后面的空行也算进去;把尾部空行剥出来当空隙,块身份更稳。
+      // 代码块例外:未闭合围栏会一直延伸到文末,里面的空白行是代码内容,剥掉会漏报空白修改
+      const type = token.type.replace(/_open$/, '');
       let bodyEnd = end;
-      while (bodyEnd > start + 1 && isBlank(lines[bodyEnd - 1])) bodyEnd -= 1;
-      blocks.push({ kind: 'block', type: token.type.replace(/_open$/, ''), text: lines.slice(start, bodyEnd).join('\n'), startLine: lineOffset + start, endLine: lineOffset + bodyEnd });
+      if (type !== 'fence' && type !== 'code_block') while (bodyEnd > start + 1 && isBlank(lines[bodyEnd - 1])) bodyEnd -= 1;
+      blocks.push({ kind: 'block', type, text: lines.slice(start, bodyEnd).join('\n'), startLine: lineOffset + start, endLine: lineOffset + bodyEnd });
       pushGap(bodyEnd, end);
       cursor = end;
     }
@@ -134,7 +136,7 @@
       let head = 0;
       while (lo1 + head < hi1 && lo2 + head < hi2 && a[lo1 + head] === b[lo2 + head]) { out.push([lo1 + head, lo2 + head]); head += 1; }
       let tail = 0;
-      while (hi1 - 1 - tail > lo1 + head && hi2 - 1 - tail > lo2 + head && a[hi1 - 1 - tail] === b[hi2 - 1 - tail]) { tail += 1; }
+      while (hi1 - 1 - tail >= lo1 + head && hi2 - 1 - tail >= lo2 + head && a[hi1 - 1 - tail] === b[hi2 - 1 - tail]) { tail += 1; }
       for (let t = tail; t >= 1; t -= 1) out.push([hi1 - t, hi2 - t]);
       return;
     }
@@ -164,27 +166,32 @@
     return set;
   }
 
-  function similarity(x, y) {
+  function similarity(x, y, gx, gy) {
     if (x === y) return 1;
-    if (!x.length || !y.length) return 0;
     if (x.length < 2 || y.length < 2) return 0;
-    const gx = bigrams(x), gy = bigrams(y);
+    // 长度差太大时相似度上限已低于门槛,不用数二元组
+    if ((2 * Math.min(x.length, y.length)) / (x.length + y.length) < PAIR_SIMILARITY) return 0;
+    gx = gx || bigrams(x); gy = gy || bigrams(y);
     let common = 0;
     for (const [g, c] of gx) if (gy.has(g)) common += Math.min(c, gy.get(g));
     return (2 * common) / ((x.length - 1) + (y.length - 1));
   }
+  const PAIR_CHAR_BUDGET = 400_000; // 一个改动组里参与相似度配对的总字符数上限,超过按位置配
 
   /** 组内配对:相似度加权的顺序对齐;两边都大时按位置配 */
   function pairGroup(oldBlocks, newBlocks) {
     const n = oldBlocks.length, m = newBlocks.length;
     const pairs = [];
     if (!n || !m) return pairs;
-    if (n > GROUP_PAIR_LIMIT || m > GROUP_PAIR_LIMIT) {
+    const chars = oldBlocks.reduce((t, b) => t + b.text.length, 0) + newBlocks.reduce((t, b) => t + b.text.length, 0);
+    const huge = oldBlocks.some((b) => b.text.length > INLINE_CHAR_LIMIT) || newBlocks.some((b) => b.text.length > INLINE_CHAR_LIMIT);
+    if (n > GROUP_PAIR_LIMIT || m > GROUP_PAIR_LIMIT || chars > PAIR_CHAR_BUDGET || huge) {
       for (let k = 0; k < Math.min(n, m); k += 1) pairs.push([k, k]);
       return pairs;
     }
+    const gOld = oldBlocks.map((b) => bigrams(b.text)), gNew = newBlocks.map((b) => bigrams(b.text));
     const sim = Array.from({ length: n }, (_, i) => Array.from({ length: m }, (_, j) => {
-      const s = oldBlocks[i].type === newBlocks[j].type || (oldBlocks[i].kind === 'block' && newBlocks[j].kind === 'block') ? similarity(oldBlocks[i].text, newBlocks[j].text) : 0;
+      const s = oldBlocks[i].type === newBlocks[j].type || (oldBlocks[i].kind === 'block' && newBlocks[j].kind === 'block') ? similarity(oldBlocks[i].text, newBlocks[j].text, gOld[i], gNew[j]) : 0;
       return s >= PAIR_SIMILARITY ? s : 0;
     }));
     const dp = Array.from({ length: n + 1 }, () => new Float64Array(m + 1));
@@ -209,18 +216,52 @@
     return diffs;
   }
 
+  /** 表格一行的单元格数:去掉代码跨度与转义竖线后数分隔符 */
+  function tableColumns(line) {
+    const cleaned = line.replace(/`[^`]*`/g, 'x').replace(/\\\|/g, 'x').trim().replace(/^\|/, '').replace(/\|$/, '');
+    return cleaned.split('|').length;
+  }
+  function sameTableShape(oldText, newText) {
+    const a = oldText.split('\n'), b = newText.split('\n');
+    if (a.length !== b.length) return false;
+    return a.every((line, i) => tableColumns(line) === tableColumns(b[i]));
+  }
+
+  // diff-match-patch 按 UTF-16 码元比较,会把表情等代理对拆开;先把增补平面字符映射到私用区单字符,比完再还原
+  const ASTRAL = /[\uD800-\uDBFF]/;
+  function protectAstral(a, b) {
+    if (!ASTRAL.test(a) && !ASTRAL.test(b)) return { a, b, decode: (text) => text };
+    const used = new Set();
+    for (const ch of a + b) { const cp = ch.codePointAt(0); if (cp >= 0xE000 && cp <= 0xF8FF) used.add(cp); }
+    const map = new Map(); const back = new Map();
+    let next = 0xE000;
+    const encode = (text) => Array.from(text).map((ch) => {
+      if (ch.length < 2) return ch;
+      if (!map.has(ch)) {
+        while (used.has(next)) next += 1;
+        if (next > 0xF8FF) return ch;
+        const code = String.fromCharCode(next); map.set(ch, code); back.set(code, ch); next += 1;
+      }
+      return map.get(ch);
+    }).join('');
+    const decode = (text) => text.replace(/[\uE000-\uF8FF]/g, (code) => back.get(code) || code);
+    return { a: encode(a), b: encode(b), decode };
+  }
+  function charDiff(dmp, oldText, newText) {
+    const guarded = protectAstral(oldText, newText);
+    const diffs = dmp.diff_main(guarded.a, guarded.b, false);
+    dmp.diff_cleanupSemantic(diffs);
+    return diffs.map(([op, text]) => [op, guarded.decode(text)]);
+  }
+
   function inlineDiff(dmp, type, oldText, newText) {
     if (oldText.length > INLINE_CHAR_LIMIT || newText.length > INLINE_CHAR_LIMIT) return null;
     if (type === 'table') {
-      if (oldText.split('\n').length !== newText.split('\n').length) return null; // 结构变了:显示旧表、新表
-      const diffs = dmp.diff_main(oldText, newText, false);
-      dmp.diff_cleanupSemantic(diffs);
-      return diffs;
+      if (!sameTableShape(oldText, newText)) return null; // 行列变了:显示旧表、新表
+      return charDiff(dmp, oldText, newText);
     }
     if (SOURCE_TYPES.has(type)) return lineDiff(dmp, oldText, newText);
-    const diffs = dmp.diff_main(oldText, newText, false);
-    dmp.diff_cleanupSemantic(diffs);
-    return diffs;
+    return charDiff(dmp, oldText, newText);
   }
 
   // ---------- 主入口 ----------
@@ -264,19 +305,24 @@
         while (ni < toNew) { if (!usedNew.has(ni)) { items.push({ kind: 'insert', type: news[ni].type, oldText: null, newText: news[ni].text, inline: null, source: SOURCE_TYPES.has(news[ni].type) }); stats.inserted += 1; } ni += 1; }
       };
       for (const [a, b] of paired) { usedOld.add(a); usedNew.add(b); }
+      // 「上一处 / 下一处」按改动块跳:每个改动块一个序号;相邻的改动块合在一个组里渲染
+      const flushItems = () => {
+        if (!items.length) return;
+        const first = changes;
+        for (const item of items) { item.index = changes; changes += 1; }
+        hunks.push({ kind: 'change', index: first, items: items.splice(0) });
+      };
       for (const [a, b] of paired) {
         emitPending(a, b);
+        oi = a + 1; ni = b + 1;
+        if (olds[a].text === news[b].text) { flushItems(); hunks.push({ kind: 'equal', blocks: [news[b]], text: news[b].text }); continue; } // 位置配对配到了没改的块
         const type = news[b].type;
         const inline = inlineDiff(dmp, type, olds[a].text, news[b].text);
         items.push({ kind: 'replace', type, oldText: olds[a].text, newText: news[b].text, inline, source: SOURCE_TYPES.has(type) });
         stats.replaced += 1;
-        oi = a + 1; ni = b + 1;
       }
       emitPending(olds.length, news.length);
-      // 「上一处 / 下一处」按改动块跳:每个改动块一个序号;相邻的改动块合在一个组里渲染
-      const first = changes;
-      for (const item of items) { item.index = changes; changes += 1; }
-      hunks.push({ kind: 'change', index: first, items });
+      flushItems();
     };
     let fullNew = 0;   // 新稿完整块表里消费到哪
     const takeBlanksUpTo = (limit) => { while (fullNew < limit) { if (isBlankGap(newBlocks[fullNew])) equalRun.push(newBlocks[fullNew]); fullNew += 1; } };
@@ -304,5 +350,5 @@
     return blocks.filter((b) => b.kind === 'gap' && b.type === 'reference').map((b) => b.text).join('\n');
   }
 
-  return Object.freeze({ splitBlocks, alignBlocks, pairGroup, similarity, inlineDiff, diffDocuments, referenceDefinitions, SOURCE_TYPES, LCS_CELL_LIMIT, INLINE_CHAR_LIMIT });
+  return Object.freeze({ splitBlocks, alignBlocks, pairGroup, similarity, inlineDiff, diffDocuments, referenceDefinitions, sameTableShape, protectAstral, SOURCE_TYPES, LCS_CELL_LIMIT, INLINE_CHAR_LIMIT });
 });

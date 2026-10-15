@@ -132,3 +132,34 @@ test('300 章样本:首次计算 ≤ 300 ms,改动数与实际一致(超上限�
   assert.equal(result.stats.inserted, 1);
   assert.ok(result.ms <= 300, `首次计算 ${result.ms.toFixed(0)} ms`);
 });
+
+test('Codex 审查修补:代码块尾部空白是内容;表格加列整表删旧加新;表情代理对不拆;无锚点退化不把未改块报成替换', () => {
+  // 1. 未闭合围栏的末尾空白行
+  const ws = run('```\na\n \n', '```\na\n\t\n');
+  assert.equal(ws.changes, 1, '代码块里空白行从空格改成制表符是改动');
+  assert.equal(run('```\na\n \n', '```\na\n').changes, 1, '删掉代码块末尾空行是改动');
+  // 9. 行数相同但加了一列
+  const table = run('| a | b |\n|---|---|\n| 1 | 2 |\n', '| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n');
+  assert.equal(changeItems(table)[0].inline, null, '列数变了不做字级,显示旧表、新表');
+  assert.equal(Diff.sameTableShape('| a \\| x | `b|c` |\n|---|---|', '| a | b |\n|---|---|'), true, '转义竖线与代码跨度里的竖线不算分隔符');
+  // 13. 代理对
+  const emoji = run('状态😀很好。\n', '状态😁很好。\n');
+  const ops = changeItems(emoji)[0].inline;
+  for (const [, text] of ops) assert.doesNotMatch(text, /^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/, `不能拆开代理对: ${JSON.stringify(text)}`);
+  assert.deepEqual(ops.filter((d) => d[0] !== 0), [[-1, '😀'], [1, '😁']]);
+  // 12. 2001 个相同段落中间插入一段:只有一处新增,没有 oldText === newText 的替换
+  const same = Array.from({ length: 2001 }, () => '同一段。').join('\n\n') + '\n';
+  const parts = same.split('\n\n');
+  parts.splice(1000, 0, '插进来的一段。');
+  const inserted = run(same, parts.join('\n\n'));
+  assert.equal(inserted.stats.inserted, 1);
+  assert.equal(inserted.stats.replaced, 0, `未改块不能报成替换: ${JSON.stringify(inserted.stats)}`);
+  assert.ok(changeItems(inserted).every((i) => i.oldText !== i.newText));
+});
+
+test('Codex 审查修补:超大块不做相似度配对(预算),直接按位置配,耗时可控', () => {
+  const big = (ch) => Array.from({ length: 40 }, (_, i) => `${ch.repeat(50_000)}${i}`).join('\n\n') + '\n';
+  const result = run(big('x'), big('y'));
+  assert.equal(result.stats.replaced, 40);
+  assert.ok(result.ms < 500, `超上限退化路径耗时 ${result.ms.toFixed(0)} ms`);
+});

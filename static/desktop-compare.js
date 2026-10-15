@@ -29,6 +29,7 @@
   function create(deps) {
     const { elements: el, md, dmp, Diff, renderMarkdown, loadVersion, onChange } = deps;
     const cache = new Map(); // `${docId}/${versionId}` → { result, originalHash, finalHash }
+    const inflight = new Map(); // 正在计算的 Promise:计数与打开同时请求只算一次
     let current = null;      // { tabId, docId, versionId, round, kind, changes, index, token }
     let loading = 0;
 
@@ -36,9 +37,15 @@
     function isOpen() { return !!current && !el.view.hidden; }
     function notify() { if (typeof onChange === 'function') onChange({ open: isOpen(), tabId: current ? current.tabId : null }); }
 
-    async function compute(docId, versionId) {
+    function compute(docId, versionId) {
       const k = key(docId, versionId);
-      if (cache.has(k)) return cache.get(k);
+      if (cache.has(k)) return Promise.resolve(cache.get(k));
+      if (inflight.has(k)) return inflight.get(k);
+      const job = computeNow(docId, versionId, k).finally(() => inflight.delete(k));
+      inflight.set(k, job);
+      return job;
+    }
+    async function computeNow(docId, versionId, k) {
       const [original, final] = await Promise.all([loadVersion(docId, versionId, 'original'), loadVersion(docId, versionId, 'final')]);
       if (!original.available || !final.available) {
         const reason = !original.available ? original.reason : final.reason;
@@ -63,10 +70,17 @@
 
     function headingLevel(text) { const m = /^(#{1,6})\s/.exec(text || ''); return m ? m[1].length : 0; }
 
-    async function renderBlock(container, text, refs, tab, className) {
+    const SOURCE_ONLY = new Set(['front_matter', 'reference', 'gap', 'blank']);
+    async function renderBlock(container, text, refs, tab, className, type) {
       const box = document.createElement('div');
       box.className = className;
       container.appendChild(box);
+      if (SOURCE_ONLY.has(type) || !String(text).trim()) {
+        // 元数据与引用定义渲染出来是空的,按源码显示才看得见增删
+        const pre = document.createElement('pre'); pre.className = 'diff-inline diff-source-block'; pre.textContent = text;
+        box.classList.add('diff-inline-block', 'source'); box.appendChild(pre);
+        return box;
+      }
       const source = refs ? `${text}\n\n${refs}` : text;
       try { await renderMarkdown(box, source, tab, { interactive: false }); } catch { box.textContent = text; }
       return box;
@@ -103,13 +117,13 @@
           const node = document.createElement('div');
           node.className = `diff-change diff-${item.kind}-item`; node.dataset.changeIndex = String(item.index);
           node.setAttribute('aria-label', `第 ${item.index + 1} 处改动`);
-          if (item.kind === 'insert') jobs.push(renderBlock(node, item.newText, refsNew, tab, 'diff-insert'));
-          else if (item.kind === 'delete') jobs.push(renderBlock(node, item.oldText, refsOld, tab, 'diff-delete'));
+          if (item.kind === 'insert') jobs.push(renderBlock(node, item.newText, refsNew, tab, 'diff-insert', item.type));
+          else if (item.kind === 'delete') jobs.push(renderBlock(node, item.oldText, refsOld, tab, 'diff-delete', item.type));
           else if (item.inline) renderInline(node, item, 'diff-replace');
           else {
             // 字级对比不可用(超长 / 表格结构变了):显示旧块、新块
-            jobs.push(renderBlock(node, item.oldText, refsOld, tab, 'diff-delete'));
-            jobs.push(renderBlock(node, item.newText, refsNew, tab, 'diff-insert'));
+            jobs.push(renderBlock(node, item.oldText, refsOld, tab, 'diff-delete', item.type));
+            jobs.push(renderBlock(node, item.newText, refsNew, tab, 'diff-insert', item.type));
           }
           group.appendChild(node);
         }
@@ -142,15 +156,15 @@
 
     function step(direction) { if (current) goTo(current.index + (direction < 0 ? -1 : 1)); }
 
-    /** 定位到包含某段文字(被删或被改的原文)的第一处改动;找不到返回 false */
+    /** 定位到原文(改前)里包含某段文字的第一处改动;找不到返回 false。按改动项的 oldText 找,不搜合并了 del/ins 的展示文本 */
     function locateText(text) {
-      if (!current || !text) return false;
+      if (!current || !current.entry || !text) return false;
       const needle = String(text).trim().slice(0, 80);
       if (!needle) return false;
-      const nodes = changeNodes();
-      const hit = nodes.findIndex((node) => (node.textContent || '').includes(needle));
-      if (hit < 0) return false;
-      goTo(hit);
+      const items = current.entry.result.hunks.filter((h) => h.kind === 'change').flatMap((h) => h.items);
+      const hit = items.find((item) => (item.oldText || '').includes(needle)) || items.find((item) => (item.newText || '').includes(needle));
+      if (!hit) return false;
+      goTo(hit.index);
       return true;
     }
 
@@ -175,6 +189,7 @@
         if (!current || current.token !== token) return;
         const painted = await paint(entry, options.tab, token);
         if (!painted) return;
+        current.entry = entry;
         current.changes = entry.result.changes;
         const { stats } = entry.result;
         const parts = [];
@@ -206,7 +221,7 @@
       notify();
     }
 
-    function currentView() { return current ? { ...current } : null; }
+    function currentView() { return current ? { tabId: current.tabId, docId: current.docId, versionId: current.versionId, round: current.round, kind: current.kind, changes: current.changes, index: current.index } : null; }
     /** 回稿卡上的「改了几处」:算完给数,算不出给 null(不显示) */
     async function changeCount(docId, versionId) {
       try { return (await compute(docId, versionId)).result.changes; } catch { return null; }

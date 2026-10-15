@@ -59,7 +59,10 @@
     const notes = Array.isArray(version && version.annotations) ? version.annotations : null;
     if (!notes) return null;
     const members = Array.isArray(version.memberAnnotationIds) ? new Set(version.memberAnnotationIds) : null;
-    return members ? notes.filter((note) => members.has(note.id)) : notes;
+    const picked = members ? notes.filter((note) => members.has(note.id)) : notes;
+    if (version.kind !== 'cancelled') return picked;
+    // 作废事件里仍是 open 的成员就是随会话一起作废的那些(旧版服务端在改旁注之前固化快照)
+    return picked.map((note) => (statusOf(note) === 'open' ? { ...note, status: 'cancelled', cancelReason: note.cancelReason || version.summary || '会话作废' } : note));
   }
 
   /** 逐条结果:你说了什么 / AI 怎么处理 */
@@ -89,35 +92,38 @@
     const version = list.find((v) => v.versionId === r.versionId) || list.find((v) => v.reviewId === r.id) || null;
     const round = (version && version.round) || r.round || null;
     const roundText = Number.isInteger(round) ? `第 ${round} 轮` : '这一轮';
+    // 发布失败对每种终态卡都一样:标出来并给重试入口(按 docId/versionId 重试,不指向路径)
+    const failed = publishFailed(version);
+    const publishState = { degraded: failed, degradedText: failed ? `${UNARCHIVED_TEXT}(发布失败,可以重试)` : '', canRetryPublish: failed };
     if (r.status === 'cancelled' || (version && version.kind === 'cancelled')) {
-      return { show: true, kind: 'cancelled', title: `${roundText}已作废`, subtitle: when(version && version.completedAt || r.completedAt || r.updatedAt), summary: r.cancelReason || (version && version.summary) || '', counts: null, items: [], degraded: false, canCompare: false, version };
+      return { show: true, kind: 'cancelled', title: `${roundText}已作废`, subtitle: when(version && version.completedAt || r.completedAt || r.updatedAt), summary: r.cancelReason || (version && version.summary) || '', counts: null, items: [], canCompare: false, version, ...publishState };
     }
     if (r.outcome === 'restored' || (version && version.kind === 'restored')) {
       const from = (version && version.restoredFrom) || r.restoredFrom || {};
       return {
         show: true, kind: 'restored', title: `已恢复到第 ${from.round || '?'} 轮改稿前`, subtitle: when(version && version.completedAt || r.completedAt),
         summary: '正文已换回那一轮改稿前的样子;恢复前的稿子留在历史里(这一轮的「原稿」),可以再恢复回来。附件不随恢复变化。',
-        counts: null, items: [], degraded: false, canCompare: canCompare(version), restoreBackVersionId: version ? version.versionId : null, version,
+        counts: null, items: [], canCompare: canCompare(version), restoreBackVersionId: version ? version.versionId : null, version, ...publishState,
       };
     }
     if (r.outcome === 'approved' || (version && version.kind === 'approved')) {
-      return { show: true, kind: 'approved', title: `${roundText} · 通过,没有批注`, subtitle: when(version && version.completedAt || r.completedAt), summary: '', counts: null, items: [], degraded: false, canCompare: false, version };
+      return { show: true, kind: 'approved', title: `${roundText} · 通过,没有批注`, subtitle: when(version && version.completedAt || r.completedAt), summary: '', counts: null, items: [], canCompare: false, version, ...publishState };
     }
     // 回稿(AI 改或我自己改)
     const manual = r.applyMode === 'manual' || (version && version.applyMode === 'manual') || (version && version.kind === 'manual');
+    // 处理记录只认版本事件里固化的快照;没有快照(事件缺失 / 旧会话)只显示摘要,不从会继续变的旁注拼本轮结果
     const notes = memberNotes(version);
-    const degraded = !version || notes === null || publishFailed(version);
-    const fallbackNotes = degraded ? (Array.isArray(annotations) ? annotations : []).filter((note) => note.reviewSessionId === r.id || (!note.reviewSessionId && statusOf(note) !== 'open')) : [];
-    const used = notes || fallbackNotes;
+    const unarchived = !version || notes === null;
+    const used = notes || [];
     const actor = (version && (version.applyActor || version.claimedBy)) || r.applyActor || r.claimedBy || null;
     return {
       show: true, kind: manual ? 'manual' : 'agent',
       title: manual ? `${roundText} · 我自己改完了` : `${roundText}回稿`,
       subtitle: [when((version && version.completedAt) || r.completedAt), actor && !manual ? actor : null].filter(Boolean).join(' · '),
       summary: (version && version.summary) || r.summary || '',
-      counts: counts(used), items: resultItems(used),
-      degraded, degradedText: degraded ? (publishFailed(version) ? `${UNARCHIVED_TEXT}(发布失败,可以重试)` : UNARCHIVED_TEXT) : '',
-      canRetryPublish: publishFailed(version), canCompare: canCompare(version), version,
+      counts: unarchived ? null : counts(used), items: resultItems(used),
+      degraded: unarchived || failed, degradedText: unarchived ? UNARCHIVED_TEXT : publishState.degradedText,
+      canRetryPublish: failed, canCompare: canCompare(version), version,
     };
   }
 
@@ -150,8 +156,9 @@
         key: v.versionId, versionId: v.versionId, reviewId: v.reviewId, round: v.round, seq: v.seq, kind: v.kind,
         label: active ? '进行中' : kindLabel(v), icon: kindIcon(v), time: v.completedAt || v.submittedAt || v.startedAt || null,
         counts: counts(items), summary: v.summary || '', items: resultItems(items), archived: true,
-        degraded: !active && (members === null || publishFailed(v)), degradedText: publishFailed(v) ? `${UNARCHIVED_TEXT}(发布失败)` : UNARCHIVED_TEXT,
-        canCompare: !active && canCompare(v), canRestore: !active && canRestore(v), restoredFrom: v.restoredFrom || null, current: v.reviewId === r.id, active,
+        degraded: members === null || publishFailed(v), degradedText: publishFailed(v) ? `${UNARCHIVED_TEXT}(发布失败,可以重试)` : UNARCHIVED_TEXT,
+        canRetryPublish: publishFailed(v),
+        canCompare: canCompare(v), canRestore: canRestore(v), restoredFrom: v.restoredFrom || null, current: v.reviewId === r.id, active,
       });
     }
     // 旁注里有、事件里没有的轮(上线前的旧会话,或事件被清理):标「未归档」
@@ -163,7 +170,7 @@
         key: `unarchived:${key}`, versionId: null, reviewId: key, round: isCurrent ? r.round || null : null, seq: null, kind: 'unarchived',
         label: isCurrent && !TERMINAL.has(r.status) ? '进行中' : '未归档', icon: 'ph-archive', time: items.reduce((latest, n) => latestTime(latest, n.appliedAt || n.updatedAt || n.createdAt), null),
         counts: counts(items), summary: isCurrent ? r.summary || '' : '', items: resultItems(items), archived: false, degraded: true, degradedText: UNARCHIVED_TEXT,
-        canCompare: false, canRestore: false, restoredFrom: null, current: isCurrent, active: isCurrent && !TERMINAL.has(r.status),
+        canRetryPublish: false, canCompare: false, canRestore: false, restoredFrom: null, current: isCurrent, active: false,
       });
     }
     rounds.sort((a, b) => (b.seq || 0) - (a.seq || 0) || Date.parse(b.time || 0) - Date.parse(a.time || 0));

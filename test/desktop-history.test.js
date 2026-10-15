@@ -40,7 +40,7 @@ test('回稿卡:摘要、采纳 / 未采纳计数、逐条「你 / AI」都来�
   assert.equal(History.returnCard({ review: { id: 'rabc', status: 'reviewing' }, versions: [agentVersion] }).show, false);
 });
 
-test('回稿卡降级:事件缺失或发布失败时从会话与旁注读,并标明没归档;通过 / 恢复 / 作废各有自己的卡', () => {
+test('回稿卡降级:事件缺失时只有会话摘要并标明没归档,发布失败保留快照并给重试;通过 / 恢复 / 作废各有自己的卡', () => {
   const missing = History.returnCard({
     review: { id: 'rold', status: 'complete', summary: '旧会话的摘要', applyMode: 'agent' }, versions: [],
     annotations: [{ id: 'a', comment: '旧', status: 'applied', appliedNote: '改了', reviewSessionId: 'rold' }, { id: 'b', comment: '别轮的', status: 'applied', reviewSessionId: 'rother' }],
@@ -48,7 +48,8 @@ test('回稿卡降级:事件缺失或发布失败时从会话与旁注读,并标
   assert.equal(missing.degraded, true);
   assert.equal(missing.degradedText, History.UNARCHIVED_TEXT);
   assert.equal(missing.summary, '旧会话的摘要');
-  assert.deepEqual(missing.items.map((i) => i.id), ['a']);
+  assert.deepEqual(missing.items, [], '没归档只给摘要,不从旁注拼结果(Codex 审查第 5 条)');
+  assert.equal(missing.counts, null);
   assert.equal(missing.canCompare, false);
 
   const failed = History.returnCard({ review: { id: 'rabc', status: 'complete', versionId: '0003-rabc' }, versions: [{ ...agentVersion, state: 'publish-failed' }] });
@@ -127,4 +128,49 @@ test('版本列表只在 detail=1 时附带处理记录与成员;列表本身仍
   assert.equal(card.summary, '改了一处');
   assert.equal(card.items[0].ai, '改了');
   assert.equal(card.canCompare, true);
+});
+
+test('Codex 审查修补:没有快照只给摘要不拼旁注;作废事件里的 open 成员按作废显示;恢复 / 通过卡发布失败也有重试;历史轮带重试', () => {
+  const missing = History.returnCard({
+    review: { id: 'rold', status: 'complete', summary: '旧摘要', applyMode: 'agent' }, versions: [],
+    annotations: [{ id: 'legacy', comment: '旧', status: 'applied', appliedNote: '改了' }],
+  });
+  assert.equal(missing.counts, null, '没归档就不显示计数');
+  assert.deepEqual(missing.items, [], '不从旁注拼本轮结果');
+  assert.equal(missing.summary, '旧摘要');
+  const cancelledVersion = { versionId: '0002-r2', seq: 2, round: 2, kind: 'cancelled', reviewId: 'r2', state: 'published', summary: '人工解锁', files: { original: 'archived', final: null }, memberAnnotationIds: ['c1'], annotations: [{ id: 'c1', comment: 'x', status: 'open' }] };
+  const { rounds } = History.buildRounds({ review: { id: 'r3', status: 'reviewing' }, versions: [cancelledVersion], annotations: [] });
+  assert.equal(rounds[0].items[0].status, 'cancelled');
+  assert.match(rounds[0].items[0].ai, /已作废/);
+  assert.equal(rounds[0].counts.open, 0);
+  const restoredFailed = History.returnCard({ review: { id: 'r4', status: 'complete', outcome: 'restored', restoredFrom: { round: 1 } }, versions: [{ versionId: '0004-r4', reviewId: 'r4', kind: 'restored', state: 'publish-failed', files: { original: 'archived', final: 'archived' }, restoredFrom: { round: 1 } }] });
+  assert.equal(restoredFailed.degraded, true); assert.equal(restoredFailed.canRetryPublish, true);
+  const failedRound = History.buildRounds({ review: { id: 'r9', status: 'reviewing' }, versions: [{ ...agentVersion, state: 'publish-failed' }], annotations: [] }).rounds[0];
+  assert.equal(failedRound.canRetryPublish, true);
+  assert.match(failedRound.degradedText, /重试/);
+});
+
+test('Codex 审查修补:作废时固化的是作废后的状态;普通打开带文档身份', async (t) => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-cancel-')));
+  const dataDir = path.join(root, '.draftback');
+  const doc = path.join(root, '作废.md');
+  fs.writeFileSync(doc, '# 作废\n');
+  store.ensureDataDir({ dataDir });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const options = { dataDir };
+  const { review } = await store.openReview(doc, options);
+  fs.writeFileSync(`${doc}.annotations.json`, JSON.stringify({ version: 1, file: '作废.md', annotations: [{ id: 'n1', comment: '改', status: 'open', reviewSessionId: review.id }] }));
+  await store.unlockReview(doc, '测试作废', options);
+  const [event] = versions.listVersions(review.docId, { ...options, includeAnnotations: true });
+  assert.equal(event.kind, 'cancelled');
+  assert.deepEqual(event.annotations.map((n) => [n.id, n.status]), [['n1', 'cancelled']]);
+  assert.match(event.annotations[0].cancelReason, /测试作废/);
+  const documents = require('../lib/documents');
+  const opened = await documents.readDocument(doc, options);
+  assert.equal(opened.docId, review.docId);
+  // 会话被清理后仍能按身份拿到
+  await store.mutateReviews((data) => { delete data.reviews[review.id]; return null; }, options);
+  const after = await documents.readDocument(doc, options);
+  assert.equal(after.latestReview, null);
+  assert.equal(after.docId, review.docId, '会话没了,文档身份还在');
 });
