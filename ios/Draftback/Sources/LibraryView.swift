@@ -84,28 +84,57 @@ struct LibraryView: View {
         collapsedStore = keys.sorted().joined(separator: ",")
     }
 
-    /// 大类标题:名字、篇数、收起时里面有没看过的就带一个蓝点;点一下收起 / 展开
-    private func sectionHeader(_ title: String, key: String, count: Int, unread: Bool) -> some View {
+    /// 大类卡片的第一行(2026-10-15 用户提:全收起时只剩几行灰字,太简陋):彩色图标、名字、收起时写最新一篇的标题,
+    /// 右边篇数(轮到你用实心徽标)与箭头;收起时里面有没看过的带一个蓝点。点一下收起 / 展开,稿件列在同一张卡片里
+    private func categoryRow(_ title: String, key: String, icon: String, tone: Tone, count: Int, unread: Bool, preview: String?, emphasize: Bool = false) -> some View {
         let collapsed = isCollapsed(key)
         return Button {
             withAnimation(.easeInOut(duration: 0.2)) { toggle(key) }
         } label: {
-            HStack(spacing: 6) {
-                Text(title)
-                Text("\(count)").foregroundStyle(.tertiary)
-                if collapsed && unread { Circle().fill(Palette.unread).frame(width: 7, height: 7) }
-                Spacer()
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(tone.color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline).foregroundStyle(.primary)
+                    if collapsed, let preview {
+                        Text(preview).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                if collapsed && unread { Circle().fill(Palette.unread).frame(width: 8, height: 8) }
+                if emphasize && count > 0 {
+                    Text("\(count)").font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(.white)
+                        .padding(.horizontal, 8).frame(minWidth: 24, minHeight: 22)
+                        .background(tone.color, in: Capsule())
+                } else {
+                    Text("\(count)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                }
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(collapsed ? 0 : 90))
             }
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!query.isEmpty)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title),\(count) 篇\(collapsed && unread ? ",有新的" : "")")
         .accessibilityValue(collapsed ? "已收起" : "已展开")
         .accessibilityHint(query.isEmpty ? (collapsed ? "点按展开" : "点按收起") : "")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func groupIcon(_ group: DraftGroup) -> (String, Tone) {
+        switch group {
+        case .yours: return ("tray.full.fill", .turn)
+        case .handed: return ("paperplane.fill", .ai)
+        case .ended: return ("checkmark.seal.fill", .done)
+        }
     }
 
     var body: some View {
@@ -123,6 +152,9 @@ struct LibraryView: View {
                 ForEach(DraftGroup.allCases) { group in
                     if let items = groups[group], !items.isEmpty {
                         Section {
+                            let (icon, tone) = groupIcon(group)
+                            categoryRow(group.title, key: group.rawValue, icon: icon, tone: tone, count: items.count,
+                                        unread: items.contains { $0.state.unread }, preview: items.first?.doc.title, emphasize: group == .yours)
                             if !isCollapsed(group.rawValue) {
                                 ForEach(items) { item in
                                     Button { store.openSynced(item.doc) } label: { DraftRowView(title: item.doc.title, state: item.state) }
@@ -132,19 +164,16 @@ struct LibraryView: View {
                                         }
                                 }
                             }
-                        } header: {
-                            sectionHeader(group.title, key: group.rawValue, count: items.count, unread: items.contains { $0.state.unread })
                         }
                     }
                 }
                 let local = localEntries
                 if !local.isEmpty {
                     Section {
+                        categoryRow("本机文件", key: "local", icon: "iphone", tone: .waiting, count: local.count, unread: false, preview: localPreview(local))
                         if !isCollapsed("local") {
                             ForEach(local) { entry in localRow(entry) }
                         }
-                    } header: {
-                        sectionHeader("本机文件", key: "local", count: local.count, unread: false)
                     } footer: {
                         if !isCollapsed("local") {
                             Text("只在这台手机上,不会同步到 Mac。「文件」App → 我的 iPhone → \(appFolderName) 里的 Markdown 也列在这里。")
@@ -155,9 +184,10 @@ struct LibraryView: View {
             }
             .listStyle(.insetGrouped)
             #if DEBUG
-            // 仅调试版:截图时滚到最底(--demo-scroll-bottom)、全部展开(--demo-expand-all)
+            // 仅调试版:截图时滚到最底(--demo-scroll-bottom)、全部展开(--demo-expand-all)、全部收起(--demo-collapse-all)
             .onAppear {
                 if CommandLine.arguments.contains("--demo-expand-all") { collapsedStore = "" }
+                if CommandLine.arguments.contains("--demo-collapse-all") { collapsedStore = "ended,handed,local,yours" }
                 if CommandLine.arguments.contains("--demo-scroll-bottom") {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { withAnimation { proxy.scrollTo("sync-footer", anchor: .bottom) } }
                 }
@@ -182,6 +212,15 @@ struct LibraryView: View {
             .alert("出错了", isPresented: Binding(get: { store.lastError != nil && store.current == nil }, set: { if !$0 { store.lastError = nil } })) {
                 Button("好", role: .cancel) {}
             } message: { Text(store.lastError ?? "") }
+        }
+    }
+
+    private func localPreview(_ entries: [LocalEntry]) -> String? {
+        switch entries.first {
+        case .recent(let item): return item.name
+        case .folder(let url): return url.lastPathComponent
+        case .sample: return "示例文档.md"
+        case nil: return nil
         }
     }
 
