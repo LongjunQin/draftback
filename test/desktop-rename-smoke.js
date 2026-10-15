@@ -99,6 +99,21 @@ async function main() {
     await pressKey(cdp, 'Escape', 'Escape', 27);
     await waitUntil('收起', () => cdp.evaluate(`!document.querySelector('.doc-title-input')`));
 
+    // 3b. 改名输入了新名字,直接点另一个标签:取消改名,不提交(失焦先于切换触发,以前会把名字改掉)
+    const second = path.join(docDir, '第二篇.md');
+    fs.writeFileSync(second, '# 第二篇\n');
+    await openPath(cdp, second);
+    await waitUntil('第二篇打开', () => cdp.evaluate(`${titleText} === '第二篇.md' && document.querySelectorAll('#tabList .tab').length >= 2`));
+    await mouseClick(cdp, '#docTitleButton', 2);
+    await waitUntil('输入框出现', () => cdp.evaluate(`Boolean(document.querySelector('.doc-title-input'))`));
+    await typeName(cdp, '不该改成这个');
+    const otherTab = await cdp.evaluate(`(() => { const tab = Array.from(document.querySelectorAll('#tabList .tab')).find((t) => t.textContent.includes('周报')); tab.id = tab.id || 'rename-smoke-other-tab'; return '#' + tab.id; })()`);
+    await mouseClick(cdp, otherTab, 1);
+    await waitUntil('切到另一篇', () => cdp.evaluate(`${titleText} === '周报.md' && !document.querySelector('.doc-title-input')`));
+    await sleep(300);
+    assert.ok(fs.existsSync(second), '点别的标签不提交改名');
+    assert.equal(fs.existsSync(path.join(docDir, '不该改成这个.md')), false);
+
     // 4. 这一轮还没走完:不出输入框
     const active = path.join(docDir, '审阅中.md');
     fs.writeFileSync(active, '# 审阅中\n\n正文。\n');
@@ -124,7 +139,7 @@ async function main() {
 
     const errors = cdp.exceptions.concat(cdp.consoleMessages.filter((m) => m.type === 'error').map((m) => m.text)).filter((text) => !/favicon|ERR_|net::|Failed to load resource/.test(text));
     assert.deepEqual(errors, [], `页面不应有脚本异常或 console.error: ${errors.join(' | ')}`);
-    console.log('PASS: 双击就地改名、单击开信息卡、卡里重新命名、Esc 取消、同名提示、这一轮没走完不改、审阅历史跟着走。');
+    console.log('PASS: 双击就地改名、单击开信息卡、卡里重新命名、Esc 取消、同名提示、点别的标签不提交、这一轮没走完不改、审阅历史跟着走。');
   } finally {
     if (chrome) await stopChild(chrome.child);
     if (server) await stopChild(server.child);

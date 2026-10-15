@@ -153,6 +153,16 @@ final class SyncLoop {
         record["contentHash"] = payload["contentHash"] as? String ?? ""
         record["summary"] = payload["summary"] as? String ?? ""
         record["openCount"] = Int64((payload["openCount"] as? Int) ?? 0)
+        // 稿子回来的处理结果(跨端规则 v2.4 第 5 节):逐条与计数;别的状态清掉,手机不会显示过期的结果
+        if let results = payload["results"] as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: results) {
+            record["results"] = String(decoding: data, as: UTF8.self)
+            record["appliedCount"] = Int64((results["applied"] as? Int) ?? 0)
+            record["wontfixCount"] = Int64((results["wontfix"] as? Int) ?? 0)
+        } else {
+            record["results"] = nil
+            record["appliedCount"] = nil
+            record["wontfixCount"] = nil
+        }
         record["pushedAt"] = Date()
         record["pusher"] = Host.current().localizedName ?? "Mac"
 
@@ -208,6 +218,8 @@ final class SyncLoop {
             }
             guard let fresh = existing else { throw error }
             for key in record.allKeys() { fresh[key] = record[key] }
+            // allKeys() 不含这次清掉的字段:处理结果在别的状态下要清空,搬到新鲜记录上时也得清
+            for key in ["results", "appliedCount", "wontfixCount"] where record[key] == nil { fresh[key] = nil }
             try await cloud.saveIfUnchanged(Array(records.dropLast()) + [fresh])
         }
         try? FileManager.default.removeItem(at: tempDir)
@@ -247,6 +259,8 @@ final class SyncLoop {
             "completedAt": record["completedAt"] as? String ?? ISO8601DateFormatter().string(from: Date()),
             "device": record["device"] as? String ?? "iPhone",
         ]
+        // 批次意图(跨端规则 v2.4 第 6.9 节):手机写什么就转什么,桥层不补、不改;旧手机没有这个字段
+        if let intent = record["intent"] as? String, !intent.isEmpty { batch["intent"] = intent }
         if let json = record["annotations"] as? String, let data = json.data(using: .utf8),
            let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             batch["annotations"] = array

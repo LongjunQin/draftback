@@ -118,6 +118,13 @@ test('待推送队列:open 后待推,推完清空;提交、改稿、完成各自
   assert.equal(outbox[0].summary, done.summary);
   const final = await sync.readPushPayload(review.id, f.options);
   assert.match(final.content, /正文\(改\)/);
+  // 稿子回来带本轮处理结果(v2.4):与 Mac 回稿卡同一个函数算,数据来自版本事件
+  assert.equal(final.results.applied, 1);
+  assert.equal(final.results.wontfix, 0);
+  assert.equal(final.results.items.length, 1);
+  assert.deepEqual({ id: final.results.items[0].id, you: final.results.items[0].you, ai: final.results.items[0].ai, status: final.results.items[0].status },
+    { id: 'n1', you: '改', ai: '已改', status: 'applied' });
+  assert.equal(partial.results, null, '改稿中不带处理结果');
 });
 
 test('已交出三档(没人接入 / AI 在线 / 已领取)一变就再推;其他状态的签名不带三档', async (t) => {

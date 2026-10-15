@@ -1129,7 +1129,11 @@ if (Number.isInteger(parentPid) && parentPid > 0) {
         const done = results.filter((item) => item && item.receipt).length;
         if (done) console.log(`批次导入收敛: ${done} 个中途断掉的导入已补齐`);
       }).catch((error) => console.error(`批次导入收敛失败: ${error.message || error}`));
-      store.canonicalizeReviewPaths()
+      // 中途断掉的改名先收敛(做完或退回),再归一路径、清理索引:清理会删"文件已不存在"的已结束会话
+      plainDocuments.recoverRenames()
+        .then((results) => { for (const item of results) console.log(`改名收敛: ${item.from} → ${item.to}: ${item.action}${item.message ? ` (${item.message})` : ''}`); })
+        .catch((error) => console.error(`改名收敛失败: ${error.message || error}`))
+        .then(() => store.canonicalizeReviewPaths())
         .then((result) => { if (result.changed) console.log(`路径归一: ${result.changed} 条会话的路径改成磁盘上的真实写法`); })
         .then(() => versionStore.canonicalizeDocumentPaths())
         .then((result) => { if (result && result.changed) console.log(`路径归一: ${result.changed} 篇文档身份的路径改成磁盘上的真实写法`); })

@@ -64,3 +64,15 @@ final class ReturnCardTests: XCTestCase {
         XCTAssertNotEqual(doc.cardKey, before, "定稿后卡片要收起:网页得重画")
     }
 }
+
+/// 原生给网页传值:单个字符串、数字也要变成合法的 JS 字面量(以前字符串一律变成 null,大纲跳转与定位都不灵)
+final class BridgeJSONTests: XCTestCase {
+    func testScalarsBecomeLiterals() {
+        let bridge = ReaderBridge(webView: AnnotatingWebView(frame: .zero, configuration: .init()))
+        XCTAssertEqual(bridge.json("draftback-h-2"), "\"draftback-h-2\"")
+        XCTAssertEqual(bridge.json("引号\"与</script>"), "\"引号\\\"与<\\/script>\"")
+        XCTAssertEqual(bridge.json(3), "3")
+        XCTAssertEqual(bridge.json(["a": 1]), "{\"a\":1}")
+        XCTAssertEqual(bridge.json(Date()), "null", "不能编码的值给 null,不崩")
+    }
+}

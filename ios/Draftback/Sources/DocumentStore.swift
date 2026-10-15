@@ -84,9 +84,13 @@ final class OpenedDocument: ObservableObject, Identifiable {
             formatter.dateFormat = "M/d HH:mm"
             meta.append(formatter.string(from: pushedAt))
         }
-        meta.append(sync.applyMode == "manual" ? "你在 Mac 上自己改的" : "AI 改的")
+        meta.append(sync.applyMode == "manual" ? "你在 Mac 上自己改的" : (sync.results?.actor ?? "AI 改的"))
         card["meta"] = meta.joined(separator: " · ")
         if !sync.summary.isEmpty { card["summary"] = sync.summary }
+        if let results = sync.results {
+            card["counts"] = ["applied": results.applied, "wontfix": results.wontfix]
+            card["hasResults"] = !results.items.isEmpty
+        }
         if let previous, previous.info.reviewId != sync.reviewId { card["note"] = "手机上没有这一轮的原稿,对比的是手机上的上一版。" }
         return card
     }
@@ -142,6 +146,8 @@ final class DocumentStore: ObservableObject {
     @Published private(set) var hidden: [String: String] = [:]
     /// 已经发过「回稿了」通知的:文档标识 → 会话标识|completed(同一次回稿只通知一次)
     private var notified: [String: String] = [:]
+    /// 通知的起点:第一次完整拉取之后才通知;那一刻已经回来的稿子都算通知过(刚装、刚登录、升级后不补发旧通知)
+    private var notifyBaseline = false
     /// 每篇 Mac 推来的稿子在手机上这一轮还没交的批注数(首页副标题用)
     @Published private(set) var localOpenCounts: [String: Int] = [:]
     /// App 在前台:只有前台时打开着的稿子才算"看过"
@@ -162,7 +168,10 @@ final class DocumentStore: ObservableObject {
         cloud.$lastError.receive(on: RunLoop.main).sink { [weak self] error in self?.syncError = error }.store(in: &cancellables)
         cloud.$pendingUploads.receive(on: RunLoop.main).sink { [weak self] count in self?.pendingUploads = count }.store(in: &cancellables)
         cloud.$accountStatus.receive(on: RunLoop.main).sink { [weak self] status in self?.cloudAccount = status }.store(in: &cancellables)
-        cloud.$lastPullAt.receive(on: RunLoop.main).sink { [weak self] date in self?.lastPullAt = date }.store(in: &cancellables)
+        cloud.$lastPullAt.receive(on: RunLoop.main).sink { [weak self] date in
+            self?.lastPullAt = date
+            if date != nil { self?.establishNotifyBaseline() }
+        }.store(in: &cancellables)
         cloud.$syncing.receive(on: RunLoop.main).sink { [weak self] value in self?.syncing = value }.store(in: &cancellables)
         loadSeen()
         pathMonitor.pathUpdateHandler = { [weak self] path in
@@ -187,10 +196,11 @@ final class DocumentStore: ObservableObject {
         seen = object["seen"] as? [String: String] ?? [:]
         hidden = object["hidden"] as? [String: String] ?? [:]
         notified = object["notified"] as? [String: String] ?? [:]
+        notifyBaseline = object["notifyBaseline"] as? Bool ?? false
     }
 
     private func saveSeen() {
-        let object: [String: Any] = ["version": 1, "seen": seen, "hidden": hidden, "notified": notified]
+        let object: [String: Any] = ["version": 1, "seen": seen, "hidden": hidden, "notified": notified, "notifyBaseline": notifyBaseline]
         if let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: seenFile, options: .atomic)
         }
@@ -203,18 +213,33 @@ final class DocumentStore: ObservableObject {
         saveSeen()
         updateBadge()
         // 看过了:这篇的「回稿了」通知从通知中心收掉
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["return-\(doc.docId)"])
+        Self.withdrawNotification(docId: doc.docId)
     }
 
     // MARK: 稿子回来的通知与图标角标(UI 方案 4.4;手机拉到新版时自己发,不需要 Mac 改动)
 
     /// 第一次打开 Mac 推来的稿子时问一次通知权限(系统只弹一次)
     func requestNotificationPermissionIfNeeded() {
-        let key = "draftback.notifications.asked.v1"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
+        #if DEBUG
+        if cloud.demoMode { return } // 模拟器截图时不弹系统权限框
+        #endif
+        guard !Self.notificationsAsked else { return }
+        UserDefaults.standard.set(true, forKey: Self.notificationsAskedKey)
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
             Task { @MainActor in self.updateBadge() }
+        }
+    }
+
+    /// 问过通知权限没有。没问过之前一概不碰通知中心:新系统上连查授权状态都会提前弹权限框
+    nonisolated static let notificationsAskedKey = "draftback.notifications.asked.v1"
+    nonisolated static var notificationsAsked: Bool { UserDefaults.standard.bool(forKey: notificationsAskedKey) }
+
+    /// 收掉某篇的「回稿了」通知;还没允许通知时什么都不碰(碰了系统可能提前弹权限框)
+    nonisolated static func withdrawNotification(docId: String) {
+        guard notificationsAsked else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus != .notDetermined else { return }
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["return-\(docId)"])
         }
     }
 
@@ -225,12 +250,24 @@ final class DocumentStore: ObservableObject {
             let row = DraftStatus.row(for: doc, seen: seen[doc.docId])
             return row.isNew || row.unread
         }.count
-        UNUserNotificationCenter.current().setBadgeCount(count) { _ in }
+        // 还没问过 / 没允许时不碰角标:系统会因此弹权限框,时机就不对了(权限只在第一次打开 Mac 推来的稿子时问)
+        guard Self.notificationsAsked else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus), settings.badgeSetting == .enabled else { return }
+            UNUserNotificationCenter.current().setBadgeCount(count) { _ in }
+        }
     }
 
-    private func notifyReturns(old: [SyncedDocument], new docs: [SyncedDocument]) {
-        // 第一次拉取(刚装、刚登录 iCloud)不补发旧稿子的通知
-        guard !old.isEmpty else { return }
+    private func establishNotifyBaseline() {
+        guard !notifyBaseline else { return }
+        for doc in synced where doc.phoneState == "completed" { notified[doc.docId] = "\(doc.reviewId)|completed" }
+        notifyBaseline = true
+        saveSeen()
+    }
+
+    private func notifyReturns(new docs: [SyncedDocument]) {
+        // 第一次完整拉取之前不发(那时到的都是旧稿子)
+        guard notifyBaseline else { return }
         var changed = false
         for doc in docs where doc.phoneState == "completed" && doc.outcome != "approved" && !isHidden(doc) {
             let key = "\(doc.reviewId)|completed"
@@ -242,12 +279,14 @@ final class DocumentStore: ObservableObject {
             let content = UNMutableNotificationContent()
             content.title = "《\(doc.title.replacingOccurrences(of: ".md", with: ""))》回稿了"
             let firstLine = doc.summary.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-            content.body = firstLine.isEmpty ? "第 \(doc.round) 轮改完了,点开看看。" : String(firstLine.prefix(80))
+            let counts = doc.results.map { "采纳 \($0.applied) · 未采纳 \($0.wontfix)" }
+            let detail = firstLine.isEmpty ? "第 \(doc.round) 轮改完了,点开看看。" : String(firstLine.prefix(80))
+            content.body = counts.map { "\($0)。\(detail)" } ?? detail
             content.sound = .default
             content.userInfo = ["docId": doc.docId]
             content.threadIdentifier = doc.docId
             let request = UNNotificationRequest(identifier: "return-\(doc.docId)", content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request) { _ in }
+            if Self.notificationsAsked { UNUserNotificationCenter.current().add(request) { _ in } }
         }
         if changed { saveSeen() }
     }
@@ -266,6 +305,8 @@ final class DocumentStore: ObservableObject {
     func hide(_ doc: SyncedDocument) {
         hidden[doc.docId] = Self.hiddenKey(doc)
         saveSeen()
+        updateBadge()
+        Self.withdrawNotification(docId: doc.docId)
     }
 
     private func recountLocalOpen() {
@@ -491,12 +532,15 @@ final class DocumentStore: ObservableObject {
         return true
     }
 
-    func update(noteId: String, comment: String, in document: OpenedDocument) {
-        guard let index = document.notes.firstIndex(where: { $0.id == noteId }), document.notes[index].isOpen else { return }
+    @discardableResult
+    func update(noteId: String, comment: String, in document: OpenedDocument) -> Bool {
+        guard let index = document.notes.firstIndex(where: { $0.id == noteId }), document.notes[index].isOpen else { return false }
         let before = document.notes[index]
         document.notes[index].raw["comment"] = comment
         document.notes[index].raw["updatedAt"] = ISO8601DateFormatter().string(from: Date())
-        if !persistNotes(document), let restore = document.notes.firstIndex(where: { $0.id == noteId }) { document.notes[restore] = before }
+        if persistNotes(document) { return true }
+        if let restore = document.notes.firstIndex(where: { $0.id == noteId }) { document.notes[restore] = before }
+        return false
     }
 
     func remove(noteId: String, from document: OpenedDocument) {
@@ -597,15 +641,12 @@ final class DocumentStore: ObservableObject {
     }
 
     private func syncedDocumentsChanged(_ docs: [SyncedDocument]) {
-        let old = synced
         synced = docs
         recountLocalOpen()
-        notifyReturns(old: old, new: docs)
+        notifyReturns(new: docs)
         updateBadge()
         if let pending = pendingOpenDocId, docs.contains(where: { $0.docId == pending }) { openSynced(docId: pending) }
         guard let document = current, let sync = document.sync, let latest = docs.first(where: { $0.docId == sync.docId }) else { return }
-        // 正在看的这篇状态变了:前台时算看过(后台收到的回稿要等你真看到)
-        if isActive { markSeen(latest) }
         if latest.contentHash != sync.contentHash && latest.contentAvailable {
             // 手头没有未提交的批注:新版直接换进来,不用退出再进;有未提交的批注(锚在旧正文上)才留给用户点「新版」
             if document.openNotes.isEmpty { loadLatestVersion(latest, into: document) } else { document.newerVersionAvailable = true }
@@ -626,6 +667,8 @@ final class DocumentStore: ObservableObject {
             document.sync = latest
             document.retitle(latest.title)
         }
+        // 前台、而且正在看的就是这一版,才算看过;还留着旧正文(手头有没交的批注)时新版保持未读
+        if isActive, document.sync?.reviewId == latest.reviewId, document.hash == latest.contentHash { markSeen(latest) }
     }
 
     /// 把 Mac 推来的最新正文换进当前打开的文档(供自动更新与「新版」按钮共用)
@@ -723,7 +766,7 @@ final class DocumentStore: ObservableObject {
                                       updatedAt: now, revision: 1, outcome: outcome, agentState: agent)
             return (item, markdown)
         }
-        let items = [
+        var items = [
             doc("demo-rules", "跨端规则.md", round: 2, state: "reviewing", minutes: 3),
             doc("demo-plan", "产品方案.md", round: 3, state: "completed", summary: "按 3 条批注改了第二节的说法,删掉一段重复的背景。", minutes: 12),
             doc("demo-interview", "访谈记录.md", round: 1, state: "completed", outcome: "approved", minutes: 200),
@@ -733,6 +776,11 @@ final class DocumentStore: ObservableObject {
             doc("demo-annual", "年度总结.md", round: 4, state: "finalized", minutes: 60 * 26),
             doc("demo-draft", "旧草稿.md", round: 1, state: "cancelled", minutes: 60 * 24 * 5),
         ]
+        items[1].doc.results = RoundResults(applied: 2, wontfix: 1, total: 3, actor: "Claude Code", items: [
+            .init(id: "n1", scope: "text", quote: "Mac 管原文、轮次和最终状态。", you: "把「最终状态」说清楚是谁定的。", ai: "补了一句:定稿只在 Mac 上落盘。", status: "applied"),
+            .init(id: "n2", scope: "text", quote: "云端只是邮筒,不做裁判。", you: "这个比喻好,保留。", ai: "未采纳:原文已经是这样,没有改。", status: "wontfix"),
+            .init(id: "n3", scope: "document", quote: "", you: "最后一节再举个具体例子。", ai: "在「出了岔子怎么办」里加了断网重传的例子。", status: "applied"),
+        ])
         // 产品方案:手机上留着这一轮的原稿,回稿卡能「显示改动」
         let planOriginal = items[1].markdown
             .replacingOccurrences(of: "Mac 管原文、轮次和最终状态。", with: "Mac 管原文和轮次。")

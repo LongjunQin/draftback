@@ -50,7 +50,7 @@ enum DraftStatus {
             return DraftRowState(group: .yours, tone: .conflict, subtitle: "文件被别的程序改了 · 要在 Mac 上处理",
                                  spoken: "文件被别的程序改了,要在 Mac 上处理")
         case "waiting-agent":
-            switch doc.agentState {
+            switch doc.effectiveAgentState(now: now) {
             case "claimed":
                 return DraftRowState(group: .handed, tone: .ai, subtitle: "AI 正在修改 · \(TimeText.duration(since: doc.pushedAt, now: now))",
                                      spinning: true, spoken: "AI 正在修改")
@@ -72,6 +72,12 @@ enum DraftStatus {
                 return DraftRowState(group: .yours, tone: .back, subtitle: "\(round) · 已通过,没有批注\(stamp)", spoken: "\(round)已通过,没有批注")
             }
             let unread = seen != "\(doc.reviewId)|completed"
+            // 与 Mac 左栏一样:有处理结果就写采纳 / 未采纳,没有就写时间
+            if let results = doc.results, results.applied + results.wontfix > 0 {
+                let counts = "采纳 \(results.applied) · 未采纳 \(results.wontfix)"
+                return DraftRowState(group: .yours, tone: .back, subtitle: "\(round)回稿 · \(counts)", unread: unread,
+                                     spoken: "\(round)回稿,\(counts)\(unread ? ",还没看" : "")")
+            }
             return DraftRowState(group: .yours, tone: .back, subtitle: "\(round)回稿\(stamp)", unread: unread,
                                  spoken: "\(round)回稿\(unread ? ",还没看" : "")")
         case "restored":
@@ -192,14 +198,15 @@ struct ReaderStatus: Equatable {
                                 primary: .handOffDisabled, canAnnotate: true)
         case "waiting-agent":
             // 副标题已经说了「已交出」,横幅只说三档里的哪一档
-            if sync.agentState == "claimed" {
+            let agentState = sync.effectiveAgentState(now: input.now)
+            if agentState == "claimed" {
                 return ReaderStatus(subtitle: "AI 正在修改", subtitleTone: .ai, banner: Banner(text: "AI 正在修改,改完会自动换成新版", tone: .ai, spinning: true),
                                     statusLine: receivedLine(input), statusDetail: nil, statusTap: input.received > 0 ? .openNotes : nil,
                                     primary: .busy, canAnnotate: false, blockedReason: handedNote)
             }
             // 旧版 Mac 不推三档(agentState 为空):不出横幅,不猜有没有 AI 接入
-            let banner: Banner? = sync.agentState == "listening" ? Banner(text: "AI 在线,等待领取", tone: .waiting)
-                : sync.agentState == "none" ? Banner(text: "还没有 AI 接入", tone: .waiting) : nil
+            let banner: Banner? = agentState == "listening" ? Banner(text: "AI 在线,等待领取", tone: .waiting)
+                : agentState == "none" ? Banner(text: "还没有 AI 接入", tone: .waiting) : nil
             return ReaderStatus(subtitle: "已交出", subtitleTone: .waiting, banner: banner, statusLine: receivedLine(input),
                                 statusDetail: "稿子回来会自动换成新版", statusTap: input.received + input.rejected > 0 ? .openNotes : nil,
                                 primary: .handedOff, canAnnotate: false, blockedReason: handedNote)

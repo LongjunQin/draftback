@@ -35,10 +35,39 @@ struct SyncedDocument: Identifiable, Codable, Equatable {
     var outcome: String? = nil
     /// 已交出的三档(电脑版规划 v3 规则②):none 还没有 AI 接入 / listening AI 在线,等待领取 / claimed AI 正在修改;其他状态为空
     var agentState: String? = nil
+    /// 稿子回来时的逐条结果与计数(v2.4);别的状态为空
+    var results: RoundResults? = nil
+
+    /// 「AI 在线,等待领取」要有期限:Mac 在 AI 监听期间每 10 分钟重推一次;超过 20 分钟没刷新(Mac 关机、断网),
+    /// 手机不再说 AI 在线,只说已交出(跨端规则第 7 节:过期监听不得继续显示为在线)
+    func effectiveAgentState(now: Date = Date()) -> String? {
+        guard agentState == "listening" else { return agentState }
+        guard let pushedAt, now.timeIntervalSince(pushedAt) <= 20 * 60 else { return nil }
+        return agentState
+    }
 
     var id: String { docId }
     /// 状态上允许批注;正文字节是否真的是这一轮的,由 OpenedDocument.annotationAllowed 再核一次
     var canAnnotate: Bool { phoneState == "reviewing" }
+}
+
+/// 稿子回来时本轮的处理结果(跨端规则 v2.4 第 5 节):与 Mac 回稿卡同一套说法
+struct RoundResults: Codable, Equatable {
+    struct Item: Codable, Equatable, Identifiable {
+        var id: String
+        var scope: String     // text / document
+        var quote: String
+        var you: String       // 你说了什么
+        var ai: String        // AI 怎么处理(含「未采纳:理由」)
+        var status: String    // applied / wontfix / cancelled / open
+    }
+    var applied: Int
+    var wontfix: Int
+    var total: Int
+    var actor: String?
+    var items: [Item]
+    /// 列表按字节预算放,放不下的没带过来(计数仍是全部)
+    var truncated: Bool? = nil
 }
 
 /// 手机换新版前留下的上一版正文(回稿卡「显示改动」在本机对比用)。
@@ -118,8 +147,10 @@ final class CloudSyncEngine: ObservableObject {
             try? item.markdown.write(to: contentURL(for: item.doc.docId), atomically: true, encoding: .utf8)
             try? fileManager.removeItem(at: previousInfoURL(for: item.doc.docId))
             if let old = previous[item.doc.docId] {
-                keepPrevious(docId: item.doc.docId, data: Data(old.utf8), hash: Hashing.sha256(old), prior: item.doc)
+                recordContentIdentity(docId: item.doc.docId, hash: Hashing.sha256(old), reviewId: item.doc.reviewId, round: item.doc.round)
+                keepPrevious(docId: item.doc.docId, data: Data(old.utf8), hash: Hashing.sha256(old))
             }
+            recordContentIdentity(docId: item.doc.docId, hash: Hashing.sha256(item.markdown), reviewId: item.doc.reviewId, round: item.doc.round)
         }
         documents = items.map(\.doc)
         saveIndex()
@@ -134,14 +165,26 @@ final class CloudSyncEngine: ObservableObject {
     func directory(for docId: String) -> URL { root.appendingPathComponent(docId, isDirectory: true) }
     func contentURL(for docId: String) -> URL { directory(for: docId).appendingPathComponent("content.md") }
     func previousURL(for docId: String) -> URL { directory(for: docId).appendingPathComponent("previous.md") }
+    /// content.md 实际是哪一轮的正文(写正文时一起记);只收到状态时不改它(跨端规则第 5 节:缓存绑定自己的身份)
+    private func contentInfoURL(for docId: String) -> URL { directory(for: docId).appendingPathComponent("content.json") }
+    private func contentIdentity(for docId: String) -> PreviousVersion? {
+        guard let data = try? Data(contentsOf: contentInfoURL(for: docId)) else { return nil }
+        return try? JSONDecoder().decode(PreviousVersion.self, from: data)
+    }
+    private func recordContentIdentity(docId: String, hash: String, reviewId: String, round: Int) {
+        let info = PreviousVersion(hash: hash, reviewId: reviewId, round: round, savedAt: Date())
+        if let data = try? JSONEncoder().encode(info) { try? data.write(to: contentInfoURL(for: docId), options: .atomic) }
+    }
     private func previousInfoURL(for docId: String) -> URL { directory(for: docId).appendingPathComponent("previous.json") }
     func previousVersion(for docId: String) -> PreviousVersion? {
         guard let data = try? Data(contentsOf: previousInfoURL(for: docId)) else { return nil }
         return try? JSONDecoder().decode(PreviousVersion.self, from: data)
     }
-    /// 换新版前把旧正文留一份;只留最近一版
-    private func keepPrevious(docId: String, data: Data, hash: String, prior: SyncedDocument?) {
-        let info = PreviousVersion(hash: hash, reviewId: prior?.reviewId ?? "", round: prior?.round ?? 0, savedAt: Date())
+    /// 换新版前把旧正文留一份;只留最近一版。身份取旧正文自己记下的(content.json),
+    /// 不拿最新一条状态冒充——手机可能错过了中间几版;旧缓存没有记录时身份算未知
+    private func keepPrevious(docId: String, data: Data, hash: String) {
+        let known = contentIdentity(for: docId).flatMap { $0.hash == hash ? $0 : nil }
+        let info = PreviousVersion(hash: hash, reviewId: known?.reviewId ?? "", round: known?.round ?? 0, savedAt: Date())
         guard let json = try? JSONEncoder().encode(info) else { return }
         do {
             try data.write(to: previousURL(for: docId), options: .atomic)
@@ -258,19 +301,18 @@ final class CloudSyncEngine: ObservableObject {
         }
         var available = (record["contentAvailable"] as? Int64 ?? 0) == 1
         let target = contentURL(for: docId)
-        let prior = documents.first(where: { $0.docId == docId })
         if available, let asset = record["content"] as? CKAsset, let source = asset.fileURL {
             let existingData = try? Data(contentsOf: target)
             let existing = existingData.map { Hashing.sha256($0) }
             if existing != contentHash {
                 // 换新版前把旧正文留一份:回稿卡「显示改动」在本机对比,不用 Mac 再推原稿
-                if let existingData, let existing { keepPrevious(docId: docId, data: existingData, hash: existing, prior: prior) }
+                if let existingData, let existing { keepPrevious(docId: docId, data: existingData, hash: existing) }
                 try? fileManager.removeItem(at: target)
                 try? fileManager.copyItem(at: source, to: target)
             }
             // 复制后校验字节:对不上就当正文不可用(旧缓存照旧按旧身份只读显示)
             let copied = (try? Data(contentsOf: target)).map { Hashing.sha256($0) }
-            if copied != contentHash { available = false }
+            if copied != contentHash { available = false } else { recordContentIdentity(docId: docId, hash: contentHash, reviewId: record["reviewId"] as? String ?? "", round: Int(record["round"] as? Int64 ?? 1)) }
         } else {
             // 只推状态(作废 / 非 UTF-8 / 发布失败):本地旧正文仍在,但它不是这一轮的;只有指纹相同才算可用
             let existing = (try? Data(contentsOf: target)).map { Hashing.sha256($0) }
@@ -293,10 +335,13 @@ final class CloudSyncEngine: ObservableObject {
             updatedAt: Date(),
             revision: revision,
             outcome: record["outcome"] as? String,
-            agentState: (record["agentState"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            agentState: (record["agentState"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            results: (record["results"] as? String).flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode(RoundResults.self, from: $0) }
         )
-        documents.removeAll { $0.docId == docId }
-        documents.insert(item, at: 0)
+        // 一次换整个数组:先删后插会多发一次中间状态(那一刻这篇不在列表里),通知判断会被骗
+        var next = documents.filter { $0.docId != docId }
+        next.insert(item, at: 0)
+        documents = next
         return true
     }
 

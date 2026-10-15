@@ -3728,15 +3728,24 @@
   }
   async function applyRename(tab, payload) {
     if (isPlain(tab)) {
-      // 普通文档的标签按路径编号:换成新路径的标签,阅读 / 编辑状态、滚动位置、编辑登记照旧
+      // 普通文档的标签按路径编号:换成新路径的标签,阅读 / 编辑状态、滚动位置、编辑登记照旧。
+      // 改名请求在路上时还在编辑器里打的字也要带过去:先从编辑器取最新内容,存到新标签的草稿,再删旧草稿
+      if (tab.mode === 'edit') captureEditorValue(tab);
       const next = makeTab(normalizeDocument(payload));
       next.mode = tab.mode;
       next.scrollTop = tab.scrollTop;
       next.editingRegistered = tab.editingRegistered;
+      if (tab.dirty && typeof tab.editorDraft === 'string') {
+        next.editorDraft = tab.editorDraft;
+        next.dirty = true;
+        persistDraft(next);
+      }
+      // 编辑器的输入监听绑在旧标签上:按新标签重建(内容取新标签的草稿)
+      if (state.editorTabId === tab.id) destroyEditor();
       const index = state.tabs.indexOf(tab);
       if (index >= 0) state.tabs.splice(index, 1, next);
       if (state.activeId === tab.id) state.activeId = next.id;
-      try { localStorage.removeItem(draftKey(tab.id)); } catch (_) {}
+      clearDraft(tab);
       persistTabs();
       renderApp();
     } else {
@@ -3936,6 +3945,12 @@
       clearTimeout(state.docTitleClickTimer);
       state.docTitleClickTimer = setTimeout(() => { state.docTitleClickTimer = 0; toggleDocInfo(); }, 250);
     });
+    // 改名时点别的标签或左栏的稿件:按下时就收起改名(不提交)——失焦会先于切换触发,提交到的就是上一篇
+    document.addEventListener('pointerdown', (event) => {
+      const session = state.renaming;
+      if (!session || event.target === session.input) return;
+      if (event.target.closest('#tabList .tab, #recentList .recent-item, #welcomeRecent .recent-item')) endRename(session, { focus: false });
+    }, true);
     nodes.docTitleButton.addEventListener('dblclick', (event) => {
       event.preventDefault(); event.stopPropagation();
       clearTimeout(state.docTitleClickTimer); state.docTitleClickTimer = 0;

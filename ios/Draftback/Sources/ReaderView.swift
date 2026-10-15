@@ -23,6 +23,7 @@ struct ReaderView: View {
     @State private var hasSelection = false
     /// 回稿卡「显示改动」开着:对比是只读视图,这时不能批注
     @State private var showingChanges = false
+    @State private var showResults = false
     @State private var confirmNewVersion = false
     @State private var handOffCount = 0
     @State private var clock = Date()
@@ -98,6 +99,16 @@ struct ReaderView: View {
             }
         }
         .sheet(isPresented: $showOutline) { OutlineSheet(items: document.outline) { id in bridge?.scrollToHeading(id); showOutline = false } }
+        .sheet(isPresented: $showResults) {
+            if let results = document.sync?.results {
+                ResultsSheet(round: document.sync?.round ?? 0, results: results) { item in
+                    showResults = false
+                    if item.scope != "document", !item.quote.isEmpty {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { bridge?.locateQuote(item.quote) }
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $showNotes) {
             NotesSheet(document: document, canAnnotate: status.canAnnotate,
                        onFocus: { id in bridge?.focus(noteId: id); showNotes = false },
@@ -106,13 +117,17 @@ struct ReaderView: View {
         }
         .sheet(item: $composer) { item in
             ComposerSheet(quote: item.quote, initial: item.initialComment, isDocumentScope: item.scope == "document") { comment in
+                // 存进手机才关输入框;没存进去(会有提示)就留着,字不丢
+                let saved: Bool
                 if let editing = item.editingNoteId {
-                    store.update(noteId: editing, comment: comment, in: document)
+                    saved = store.update(noteId: editing, comment: comment, in: document)
                 } else {
-                    store.add(note: Note.make(anchor: item.anchor, quote: item.quote, comment: comment, scope: item.scope), to: document)
+                    saved = store.add(note: Note.make(anchor: item.anchor, quote: item.quote, comment: comment, scope: item.scope), to: document)
                 }
+                guard saved else { return false }
                 reloadToken += 1
                 bridge?.clearSelection()
+                return true
             }
         }
         .confirmationDialog("换成新版?", isPresented: $confirmNewVersion, titleVisibility: .visible) {
@@ -141,6 +156,12 @@ struct ReaderView: View {
             if args.contains("--demo-select") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { bridge?.debugSelectParagraph(2) } }
             if args.contains("--demo-annotate") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { bridge?.requestAnnotation() } }
             if args.contains("--demo-changes") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { bridge?.toggleChanges() } }
+            if let index = args.firstIndex(of: "--demo-locate"), index + 1 < args.count {
+                let quote = args[index + 1]
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { bridge?.locateQuote(quote) }
+            }
+            if args.contains("--demo-outline") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { if let last = document.outline.last { bridge?.scrollToHeading(last.id) } } }
+            if args.contains("--demo-results") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showResults = document.sync?.results != nil } }
         }
         #endif
     }
@@ -229,6 +250,9 @@ struct ReaderView: View {
             }
             if document.returnCard != nil {
                 Button { bridge?.scrollToTop() } label: { Label("回稿卡", systemImage: "arrow.uturn.backward.circle") }
+            }
+            if document.returnCard != nil, let results = document.sync?.results, !results.items.isEmpty {
+                Button { showResults = true } label: { Label("逐条结果", systemImage: "checklist") }
             }
             if document.changesBase != nil {
                 Button { bridge?.toggleChanges() } label: {
@@ -342,6 +366,8 @@ struct ReaderView: View {
         case .rendered(let outline): document.outline = outline
         case .selectionState(let active): hasSelection = active
         case .changesState(let showing): showingChanges = showing
+        case .showResults: if document.sync?.results != nil { showResults = true }
+        case .locateFailed: message = "正文里找不到这句了,可能已经改掉。点「显示改动」看改了什么。"
         case .selection(let anchor, let quote):
             guard status.canAnnotate else { message = status.blockedReason ?? "现在不能批注。"; return }
             guard !showingChanges else { message = "对比是只读的。先点「隐藏改动」回到正文再批注。"; return }
@@ -385,6 +411,53 @@ struct AnnotateButtonStyle: ButtonStyle {
             .background(RoundedRectangle(cornerRadius: 12).fill(Palette.amberSoft))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.amber, lineWidth: 1.5))
             .opacity(configuration.isPressed ? 0.75 : 1)
+    }
+}
+
+/// 逐条结果(UI 方案 4.4;跨端规则 v2.4):你说了什么、AI 怎么处理;点一条回到正文找到那句
+struct ResultsSheet: View {
+    let round: Int
+    let results: RoundResults
+    let onSelect: (RoundResults.Item) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(results.items) { item in
+                        Button { onSelect(item) } label: { row(item) }
+                            .buttonStyle(.plain)
+                    }
+                } header: {
+                    Text("采纳 \(results.applied) · 未采纳 \(results.wontfix)")
+                } footer: {
+                    if results.truncated == true || results.items.count < results.total { Text("只带过来前 \(results.items.count) 条,其余在 Mac 上看。") }
+                }
+            }
+            .navigationTitle("第 \(round) 轮 · 逐条结果")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func row(_ item: RoundResults.Item) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.status == "applied" ? "checkmark.circle.fill" : item.status == "wontfix" ? "xmark.circle" : "circle")
+                .foregroundStyle(item.status == "applied" ? Tone.back.color : Tone.idle.color)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 6) {
+                if item.scope == "document" {
+                    Text("总体意见").font(.caption.bold()).foregroundStyle(Palette.amberText)
+                } else if !item.quote.isEmpty {
+                    Text("“\(item.quote)”").font(.caption).foregroundStyle(Color.secondary).lineLimit(3)
+                }
+                (Text("你 ").bold() + Text(item.you)).font(.subheadline).foregroundStyle(Color.primary)
+                (Text("AI ").bold() + Text(item.ai)).font(.subheadline).foregroundStyle(Tone.back.text)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -525,7 +598,8 @@ struct ComposerSheet: View {
     let quote: String
     let initial: String
     let isDocumentScope: Bool
-    let onSave: (String) -> Void
+    /// 返回是否已存进手机;没存进去就不关
+    let onSave: (String) -> Bool
     @State private var text: String = ""
     @FocusState private var focused: Bool
 
@@ -552,7 +626,7 @@ struct ComposerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { onSave(text.trimmingCharacters(in: .whitespacesAndNewlines)); dismiss() }
+                    Button("保存") { if onSave(text.trimmingCharacters(in: .whitespacesAndNewlines)) { dismiss() } }
                         .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }

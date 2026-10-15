@@ -55,6 +55,13 @@ final class DraftStatusTests: XCTestCase {
         XCTAssertTrue(DraftStatus.row(for: doc("applying", minutesAgo: 75), seen: nil, now: now).subtitle.hasSuffix("1 小时 15 分"))
     }
 
+    func testListeningExpiresWithoutRefresh() {
+        // Mac 在 AI 监听期间每 10 分钟重推;超过 20 分钟没刷新(Mac 关机、断网)就不再说 AI 在线
+        XCTAssertEqual(DraftStatus.row(for: doc("waiting-agent", agent: "listening", minutesAgo: 8), seen: nil, now: now).subtitle, "已交出 · AI 在线,等待领取")
+        XCTAssertEqual(DraftStatus.row(for: doc("waiting-agent", agent: "listening", minutesAgo: 30), seen: nil, now: now).subtitle, "已交出 · 30 分钟前")
+        XCTAssertNil(reader(doc("waiting-agent", agent: "listening", minutesAgo: 30)).banner, "过期的监听不出横幅")
+    }
+
     private func reader(_ sync: SyncedDocument?, allowed: Bool = true, open: Int = 0, submitted: Int = 0, received: Int = 0, rejected: Int = 0,
                         pending: Int = 0, submittedMinutesAgo: Double? = nil, newer: Bool = false) -> ReaderStatus {
         ReaderStatus.make(.init(sync: sync, annotationAllowed: allowed, newerVersionAvailable: newer, latestRound: 3,

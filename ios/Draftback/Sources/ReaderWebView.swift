@@ -27,6 +27,10 @@ enum ReaderEvent {
     case selectionState(Bool)
     /// 回稿卡「显示改动」开着没有(开着时不能批注:对比是只读视图)
     case changesState(Bool)
+    /// 回稿卡上点了「逐条结果」
+    case showResults
+    /// 逐条结果点一条,正文里找不到那句(被改掉了)
+    case locateFailed
     case noSelection
     case error(String)
 }
@@ -128,6 +132,10 @@ struct ReaderWebView: UIViewRepresentable {
                 onEvent(.selectionState(body["active"] as? Bool ?? false))
             case "changesState":
                 onEvent(.changesState(body["showing"] as? Bool ?? false))
+            case "returnCard":
+                if (body["action"] as? String) == "results" { onEvent(.showResults) }
+            case "locateFailed":
+                onEvent(.locateFailed)
             case "selection":
                 if let anchor = body["anchor"] as? [String: Any] {
                     onEvent(.selection(anchor: anchor, quote: body["quote"] as? String ?? ""))
@@ -170,11 +178,14 @@ final class ReaderBridge {
         }
     }
 
-    private func json(_ object: Any) -> String {
-        guard JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object),
-              let text = String(data: data, encoding: .utf8) else { return "null" }
-        return text
+    /// 任意值 → JS 字面量。单个字符串、数字也要能传(大纲跳转、定位批注、找引文都传字符串):
+    /// isValidJSONObject 只认数组和字典,所以包一层数组再去掉方括号;以前字符串一律变成 null
+    func json(_ object: Any) -> String {
+        let wrapped: [Any] = [object]
+        guard JSONSerialization.isValidJSONObject(wrapped),
+              let data = try? JSONSerialization.data(withJSONObject: wrapped),
+              let text = String(data: data, encoding: .utf8), text.count >= 2 else { return "null" }
+        return String(text.dropFirst().dropLast())
     }
 
     func load(_ document: OpenedDocument) {
@@ -200,6 +211,8 @@ final class ReaderBridge {
     func toggleChanges() { call("window.DraftbackReader.toggleChanges()") }
     /// 「…」里的「回稿卡」:滚到正文最上方
     func scrollToTop() { call("window.DraftbackReader.scrollToTop()") }
+    /// 逐条结果点一条:在正文里找到那句引文
+    func locateQuote(_ quote: String) { call("window.DraftbackReader.locateQuote(\(json(quote)))") }
     #if DEBUG
     /// 仅调试版:模拟器截图时选中第 n 段
     func debugSelectParagraph(_ index: Int) {

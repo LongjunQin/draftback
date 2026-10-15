@@ -84,6 +84,10 @@ test('有审阅历史的文档改名:旁注、所有轮次、文档身份跟着�
   assert.equal(result.reviews, 1);
   assert.equal(fs.existsSync(`${doc}.annotations.json`), false);
   assert.ok(fs.existsSync(`${target}.annotations.json`), '旁注跟着新名字');
+  const sidecarJson = JSON.parse(fs.readFileSync(`${target}.annotations.json`, 'utf8'));
+  assert.equal(sidecarJson.file, '方案 v2.md', '旁注里的文件名跟着变');
+  assert.equal(sidecarJson.sourceFile, target);
+  assert.equal(fs.readdirSync(path.join(f.dataDir, 'renames')).length, 0, '改名完成后日志删掉');
   const review = await store.getReviewByPath(target, f.options);
   assert.equal(review.id, first.id, '审阅记录跟着新名字');
   assert.equal(review.file, '方案 v2.md');
@@ -131,4 +135,44 @@ test('只改大小写也能改(不分大小写的卷上新旧是同一个文件)
   assert.equal(result.renamed, true);
   assert.ok(fs.readdirSync(f.docDir).includes('report.md'), '磁盘上的写法变成小写');
   assert.equal(fs.readdirSync(f.docDir).includes('Report.md'), false);
+});
+
+test('改名中途被杀:启动时按日志把记录挂到新名字,或退回到旧名字;之后的索引清理不会删历史', async (t) => {
+  const f = fixture(t);
+  const doc = path.join(f.docDir, '季度报告.md');
+  fs.writeFileSync(doc, '# 季度报告\n');
+  const first = (await store.openReview(doc, f.options)).review;
+  fs.writeFileSync(`${doc}.annotations.json`, JSON.stringify({ version: 1, file: '季度报告.md', annotations: [] }));
+  await store.submitReview(first.id, f.options);
+  const docId = versionStore.documentByPath(doc, f.options).docId;
+
+  // 情形一:日志写了、文件已改名,记录还没挂过去(进程在这里被杀)
+  const target = path.join(f.docDir, '季度报告(终版).md');
+  const renames = path.join(f.dataDir, 'renames');
+  fs.mkdirSync(renames, { recursive: true });
+  fs.writeFileSync(path.join(renames, 'rn_crash1.json'), JSON.stringify({ id: 'rn_crash1', from: doc, to: target, stamp: '2026-10-15T00:00:00.000Z' }));
+  fs.renameSync(doc, target);
+  const results = await documents.recoverRenames(f.options);
+  assert.deepEqual(results.map((item) => item.action), ['completed']);
+  assert.equal((await store.getReviewById(first.id, f.options)).absPath, target, '审阅记录挂到新名字');
+  assert.equal(versionStore.documentByPath(target, f.options).docId, docId, '文档身份挂到新名字');
+  assert.ok(fs.existsSync(`${target}.annotations.json`), '旁注挂到新名字');
+  assert.equal(fs.readdirSync(renames).length, 0, '日志收掉');
+  const pruned = await store.pruneReviews(f.options);
+  assert.equal(pruned.removed, 0, '索引清理不会把它当成文件已不存在');
+  assert.ok(await store.getReviewById(first.id, f.options));
+
+  // 情形二:日志写了、记录挂过去了一半,文件还没改名(改文件名之前被杀)
+  const other = path.join(f.docDir, '季度报告(草).md');
+  fs.writeFileSync(path.join(renames, 'rn_crash2.json'), JSON.stringify({ id: 'rn_crash2', from: target, to: other, stamp: '2026-10-15T01:00:00.000Z' }));
+  await store.mutateReviews((data) => {
+    const review = data.reviews[first.id];
+    review.renamedFrom = review.absPath; review.absPath = other; review.file = path.basename(other); review.renamedAt = '2026-10-15T01:00:00.000Z';
+    return null;
+  }, f.options);
+  const back = await documents.recoverRenames(f.options);
+  assert.deepEqual(back.map((item) => item.action), ['rolled-back']);
+  assert.equal((await store.getReviewById(first.id, f.options)).absPath, target, '挂过去的一半退回');
+  assert.ok(fs.existsSync(target));
+  assert.equal(fs.existsSync(other), false);
 });

@@ -8,7 +8,7 @@
  *                 setFontScale(x)、toggleChanges()、scrollToTop();load 还可带 returnCard 与 previousMarkdown(回稿卡与「显示改动」)
  *   页面 → 原生:webkit.messageHandlers.draftback.postMessage({ type, ... })
  *                 type = ready | rendered { outline } | selection { anchor, quote } | selectionState { active } |
- *                        changesState { showing } | changesCount { count } | error { message }
+ *                        changesState { showing } | changesCount { count } | returnCard { action } | locateFailed | error { message }
  */
 (() => {
   'use strict';
@@ -267,7 +267,8 @@
   const changesEl = document.getElementById('changes');
   const Diff = window.DraftbackDiff;
   const dmp = window.diff_match_patch ? new window.diff_match_patch() : null;
-  const changes = { previous: null, current: '', showing: false, painted: false, result: null, toggle: null, count: null };
+  // generation:每次 load 加一;异步画对比时每次 await 之后核对,过期的任务不许再动页面(新正文到了,旧对比不能把它藏起来)
+  const changes = { previous: null, current: '', showing: false, painted: false, result: null, toggle: null, count: null, generation: 0, summary: null, more: null };
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -291,6 +292,17 @@
     head.append(el('span', 'rc-icon', '↩'), el('h2', 'rc-title', card.title || '稿子回来了'));
     cardEl.append(head);
     if (card.meta) cardEl.append(el('div', 'rc-meta', card.meta));
+    if (card.counts) {
+      // 与 Mac 回稿卡一样的计数徽标;「逐条结果」由原生弹半屏列表
+      const chips = el('div', 'rc-chips');
+      chips.append(el('span', 'rc-chip applied', `采纳 ${card.counts.applied}`), el('span', 'rc-chip wontfix', `未采纳 ${card.counts.wontfix}`));
+      if (card.hasResults) {
+        const list = el('button', 'rc-results', '逐条结果'); list.type = 'button';
+        list.addEventListener('click', () => post({ type: 'returnCard', action: 'results' }));
+        chips.append(list);
+      }
+      cardEl.append(chips);
+    }
     if (card.summary) {
       const summary = el('p', 'rc-summary clamped', card.summary);
       cardEl.append(summary);
@@ -300,7 +312,8 @@
         more.textContent = open ? '收起' : '展开';
       });
       cardEl.append(more);
-      requestAnimationFrame(() => { more.hidden = summary.scrollHeight <= summary.clientHeight + 2; });
+      changes.summary = summary; changes.more = more;
+      requestAnimationFrame(measureSummary);
     }
     if (changes.previous != null && Diff && dmp) {
       if (card.note) cardEl.append(el('div', 'rc-note', card.note));
@@ -321,6 +334,15 @@
     cardEl.hidden = false;
   }
 
+  // 摘要超过 4 行才出「展开」;字号或宽度变了要重新量
+  function measureSummary() {
+    const { summary, more } = changes;
+    if (!summary || !more || !summary.isConnected) return;
+    if (!summary.classList.contains('clamped')) { more.hidden = false; return; }
+    more.hidden = summary.scrollHeight <= summary.clientHeight + 2;
+  }
+  window.addEventListener('resize', () => requestAnimationFrame(measureSummary));
+
   function paintToggle() {
     if (!changes.toggle) return;
     changes.toggle.textContent = changes.showing ? '隐藏改动' : '显示改动';
@@ -328,8 +350,14 @@
     changes.toggle.setAttribute('aria-pressed', String(changes.showing));
   }
 
-  function changeBlock(text, className) {
+  // 元数据(Front Matter)、引用定义、空隙渲染出来是空的:按源码显示才看得见增删(与 Mac 对比视图一致)
+  const SOURCE_ONLY = new Set(['front_matter', 'reference', 'gap', 'blank']);
+  function changeBlock(text, className, type) {
     const box = el('div', className);
+    if (SOURCE_ONLY.has(type) || !String(text).trim()) {
+      box.append(el('pre', 'diff-inline diff-source-block', text));
+      return box;
+    }
     box.innerHTML = sanitize(md.render(blankFrontMatter(text)));
     decorate(box);
     return box;
@@ -341,7 +369,7 @@
     box.append(body);
     return box;
   }
-  async function paintChanges() {
+  async function paintChanges(generation) {
     const result = diffResult();
     if (!result) { changesEl.replaceChildren(el('p', 'diff-empty', '没能算出改动。')); return; }
     const refsNew = Diff.referenceDefinitions(result.newBlocks), refsOld = Diff.referenceDefinitions(result.oldBlocks);
@@ -353,23 +381,29 @@
       if (hunk.kind === 'equal') { frag.append(changeBlock(refsNew ? `${hunk.text}\n\n${refsNew}` : hunk.text, 'diff-equal')); continue; }
       for (const item of hunk.items) {
         const node = el('div', `diff-change diff-${item.kind}-item`);
-        if (item.kind === 'insert') node.append(changeBlock(refsNew ? `${item.newText}\n\n${refsNew}` : item.newText, 'diff-insert'));
-        else if (item.kind === 'delete') node.append(changeBlock(refsOld ? `${item.oldText}\n\n${refsOld}` : item.oldText, 'diff-delete'));
+        const source = SOURCE_ONLY.has(item.type);
+        if (item.kind === 'insert') node.append(changeBlock(refsNew && !source ? `${item.newText}\n\n${refsNew}` : item.newText, 'diff-insert', item.type));
+        else if (item.kind === 'delete') node.append(changeBlock(refsOld && !source ? `${item.oldText}\n\n${refsOld}` : item.oldText, 'diff-delete', item.type));
         else if (item.inline) node.append(inlineBlock(item));
-        else node.append(changeBlock(item.oldText, 'diff-delete'), changeBlock(item.newText, 'diff-insert'));
+        else node.append(changeBlock(item.oldText, 'diff-delete', item.type), changeBlock(item.newText, 'diff-insert', item.type));
         frag.append(node);
       }
     }
+    if (generation !== changes.generation) return false;
     changesEl.replaceChildren(frag);
     const diagrams = Array.from(changesEl.querySelectorAll('.mermaid'));
     if (diagrams.length && window.mermaid) { try { await window.mermaid.run({ nodes: diagrams }); } catch (_) {} }
+    if (generation !== changes.generation) return false;
     changes.painted = true;
+    return true;
   }
 
   async function setShowingChanges(showing) {
     if (showing && (changes.previous == null || !Diff || !dmp)) return;
+    const generation = changes.generation;
     window.getSelection()?.removeAllRanges();
-    if (showing && !changes.painted) await paintChanges();
+    if (showing && !changes.painted && !(await paintChanges(generation))) return;
+    if (generation !== changes.generation) return; // 画的时候换了正文:作废
     changes.showing = showing;
     changesEl.hidden = !showing;
     content.hidden = showing;
@@ -377,6 +411,33 @@
     if (showing) changesEl.querySelector('.diff-change')?.scrollIntoView({ block: 'center' });
     else cardEl.scrollIntoView({ block: 'start' });
     post({ type: 'changesState', showing });
+  }
+
+  // 逐条结果点一条:在正文里找到那句引文,滚过去并闪一下;找不到(被改掉了)告诉原生
+  function locateQuote(quote) {
+    const wanted = String(quote || '').replace(/\s+/g, ' ').trim();
+    if (!wanted) return false;
+    if (changes.showing) void setShowingChanges(false);
+    const probe = wanted.slice(0, 40);
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    const nodes = []; let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) { nodes.push({ node, start: text.length }); text += node.data; }
+    const flat = text.replace(/\s/g, ' ');
+    const at = flat.indexOf(probe);
+    if (at < 0) { post({ type: 'locateFailed' }); return false; }
+    const point = (offset) => {
+      for (let i = nodes.length - 1; i >= 0; i -= 1) if (nodes[i].start <= offset) return { node: nodes[i].node, offset: Math.min(offset - nodes[i].start, nodes[i].node.data.length) };
+      return null;
+    };
+    const start = point(at), end = point(at + probe.length);
+    if (!start || !end) return false;
+    const range = document.createRange(); range.setStart(start.node, start.offset); range.setEnd(end.node, end.offset);
+    start.node.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (globalThis.CSS && CSS.highlights && globalThis.Highlight) {
+      CSS.highlights.set('draftback-locate', new Highlight(range));
+      setTimeout(() => CSS.highlights.delete('draftback-locate'), 2200);
+    }
+    return true;
   }
 
   // 选区有没有:有就立刻报(底栏换成「批注这段」),没了等 0.2 秒再报(拖动选区时不闪)
@@ -402,6 +463,7 @@
   function setFontScale(value) {
     const scale = Number(value);
     if (Number.isFinite(scale) && scale > 0.5 && scale < 4) document.documentElement.style.setProperty('--font-scale', String(scale));
+    requestAnimationFrame(measureSummary);
   }
 
   window.DraftbackReader = Object.freeze({
@@ -409,7 +471,8 @@
       setFontScale(payload.fontScale);
       changes.previous = typeof payload.previousMarkdown === 'string' ? payload.previousMarkdown : null;
       changes.current = String(payload.markdown || '');
-      changes.showing = false; changes.painted = false; changes.result = null; changes.count = null;
+      changes.generation += 1;
+      changes.showing = false; changes.painted = false; changes.result = null; changes.count = null; changes.summary = null; changes.more = null;
       changesEl.hidden = true; changesEl.replaceChildren(); content.hidden = false;
       renderReturnCard(payload.returnCard || null);
       state.annotations = Array.isArray(payload.annotations) ? payload.annotations : [];
@@ -427,6 +490,7 @@
     focusNote(id) { if (changes.showing) void setShowingChanges(false); renderMarkers(id); },
     setFontScale,
     toggleChanges() { return setShowingChanges(!changes.showing); },
+    locateQuote(quote) { return locateQuote(quote); },
     scrollToTop() { (cardEl.hidden ? content : cardEl).scrollIntoView({ block: 'start' }); },
     outline,
   });
