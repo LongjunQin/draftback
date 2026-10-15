@@ -147,3 +147,62 @@ test('云端清理:定稿或作废满 30 天、推过、当前账号的最新一
   await sync.markPushed(open.id, {}, f.options);
   assert.deepEqual((await sync.listCloudCleanup({ ...f.options, now: Date.now() + 31 * day })).map((item) => item.reviewId), []);
 });
+
+test('推到手机的附件:引用式图片也打包;缺的文件记进清单(不再悄悄跳过);指向其他 Markdown 的不打包', async (t) => {
+  const f = setup(t);
+  const doc = path.join(f.docDir, '图片.md');
+  fs.writeFileSync(path.join(f.docDir, 'ref.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  fs.writeFileSync(path.join(f.docDir, 'inline.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01]));
+  const text = '# 图片\n\n![行内](inline.png)\n\n![引用式][pic]\n\n![缺了](missing.png)\n\n[另一篇](other.md)\n\n[pic]: ref.png\n';
+  fs.writeFileSync(doc, text);
+  const items = sync.collectAttachments(doc, text);
+  const byPath = Object.fromEntries(items.map((item) => [item.relPath, item]));
+  assert.equal(byPath['inline.png'].included, true);
+  assert.equal(byPath['ref.png'].included, true, '引用式图片也打包');
+  assert.equal(byPath['ref.png'].sha256, sha(fs.readFileSync(path.join(f.docDir, 'ref.png'))));
+  assert.equal(byPath['missing.png'].included, false, '缺的文件记进清单');
+  assert.equal(byPath['missing.png'].reason, '文件不在');
+  assert.equal(byPath['other.md'], undefined, '指向其他 Markdown 的不打包');
+});
+
+test('受控重关联:挪过位置的已知文档打开时给出提示;接上后会话、身份、最近文件都跟到新路径;内容不同或几篇都像就不提示', async (t) => {
+  const f = setup(t);
+  const documents = require('../lib/documents');
+  const { doc, review } = await finishedDoc(f, '挪动.md');
+  await documents.readDocument(doc, f.options); // 进最近文件
+  const moved = path.join(f.docDir, '新位置', '挪动.md');
+  fs.mkdirSync(path.dirname(moved), { recursive: true });
+  fs.renameSync(doc, moved);
+  const opened = await documents.readDocument(moved, f.options);
+  assert.equal(opened.docId, null);
+  assert.deepEqual(opened.relinkCandidate, { docId: review.docId, oldPath: doc, file: '挪动.md', round: 1 });
+  const result = await documents.relinkDocument(doc, moved, f.options);
+  assert.equal(result.docId, review.docId);
+  const again = await documents.readDocument(moved, f.options);
+  assert.equal(again.docId, review.docId, '接上后有身份');
+  assert.equal(again.relinkCandidate, null);
+  assert.equal(again.latestReview.id, review.id, '会话跟到新路径');
+  const recent = await documents.listRecent(f.options);
+  assert.ok(recent.some((item) => item.absPath === moved));
+  assert.ok(!recent.some((item) => item.absPath === doc), '最近文件里的旧路径换成新路径');
+  // 内容改过就不提示
+  const { doc: doc2 } = await finishedDoc(f, '改过.md');
+  const moved2 = path.join(f.docDir, '新位置', '改过.md');
+  fs.renameSync(doc2, moved2);
+  fs.appendFileSync(moved2, '\n挪完又改了一句。\n');
+  assert.equal((await documents.readDocument(moved2, f.options)).relinkCandidate, null);
+});
+
+test('恢复到某一轮:我自己改之后,按「最新一轮」(我自己改那条)核对,不误报「最新一轮已经变了」', async (t) => {
+  const f = setup(t);
+  const versions = require('../lib/version-store');
+  const { doc, review } = await finishedDoc(f, '自己改后恢复.md');
+  const manual = await store.beginManualEdit(doc, f.options);
+  fs.writeFileSync(doc, '# 方案\n\n我自己又改了一句。\n');
+  const manualDone = await store.completeReview(doc, { ...f.options, expectedApplyMode: 'manual', expectedReviewId: manual.id });
+  const target = (await versions.listVersions(review.docId, f.options)).find((item) => item.reviewId === review.id);
+  const result = await versions.restoreTo({ docId: review.docId, toVersionId: target.versionId, expectedCurrentHash: sha(fs.readFileSync(doc)),
+    expectedLatestReviewId: manualDone.id, clientRequestId: 'req-after-manual' }, f.options);
+  assert.ok(result, '按我自己改那条核对,恢复照常进行');
+  assert.equal(fs.readFileSync(doc, 'utf8'), '# 方案\n\n原来的正文。\n', '回到第 1 轮改稿前');
+});

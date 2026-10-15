@@ -273,9 +273,14 @@ final class SyncLoop {
         } catch let error as CKError where error.code == .serverRecordChanged {
             // 读到之后有人改过:重读、再比一次 revision;云端不比我们新就把字段搬到新鲜记录上再写一次
             existing = try await cloud.fetch([docId])[docId]
-            if case .superseded(let cloudRevision) = compareRevision(existing, payload) {
+            switch compareRevision(existing, payload) {
+            case .superseded(let cloudRevision):
                 try await server.markPushSuperseded(reviewId: reviewId, cloudRevision: cloudRevision, signature: signature)
                 throw SyncError.superseded
+            case .same:
+                return // 重读发现同一次发布已经在云端(比如上一次写入其实成功了):只确认,不重写(跨端规则第 12 节)
+            case .proceed:
+                break
             }
             guard let fresh = existing else { throw error }
             for key in record.allKeys() { fresh[key] = record[key] }

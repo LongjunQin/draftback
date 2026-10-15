@@ -490,9 +490,48 @@
         await refreshRecents();
         return;
       }
+      // 受控重关联(跨端规则第 3 节):像是在访达里挪过位置的已知文档,问一句要不要接上审阅历史;说过「当成新文档」的不再问
+      if (payload.relinkCandidate && !relinkDeclined(payload.relinkCandidate, payload.source.path)) {
+        if (await offerRelink(payload.relinkCandidate, payload.source.path)) return;
+      }
       upsertTab(normalizeDocument(payload), { activate: true });
       await refreshRecents();
     } catch (error) { toast(friendlyError(error, '打开文档'), 'error'); }
+  }
+
+  const RELINK_DECLINED_KEY = 'draftback.relink.declined';
+  function relinkDeclined(candidate, newPath) {
+    try { return (JSON.parse(localStorage.getItem(RELINK_DECLINED_KEY) || '[]')).includes(`${candidate.docId}|${newPath}`); } catch (_) { return false; }
+  }
+  function rememberRelinkDeclined(candidate, newPath) {
+    try {
+      const list = JSON.parse(localStorage.getItem(RELINK_DECLINED_KEY) || '[]').filter((item) => item !== `${candidate.docId}|${newPath}`);
+      list.push(`${candidate.docId}|${newPath}`);
+      localStorage.setItem(RELINK_DECLINED_KEY, JSON.stringify(list.slice(-200)));
+    } catch (_) {}
+  }
+  /** 返回 true:已接上历史并按那一轮打开;false:当成新文档,调用方照常打开 */
+  async function offerRelink(candidate, newPath) {
+    const oldDir = candidate.oldPath.replace(/\/[^/]*$/, '') || '/';
+    const history = candidate.round ? `前 ${candidate.round} 轮的审阅历史` : '审阅历史';
+    const choice = await chooseAction('接上审阅历史?',
+      `这一篇和「${candidate.file}」最后一版一模一样,原来的位置(${oldDir})已经没有这个文件了,像是挪过来的。接上后,${history}、每轮留底和手机同步都跟到这里。`,
+      { accept: '接上历史', cancel: '当成新文档' });
+    if (choice !== 'accept') { rememberRelinkDeclined(candidate, newPath); return false; }
+    try {
+      const result = await requestJson('/api/app/document/relink', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: candidate.oldPath, to: newPath }),
+      });
+      const reopened = result.document || {};
+      const session = reopened.activeReview && reopened.activeReview.id ? reopened.activeReview : (reopened.latestReview && reopened.latestReview.id ? reopened.latestReview : null);
+      if (session) await openReviewId(session.id); else upsertTab(normalizeDocument(reopened), { activate: true });
+      await refreshRecents();
+      toast('已接上审阅历史。');
+      return true;
+    } catch (error) {
+      toast(friendlyError(error, '接上审阅历史'), 'error');
+      return false;
+    }
   }
 
   async function setEditing(tab, editing) {

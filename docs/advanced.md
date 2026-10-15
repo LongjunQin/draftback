@@ -222,6 +222,7 @@ node test/desktop-reader-tools-smoke.js        # 查找、深色、打印样式�
 node test/desktop-selection-smoke.js          # 划词后批注按钮:终点在正文外、拖到文末下方、滚动跟随
 node test/desktop-rename-smoke.js             # 双击文件名改名、信息卡重新命名、Esc 取消、同名提示、这一轮没走完不改
 node test/phone-reader-quote-smoke.js         # 手机阅读页「复制到本轮」找引文:连续空白、重复引文按章节挑、挑不出转总体意见、跨段引文
+node test/desktop-relink-smoke.js             # 挪过位置的文档打开时问「接上审阅历史?」;当成新文档不再问;接上后按那一轮打开
 node test/desktop-performance-probe.js --runs 3 # 渲染层性能探针
 npm --prefix desktop test
 node --check server.js

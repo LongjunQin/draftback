@@ -563,7 +563,7 @@ async function main() {
     }
     if (args.command === 'relink') {
       if (!args.file || !args.second) throw new ReviewStoreError('BAD_ARGUMENT', usage(), { httpStatus: 400 });
-      const result = await versionStore.relink(path.resolve(args.file), path.resolve(args.second));
+      const result = await require('./lib/documents').relinkDocument(path.resolve(args.file), path.resolve(args.second));
       console.log(`已重关联: ${result.from} → ${result.to}(身份 ${result.docId},${result.reviews} 条会话记录随之更新)`);
       return;
     }

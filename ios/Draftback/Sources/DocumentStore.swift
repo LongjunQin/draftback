@@ -481,11 +481,13 @@ final class DocumentStore: ObservableObject {
     /// 尽力读取文档引用的同目录图片(iOS 对单文件授权通常不含同目录,读不到就留占位,跨端规则第 5 节)。
     private static func collectAssets(markdown: String, around url: URL) -> [String: String] {
         var assets: [String: String] = [:]
-        let pattern = #"!\[[^\]]*\]\(([^)\s]+)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return assets }
+        // 行内图片 `![](pic.png)` 与引用式定义 `[ref]: pic.png`(引用式图片渲染出来也是 <img src="pic.png">)
+        let patterns = [#"!\[[^\]]*\]\(<?([^)\s>]+)"#, #"(?m)^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)"#]
+        let regexes = patterns.compactMap { try? NSRegularExpression(pattern: $0) }
         let base = url.deletingLastPathComponent()
         let text = markdown as NSString
-        for match in regex.matches(in: markdown, range: NSRange(location: 0, length: text.length)) {
+        let matches = regexes.flatMap { $0.matches(in: markdown, range: NSRange(location: 0, length: text.length)) }
+        for match in matches {
             let rawPath = text.substring(with: match.range(at: 1))
             if rawPath.hasPrefix("http") || rawPath.hasPrefix("data:") { continue }
             let key = rawPath.removingPercentEncoding ?? rawPath

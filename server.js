@@ -795,6 +795,16 @@ async function handleAppApi(req, res, pathname, q) {
   }
 
   // ---- 普通文档(不建审阅会话)----
+  // 受控重关联:打开时发现是挪过位置的已知文档,用户点「接上历史」
+  if (pathname === '/api/app/document/relink') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.from !== 'string' || typeof body.to !== 'string') {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供旧路径与新路径。' });
+    }
+    const result = await plainDocuments.relinkDocument(body.from, body.to);
+    return sendJson(res, 200, { ...result, document: await plainDocuments.readDocument(result.to) });
+  }
   if (pathname === '/api/app/document/open') {
     if (!allowMethods(req, res, ['POST'])) return;
     const body = await readBody(req);
