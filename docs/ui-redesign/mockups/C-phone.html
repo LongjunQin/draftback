@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 皮面手账:手机</title>
+<link rel="stylesheet" href="mockup.css">
+<style>
+.gold { color: #e9c77f; text-shadow: 0 1px 0 rgba(0,0,0,.55), 0 -1px 0 rgba(255,235,180,.25); }
+.lbtn { border: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0;
+  background: radial-gradient(circle at 40% 30%, #7a3a2f, #4a1812 80%); box-shadow: inset 0 1px 2px rgba(255,200,170,.25), inset 0 -2px 4px rgba(0,0,0,.45), 0 1px 0 rgba(255,210,180,.15); }
+.tape { position: absolute; height: 22px; background: rgba(235,220,170,.65); box-shadow: 0 1px 1px rgba(0,0,0,.1); }
+.entry { display: flex; align-items: baseline; gap: 10px; padding: 10px 4px 8px; border-bottom: 1px solid rgba(110,140,190,.35); }
+</style>
+</head>
+<body>
+<div class="board">
+  <div>
+    <p class="caption">读稿页(稿子回来了)</p>
+    <div class="phone"><div class="screen paper-c">
+      <div class="island"></div>
+      <header class="leather" style="flex: none; height: 108px; padding: 52px 14px 0; display: flex; align-items: center; gap: 10px; position: relative; z-index: 3; box-shadow: 0 4px 10px rgba(40,10,5,.45)">
+        <span class="stitch" style="inset: auto 8px 6px 8px; height: 0; border-width: 1.5px 0 0; border-radius: 0"></span>
+        <button class="lbtn" aria-label="返回" style="width: 42px; height: 42px; flex: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f1d9c0" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px">
+          <div class="serif deboss" style="font-size: 17px; font-weight: 700">产品方案.md</div>
+          <div class="serif gold" style="font-size: 12px; font-weight: 700; letter-spacing: 2px">第 3 轮回稿</div>
+        </div>
+        <div style="display: flex; gap: 8px; flex: none">
+          <button class="lbtn" aria-label="大纲" style="width: 36px; height: 36px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f1d9c0" stroke-width="2.2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg></button>
+          <button class="lbtn" aria-label="批注" style="width: 36px; height: 36px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f1d9c0" stroke-width="2.2" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg></button>
+          <button class="lbtn" aria-label="更多" style="width: 36px; height: 36px"><svg width="16" height="16" viewBox="0 0 24 24" fill="#f1d9c0"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+        </div>
+      </header>
+      <div class="ribbon" style="right: 14px; top: 100px; height: 132px; z-index: 2"></div>
+      <main style="position: relative; flex: 1; min-height: 0; overflow: hidden; padding: 24px 22px 0 50px">
+        <div class="margin-line"></div>
+        <section style="position: relative; margin: 6px 26px 24px 0; padding: 16px 16px 14px; background: #fffaf0; box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 6px 12px rgba(80,50,20,.18); transform: rotate(1deg)">
+          <span class="photo-corner" style="left: -5px; top: -5px; clip-path: polygon(0 0, 100% 0, 0 100%)"></span>
+          <span class="photo-corner" style="right: -5px; top: -5px; clip-path: polygon(0 0, 100% 0, 100% 100%)"></span>
+          <span class="photo-corner" style="left: -5px; bottom: -5px; clip-path: polygon(0 0, 0 100%, 100% 100%)"></span>
+          <span class="photo-corner" style="right: -5px; bottom: -5px; clip-path: polygon(100% 0, 0 100%, 100% 100%)"></span>
+          <div style="display: flex; align-items: baseline; justify-content: space-between">
+            <h2 class="serif" style="margin: 0; font-size: 18px; font-weight: 700; color: #2b2118">第 3 轮回稿</h2>
+            <span style="font-size: 11px; color: #7a6a55">10/15 15:58</span>
+          </div>
+          <div class="hand" style="margin-top: 10px; font-size: 16px; color: #2c4a7a">采纳 2 · 未采纳 1 · 改了 4 处</div>
+          <p class="serif" style="margin: 10px 0 12px; font-size: 14px; line-height: 1.7; color: #3a2e22">按 3 条批注改了第二节的说法,删掉一段重复的背景。</p>
+          <div style="display: flex; align-items: center; gap: 14px">
+            <button class="leather" style="position: relative; height: 32px; padding: 0 14px; border: 0; border-radius: 16px; font-size: 13px; font-weight: 700; color: #f1d9c0; box-shadow: 0 2px 4px rgba(0,0,0,.3)"><span class="stitch" style="inset: 3px; border-width: 1px"></span>显示改动</button>
+            <span class="serif" style="font-size: 13px; color: #6b4a2a; text-decoration: underline; text-underline-offset: 3px">逐条结果</span>
+          </div>
+        </section>
+        <article class="serif" style="color: #2b2118">
+          <h1 style="margin: 0 0 12px; font-size: 26px; font-weight: 700">产品方案</h1>
+          <p style="margin: 0 0 16px; font-size: 17px; line-height: 1.8">回稿把同一份文档在 Mac 和 iPhone 之间来回传。这份说明讲清楚谁说了算、批注怎么走。</p>
+          <h3 style="margin: 0 0 8px; font-size: 20px; font-weight: 700">谁说了算</h3>
+          <p style="margin: 0 0 4px; font-size: 17px; line-height: 1.8">Mac 管原文、轮次和最终状态。<span class="pencil">手机管自己还没交出去的批注</span>。云端只是邮筒,不做裁判。</p>
+          <div class="hand" style="margin: 0 0 14px; font-size: 15px; color: #4a5a7a; transform: rotate(-1.5deg)">↑ 这句再说清楚:强退也不会丢</div>
+          <h3 style="margin: 0 0 8px; font-size: 20px; font-weight: 700">批注怎么走</h3>
+          <p style="margin: 0; font-size: 17px; line-height: 1.8">手机上写的每一条先存在手机里。</p>
+        </article>
+      </main>
+      <footer class="leather" style="flex: none; height: 98px; padding: 8px 16px 30px; display: flex; align-items: center; gap: 12px; position: relative; z-index: 3; box-shadow: 0 -4px 10px rgba(40,10,5,.4)">
+        <span class="stitch" style="inset: 6px 8px auto 8px; height: 0; border-width: 1.5px 0 0; border-radius: 0"></span>
+        <div style="flex: 1; min-width: 0">
+          <div class="serif deboss" style="font-size: 15px; font-weight: 700">稿子回来了</div>
+          <div class="deboss" style="margin-top: 3px; font-size: 12px; opacity: .85">划词就开始第 4 轮</div>
+        </div>
+        <span class="serif gold" style="font-size: 13px; font-weight: 700">盖章定稿</span>
+        <button class="wax kai" aria-label="定稿" style="flex: none; width: 62px; height: 62px; border: 0; font-size: 19px; font-weight: 700">定稿</button>
+      </footer>
+    </div></div>
+  </div>
+
+  <div>
+    <p class="caption">首页(大类是手账的分隔页)</p>
+    <div class="phone"><div class="screen leather-brown" style="padding: 62px 18px 0; gap: 12px">
+      <div class="island"></div>
+      <span class="stitch" style="inset: 12px; border-radius: 44px"></span>
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 4px">
+        <h1 class="serif gold" style="margin: 0; font-size: 30px; font-weight: 700; letter-spacing: 8px">回稿</h1>
+        <button class="lbtn" aria-label="从「文件」打开" style="width: 44px; height: 44px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f1d9c0" stroke-width="2.2" stroke-linejoin="round"><path d="M3 7h6l2 2h10v10H3z"/></svg></button>
+      </div>
+      <section style="position: relative; margin-top: 10px; padding: 14px 16px 10px 16px; background: repeating-linear-gradient(0deg, rgba(130,100,60,.025) 0 1px, transparent 1px 3px), #fbf5e6; border-radius: 3px 3px 3px 3px; box-shadow: 0 2px 3px rgba(0,0,0,.3), 0 8px 16px rgba(0,0,0,.35)">
+        <div class="tab-c" style="position: absolute; right: -10px; top: 14px; padding: 6px 10px; background: #a8322a; color: #fff2e6; font-size: 13px; font-weight: 700">4</div>
+        <div class="serif" style="font-size: 17px; font-weight: 700; color: #2b2118; padding-bottom: 4px; border-bottom: 2px solid rgba(168,50,42,.6)">轮到你</div>
+        <div class="entry"><span class="serif" style="flex: 1; font-size: 15px; font-weight: 700; color: #2b2118">跨端规则.md</span><span style="font-size: 11px; color: #7a6a55">2 条未交</span><span class="wax-red" style="width: 18px; height: 18px"></span></div>
+        <div class="entry"><span class="serif" style="flex: 1; font-size: 15px; font-weight: 700; color: #2b2118">产品方案.md</span><span class="hand" style="font-size: 14px; color: #2c4a7a">回稿了 ✓</span></div>
+        <div class="entry"><span class="serif" style="flex: 1; font-size: 15px; font-weight: 700; color: #2b2118">定价页.md</span><span style="font-size: 11px; color: #a8322a">要在 Mac 上处理</span></div>
+        <div class="entry" style="border-bottom: 0"><span class="serif" style="flex: 1; font-size: 15px; font-weight: 700; color: #2b2118">访谈记录.md</span><span style="font-size: 11px; color: #7a6a55">已通过</span></div>
+      </section>
+      <div style="position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; background: #f4ecd8; border-radius: 3px; box-shadow: 0 2px 3px rgba(0,0,0,.3), 0 6px 12px rgba(0,0,0,.3)">
+        <div class="tab-c" style="position: absolute; right: -10px; top: 12px; padding: 5px 10px; background: #2f5c8a; color: #eef4ff; font-size: 12px; font-weight: 700">2</div>
+        <span class="serif" style="font-size: 16px; font-weight: 700; color: #2b2118">已交出</span>
+        <span style="flex: 1; font-size: 12px; color: #7a6a55">发布说明.md · AI 正在修改</span>
+      </div>
+      <div style="position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; background: #efe5ce; border-radius: 3px; box-shadow: 0 2px 3px rgba(0,0,0,.3), 0 6px 12px rgba(0,0,0,.3)">
+        <div class="tab-c" style="position: absolute; right: -10px; top: 12px; padding: 5px 10px; background: #3f6b45; color: #eefaf0; font-size: 12px; font-weight: 700">7</div>
+        <span class="serif" style="font-size: 16px; font-weight: 700; color: #2b2118">已结束</span>
+        <span style="flex: 1; font-size: 12px; color: #7a6a55">年度总结.md · 已定稿</span>
+      </div>
+      <div style="position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; background: #e9dfc6; border-radius: 3px; box-shadow: 0 2px 3px rgba(0,0,0,.3), 0 6px 12px rgba(0,0,0,.3)">
+        <div class="tab-c" style="position: absolute; right: -10px; top: 12px; padding: 5px 10px; background: #6b6458; color: #f4f1ea; font-size: 12px; font-weight: 700">1</div>
+        <span class="serif" style="font-size: 16px; font-weight: 700; color: #2b2118">本机文件</span>
+        <span style="flex: 1; font-size: 12px; color: #7a6a55">示例文档.md</span>
+      </div>
+      <div class="leather" style="position: absolute; left: 18px; right: 18px; bottom: 32px; height: 50px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-radius: 25px; box-shadow: inset 0 2px 5px rgba(0,0,0,.5), 0 1px 0 rgba(255,210,180,.15)">
+        <span class="stitch" style="inset: 5px; border-width: 1px"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e9c77f" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <span style="color: #d9b98f; font-size: 15px">搜索稿件和本机文件</span>
+      </div>
+    </div></div>
+  </div>
+</div>
+</body>
+</html>

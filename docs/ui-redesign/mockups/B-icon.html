@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 B 纸与钛金属:App 图标</title>
+<link rel="stylesheet" href="mockup.css">
+<style>
+.icon-b { position: relative; width: 1em; height: 1em; border-radius: .2267em; display: flex; align-items: center; justify-content: center;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.12) 0 .003em, rgba(0,0,0,.04) .003em .006em),
+    radial-gradient(ellipse at 30% 15%, rgba(255,255,255,.55), transparent 55%),
+    linear-gradient(160deg, #e6e8ea 0%, #c4c7cb 45%, #9fa3a8 100%);
+  box-shadow: inset 0 0 0 .01em rgba(255,255,255,.95), inset 0 0 0 .02em rgba(110,114,120,.45), inset 0 -.02em .03em rgba(0,0,0,.2), 0 .03em .07em rgba(0,0,0,.3); }
+.ib-groove { width: .6em; height: .6em; border-radius: .06em; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(160deg, #6f747a, #a3a7ac); box-shadow: inset 0 .012em .02em rgba(0,0,0,.6), 0 .004em 0 rgba(255,255,255,.9); }
+.ib-land { width: .44em; height: .44em; border-radius: .035em; display: flex; align-items: center; justify-content: center;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.12) 0 .003em, rgba(0,0,0,.04) .003em .006em), linear-gradient(160deg, #eceef0, #b9bdc1);
+  box-shadow: inset 0 .005em 0 #fff, 0 .008em .014em rgba(0,0,0,.45); }
+.ib-blue { width: .22em; height: .22em; border-radius: .03em; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 35% 25%, #8fb2ea, #34588f 55%, #1d355c 100%);
+  box-shadow: inset 0 .005em 0 rgba(255,255,255,.6), inset 0 -.006em .008em rgba(0,0,0,.4), 0 .006em .01em rgba(0,0,0,.45); }
+.ib-hole { width: .075em; height: .075em; border-radius: .01em; background: #18273f; box-shadow: inset 0 .008em .01em rgba(0,0,0,.8); }
+.mac-icon { filter: drop-shadow(0 .03em .05em rgba(0,0,0,.35)); }
+.home-row { display: flex; gap: 26px; padding: 22px 26px; border-radius: 22px; background: linear-gradient(160deg, #304a64, #1d2b3c); }
+.home-app { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #fff; font-size: 12px; }
+.other-app { width: 60px; height: 60px; border-radius: 14px; background: linear-gradient(160deg, #8fa3b8, #5d6f83); opacity: .7; }
+</style>
+</head>
+<body>
+<div class="board" style="flex-direction: column; gap: 30px">
+  <p class="caption" style="margin: 0">App 图标:钛金属上铣出的「回」字,中心蓝色阳极氧化</p>
+  <div style="display: flex; gap: 56px; align-items: flex-end">
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 12px">
+      <div class="icon-b" style="font-size: 300px"><div class="ib-groove"><div class="ib-land"><div class="ib-blue"><div class="ib-hole"></div></div></div></div></div>
+      <span class="caption" style="margin: 0">iPhone</span>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 12px">
+      <div class="icon-b mac-icon" style="font-size: 230px; margin: 20px"><div class="ib-groove"><div class="ib-land"><div class="ib-blue"><div class="ib-hole"></div></div></div></div></div>
+      <span class="caption" style="margin: 0">Mac</span>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 18px">
+      <div style="display: flex; gap: 18px; align-items: flex-end">
+        <div class="icon-b" style="font-size: 120px"><div class="ib-groove"><div class="ib-land"><div class="ib-blue"><div class="ib-hole"></div></div></div></div></div>
+        <div class="icon-b" style="font-size: 76px"><div class="ib-groove"><div class="ib-land"><div class="ib-blue"><div class="ib-hole"></div></div></div></div></div>
+        <div class="icon-b" style="font-size: 40px"><div class="ib-groove"><div class="ib-land"><div class="ib-blue"><div class="ib-hole"></div></div></div></div></div>
+      </div>
+      <div class="home-row">
+        <div class="home-app"><div class="other-app"></div>备忘录</div>
+        <div class="home-app"><div class="icon-b" style="font-size: 60px"><div class="ib-groove"><div class="ib-land"><div class="ib-blue"><div class="ib-hole"></div></div></div></div></div>回稿</div>
+        <div class="home-app"><div class="other-app"></div>文件</div>
+      </div>
+      <span class="caption" style="margin: 0">小尺寸与主屏幕上的样子</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>
