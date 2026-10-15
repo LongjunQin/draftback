@@ -184,9 +184,11 @@ final class DocumentStore: ObservableObject {
         cloud.onReceipt = { [weak self] receipt in self?.apply(receipt: receipt) }
         // 换了 iCloud 账号(或第一次知道账号、把老位置的数据整理进账号目录):列表、批注、定稿请求都换成那个账号的;
         // 正开着的原账号稿件关掉;那个账号没处理完的回执与出站事务接着做
-        cloud.onAccountSwitched = { [weak self] in
+        cloud.onAccountSwitched = { [weak self] realSwitch in
             guard let self else { return }
-            if let docId = self.current?.sync?.docId, !self.cloud.documents.contains(where: { $0.docId == docId }) { self.current = nil }
+            // 真的换了账号:正开着的 Mac 稿件一律关掉(哪怕新账号里有同一个文档标识,内存里的批注也是原账号的);
+            // 只是把老位置的数据整理进同一个账号的目录时不用关
+            if let docId = self.current?.sync?.docId, realSwitch || !self.cloud.documents.contains(where: { $0.docId == docId }) { self.current = nil }
             self.loadFinalizeRequests()
             self.reapplyPendingReceipts()
             self.recoverOutbound()
@@ -614,6 +616,7 @@ final class DocumentStore: ObservableObject {
     func submitBatch(for document: OpenedDocument) {
         let open = document.openNotes
         guard !open.isEmpty else { lastError = "这一轮还没有批注。"; return }
+        guard document.sync?.cloudRemoved != true else { lastError = "这篇的云端记录已经清理,手机上只能看。要再改,在 Mac 上打开。"; return }
         let batchId = UUID().uuidString.lowercased()
         let completedAt = ISO8601DateFormatter().string(from: Date())
         let intent: String? = (document.sync != nil && open.allSatisfy { $0.isNextRound }) ? "next-round" : nil
@@ -673,6 +676,7 @@ final class DocumentStore: ObservableObject {
     /// 确认前 Mac 推来了新的一轮(或正文变了),这次确认作废,不替你给没看过的一轮定稿
     func requestFinalize(for document: OpenedDocument, expected: (reviewId: String, hash: String)) {
         guard let sync = document.sync, sync.supportsIntents else { lastError = "Mac 上的回稿需要更新,才能在手机上定稿。"; return }
+        guard sync.cloudRemoved != true else { lastError = "这篇的云端记录已经清理,手机上只能看。要定稿,在 Mac 上打开。"; return }
         guard sync.reviewId == expected.reviewId, document.hash == expected.hash else { lastError = "确认期间这篇有了新的一轮,这次没有定稿。先看看新的一轮。"; return }
         let request = FinalizeRequest(batchId: UUID().uuidString.lowercased(), docId: sync.docId, reviewId: sync.reviewId, baseVersion: document.hash,
                                       completedAt: ISO8601DateFormatter().string(from: Date()), title: document.name)
@@ -777,6 +781,8 @@ final class DocumentStore: ObservableObject {
         updateBadge()
         if let pending = pendingOpenDocId, docs.contains(where: { $0.docId == pending }) { openSynced(docId: pending) }
         guard let document = current, let sync = document.sync, let latest = docs.first(where: { $0.docId == sync.docId }) else { return }
+        // 云端记录已清理:不管手头留着哪一版,正开着的这篇一律只读(不能再交出、定稿)
+        if latest.cloudRemoved == true, document.sync?.cloudRemoved != true { document.sync?.cloudRemoved = true }
         if latest.contentHash != sync.contentHash && latest.contentAvailable {
             // 手头没有未提交的批注:新版直接换进来,不用退出再进;有未提交的批注(锚在旧正文上)才留给用户点「新版」
             if document.openNotes.isEmpty { loadLatestVersion(latest, into: document) } else { document.newerVersionAvailable = true }

@@ -245,11 +245,10 @@ test('复核修补:快照恢复后的重新发布被云端更高的旧发布挡�
   assert.equal(sync.needsPush(current, f.options), false);
 });
 
-test('复核修补:快照里的旧路径已被现在另一篇占着时,恢复后不出现两篇占同一路径', async (t) => {
+test('复核修补:快照里的旧路径现在是另一篇文档时拒绝恢复(不悄悄盖掉它的批注);只是挪了位置的,恢复后打开新位置会问接上历史', async (t) => {
   const f = setup(t);
   const snapshot = require('../lib/snapshot');
   const documents = require('../lib/documents');
-  const versionStore = require('../lib/version-store');
   const { doc, review } = await finishedDoc(f, '原位.md');
   const snap = await snapshot.createSnapshot({ ...f.options, reason: 'test' });
   const moved = path.join(f.docDir, '挪走.md');
@@ -257,12 +256,49 @@ test('复核修补:快照里的旧路径已被现在另一篇占着时,恢复后
   await documents.relinkDocument(doc, moved, f.options);
   fs.writeFileSync(doc, '# 原位上的新文档\n');
   const { review: other } = await store.openReview(doc, f.options);
+  await assert.rejects(() => snapshot.restoreSnapshot({ ...f.options, id: snap.id, confirm: true }),
+    (error) => error.code === 'RESTORE_CONFLICT' && error.details.conflicts.includes(doc));
+  assert.equal((await store.getReviewById(other.id, f.options)).absPath, doc, '拒绝时什么都没动');
+});
+
+test('复核修补:快照之后只是挪了位置(原位置空着):恢复后身份回到快照时的位置,打开新位置会问接上历史', async (t) => {
+  const f = setup(t);
+  const snapshot = require('../lib/snapshot');
+  const documents = require('../lib/documents');
+  const { doc, review } = await finishedDoc(f, '只挪了.md');
+  const snap = await snapshot.createSnapshot({ ...f.options, reason: 'test' });
+  const moved = path.join(f.docDir, '只挪了-新位置.md');
+  fs.renameSync(doc, moved);
+  await documents.relinkDocument(doc, moved, f.options);
   await snapshot.restoreSnapshot({ ...f.options, id: snap.id, confirm: true });
-  const index = versionStore.readIndex(f.options).documents;
-  assert.equal(index[review.docId].currentPath, moved, '挪走的那篇路径以现在为准');
-  assert.equal(index[other.docId].currentPath, doc);
-  const paths = Object.values(index).map((item) => item.currentPath).filter(Boolean);
-  assert.equal(new Set(paths).size, paths.length, '路径不重复');
+  assert.equal(require('../lib/version-store').getDocument(review.docId, f.options).currentPath, doc, '身份回到快照时的位置(与恢复回来的会话一致)');
+  const offered = (await documents.readDocument(moved, f.options)).relinkCandidate;
+  assert.equal(offered && offered.docId, review.docId, '打开新位置问要不要接上历史');
+});
+
+test('复核修补:快照时最新一轮分到了发布序号还没推上去,恢复后也要在云端水位之上重新发布', async (t) => {
+  const f = setup(t);
+  const snapshot = require('../lib/snapshot');
+  const { review } = await finishedDoc(f, '没推上去.md');
+  await store.mutateReviews((data) => { data.reviews[review.id].sync = { state: 'never', revision: 2, revisionSignature: 'sig' }; }, f.options);
+  const snap = await snapshot.createSnapshot({ ...f.options, reason: 'test' });
+  await snapshot.restoreSnapshot({ ...f.options, id: snap.id, confirm: true });
+  let current = await store.getReviewById(review.id, f.options);
+  assert.equal(current.sync.republishRequired, true);
+  assert.equal(current.sync.revision, undefined, '旧序号作废');
+  await sync.markPushSuperseded(review.id, 10, sync.pushSignature(current, f.options), f.options);
+  current = await store.getReviewById(review.id, f.options);
+  assert.equal(sync.needsPush(current, f.options), true, '被云端旧发布挡住也还要推');
+});
+
+test('复核修补:升级认领时,会话上已经记着别的账号的文档不认领给当前账号', async (t) => {
+  const f = setup(t);
+  const { review } = await finishedDoc(f, '已有归属.md');
+  await store.mutateReviews((data) => { data.reviews[review.id].sync = { state: 'pushed', pushedAt: new Date().toISOString(), pushedSignature: 'x', account: 'acctA' }; }, f.options);
+  await sync.writeHelperState({ account: 'acctB' }, f.options);
+  assert.equal(require('../lib/version-store').getDocument(review.docId, f.options).account, 'acctA', '按会话上的归属认领');
+  assert.ok(!(await sync.listOutbox(f.options)).some((item) => item.reviewId === review.id), 'A 的文档不进 B 的队列');
+  assert.equal(sync.readHelperState(f.options).accountEverKnown, true);
 });
 
 test('复核修补:重关联只认最后一版——挪走前的旧原稿副本不提示;提示后文件又改过,接上时拒绝', async (t) => {

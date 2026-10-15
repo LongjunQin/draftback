@@ -117,8 +117,8 @@ final class CloudSyncEngine: ObservableObject {
 
     /// 收到回执时回调(DocumentStore 据此更新批注状态)
     var onReceipt: ((SyncReceipt) -> Void)?
-    /// 换了 iCloud 账号、本地镜像换成那个账号的之后回调(正开着的旧账号稿件要关掉)
-    var onAccountSwitched: (() -> Void)?
+    /// 账号目录换了之后回调;参数为真表示真的换了账号(不是只把老位置的数据整理进同一个账号的目录)
+    var onAccountSwitched: ((Bool) -> Void)?
 
     private let container = CKContainer(identifier: CloudSchema.containerID)
     private var database: CKDatabase { container.privateCloudDatabase }
@@ -126,21 +126,29 @@ final class CloudSyncEngine: ObservableObject {
     private let dataDirectory: URL
     private let fileManager = FileManager.default
     /// 跨端规则第 9 节:每个 iCloud 账号一个目录 accounts/<账号指纹>/,里面是这个账号的稿件镜像(synced/)、同步状态(sync/:
-    /// 变更令牌、待上传批次、回执)、这些稿件的批注(annotations/)与定稿请求(finalize.json)。换账号只换指针(sync-account),
+    /// 变更令牌、待上传批次、回执)、这些稿件的批注(annotations/)与定稿请求(finalize.json)。换账号只换指针(accounts/active),
     /// 不搬目录;中途退出也不丢。还不知道账号(升级上来第一次、从没联网)时用老位置,也就是数据目录本身
     private(set) var accountBase: URL
     private var root: URL { accountBase.appendingPathComponent("synced", isDirectory: true) }
     private var stateDir: URL { accountBase.appendingPathComponent("sync", isDirectory: true) }
     private var accountKey: String?
-    private var accountMarker: URL { dataDirectory.appendingPathComponent("sync-account") }
+    private var accountsDir: URL { dataDirectory.appendingPathComponent("accounts", isDirectory: true) }
+    /// 指针:现在用哪个账号的目录(原子写入;换账号只改它)
+    private var activeMarker: URL { accountsDir.appendingPathComponent("active") }
+    /// 老位置的数据归哪个账号:第一次整理前就原子记下,中途退出、之后换号都不改,整理只往这个账号里放
+    private var legacyOwnerMarker: URL { accountsDir.appendingPathComponent("legacy-owner") }
+    private func readMarker(_ url: URL) -> String? {
+        let text = (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text?.isEmpty ?? true) ? nil : text
+    }
     /// 账号代次:系统通知账号变了就加一;正在跑的同步每次上传、应用下载前都核对,变了就停(旧账号的东西不进新账号)
     private var accountGeneration = 0
     private var refreshAgain = false
 
     init(dataDirectory: URL) {
         self.dataDirectory = dataDirectory
-        let marker = (try? String(contentsOf: dataDirectory.appendingPathComponent("sync-account"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        accountBase = marker.flatMap { $0.isEmpty ? nil : dataDirectory.appendingPathComponent("accounts/\($0)", isDirectory: true) } ?? dataDirectory
+        let active = (try? String(contentsOf: dataDirectory.appendingPathComponent("accounts/active"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        accountBase = active.flatMap { $0.isEmpty ? nil : dataDirectory.appendingPathComponent("accounts/\($0)", isDirectory: true) } ?? dataDirectory
         prepareBase()
         documents = loadIndex()
         pendingUploads = outboxFiles().count
@@ -282,12 +290,22 @@ final class CloudSyncEngine: ObservableObject {
     /// 切到某个账号的目录。第一次知道账号(还没有指针)时,先把老位置的数据搬进这个账号的目录:
     /// 稿件镜像、同步状态、这些稿件的批注、定稿请求。只搬一次;目标已有就不动,绝不删;有一样搬不动就停下(不写指针,下次再来)
     func useAccount(_ key: String) throws {
-        let target = dataDirectory.appendingPathComponent("accounts/\(key)", isDirectory: true)
-        let previous = (try? String(contentsOf: accountMarker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if previous == key && accountBase == target { return }
-        if previous == nil || previous?.isEmpty == true { try adoptLegacy(into: target) }
+        let target = accountsDir.appendingPathComponent(key, isDirectory: true)
+        let active = readMarker(activeMarker)
+        if active == key && accountBase == target { return }
+        try? fileManager.createDirectory(at: accountsDir, withIntermediateDirectories: true)
+        var legacyOwner: String?
+        if active == nil {
+            // 第一次:老位置的数据归谁先定下来并记住——以前记过就按以前的(包括上一版留下的 sync-account),否则就是现在这个账号
+            legacyOwner = readMarker(legacyOwnerMarker) ?? readMarker(dataDirectory.appendingPathComponent("sync-account")) ?? key
+            if readMarker(legacyOwnerMarker) == nil {
+                do { try legacyOwner!.write(to: legacyOwnerMarker, atomically: true, encoding: .utf8) } catch { throw AccountError.adoptFailed("记下归属") }
+            }
+            try adoptLegacy(into: accountsDir.appendingPathComponent(legacyOwner!, isDirectory: true))
+        }
         try? fileManager.createDirectory(at: target, withIntermediateDirectories: true)
-        try key.write(to: accountMarker, atomically: true, encoding: .utf8)
+        try key.write(to: activeMarker, atomically: true, encoding: .utf8)
+        let realSwitch = (active ?? legacyOwner) != key
         accountBase = target
         prepareBase()
         UserDefaults.standard.removeObject(forKey: subscribedKey) // 订阅跟着账号走:换了账号要重新核对、订阅
@@ -295,7 +313,7 @@ final class CloudSyncEngine: ObservableObject {
         documents = loadIndex()
         pendingUploads = outboxFiles().count
         lastError = nil
-        onAccountSwitched?()
+        onAccountSwitched?(realSwitch)
     }
 
     private func adoptLegacy(into target: URL) throws {

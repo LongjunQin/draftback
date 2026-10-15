@@ -38,7 +38,8 @@ final class AccountSwitchTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("annotations/\(Hashing.sha256("synced:dA")).annotations.json").path), "稿件的批注跟进账号目录")
         XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("finalize.json").path), "定稿请求跟进账号目录")
         XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("annotations/\(Hashing.sha256("local:x")).annotations.json").path), "本机文件的批注留在原处")
-        XCTAssertEqual(try String(contentsOf: dir.appendingPathComponent("sync-account"), encoding: .utf8), "acctA")
+        XCTAssertEqual(try String(contentsOf: dir.appendingPathComponent("accounts/active"), encoding: .utf8), "acctA")
+        XCTAssertEqual(try String(contentsOf: dir.appendingPathComponent("accounts/legacy-owner"), encoding: .utf8), "acctA")
 
         try engine.useAccount("acctB")
         XCTAssertTrue(engine.documents.isEmpty, "换成 B:不显示 A 的稿件")
@@ -70,5 +71,35 @@ final class AccountSwitchTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("synced/dA/content.md").path))
         XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("annotations/\(Hashing.sha256("synced:dA")).annotations.json").path),
                       "清单已经搬过去也认得出哪些批注属于稿件")
+    }
+
+    func testInterruptedAdoptionKeepsOwnerEvenAfterAccountChange() throws {
+        let dir = fm.temporaryDirectory.appendingPathComponent("draftback-account-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try makeLegacy(in: dir)
+        // 上次已经定下老数据归 A、搬了镜像就退出了;这次登录的是 B
+        try fm.createDirectory(at: dir.appendingPathComponent("accounts/acctA"), withIntermediateDirectories: true)
+        try "acctA".write(to: dir.appendingPathComponent("accounts/legacy-owner"), atomically: true, encoding: .utf8)
+        try fm.moveItem(at: dir.appendingPathComponent("synced"), to: dir.appendingPathComponent("accounts/acctA/synced"))
+        let engine = CloudSyncEngine(dataDirectory: dir)
+        try engine.useAccount("acctB")
+        XCTAssertTrue(engine.documents.isEmpty, "B 看不到 A 的稿件")
+        XCTAssertEqual(engine.pendingUploads, 0, "A 剩下的待上传批次没有进 B")
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("accounts/acctA/sync/outbox/bA.json").path), "剩下的照旧整理进 A")
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("accounts/acctA/finalize.json").path))
+        try engine.useAccount("acctA")
+        XCTAssertEqual(engine.documents.map(\.docId), ["dA"])
+        XCTAssertEqual(engine.pendingUploads, 1)
+    }
+
+    func testPreviousBuildMarkerDecidesLegacyOwner() throws {
+        let dir = fm.temporaryDirectory.appendingPathComponent("draftback-account-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try makeLegacy(in: dir)
+        try "acctA".write(to: dir.appendingPathComponent("sync-account"), atomically: true, encoding: .utf8) // 上一版留下的:根目录数据归 A
+        let engine = CloudSyncEngine(dataDirectory: dir)
+        try engine.useAccount("acctB")
+        XCTAssertTrue(engine.documents.isEmpty)
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("accounts/acctA/synced/dA/content.md").path), "按上一版的标记整理进 A")
     }
 }

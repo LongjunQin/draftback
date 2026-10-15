@@ -63,14 +63,15 @@ final class SyncLoop {
                 guard let docId = item["docId"] as? String, let reviewId = item["reviewId"] as? String else { continue }
                 // 附件:服务累计的(包括后来不再引用的)加上云端文档记录里现在的清单
                 var others = Set((item["attachments"] as? [String]) ?? [])
-                if let record = try await cloud.fetch([docId])[docId], let json = record["attachments"] as? String,
-                   let list = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
-                    others.formUnion(list.compactMap { $0["recordName"] as? String })
-                }
+                if accountChanged.peek() { return } // 换号了:这一轮清理停下(别在新账号里删、也别把原账号的标成已清)
+                others.formUnion(Self.attachmentNames(of: try await cloud.fetch([docId])[docId]))
                 for batchId in (item["batchIds"] as? [String]) ?? [] { others.formUnion([batchId, CloudSchema.receiptName(batchId: batchId)]) }
                 // 先删附件、批次、回执,最后删文档记录:中途失败时文档记录还在,下次还读得到附件清单,整套重来
+                if accountChanged.peek() { return }
                 try await cloud.deleteIgnoringMissing(Array(others))
+                if accountChanged.peek() { return }
                 try await cloud.deleteIgnoringMissing([docId])
+                if accountChanged.peek() { return }
                 try await server.markCloudCleaned(reviewId: reviewId)
                 log.info("云端清理:\(item["title"] as? String ?? docId) 定稿或作废满 30 天,删掉云端 \(others.count + 1) 条记录")
             }
@@ -183,6 +184,13 @@ final class SyncLoop {
         return pushed > 0
     }
 
+    /// 云端文档记录里附件清单的记录名
+    private static func attachmentNames(of record: CKRecord?) -> [String] {
+        guard let json = record?["attachments"] as? String,
+              let list = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] else { return [] }
+        return list.filter { ($0["included"] as? Bool) != false }.compactMap { $0["recordName"] as? String }
+    }
+
     /// 发布先后(跨端规则 v2.3 第 12 节):初读与冲突重读都先比业务 revision——云端更新则本次作废,相同只确认不重写,本地更新才条件写入
     private enum RevisionVerdict { case superseded(Int), same, proceed }
     private func compareRevision(_ existing: CKRecord?, _ payload: [String: Any]) -> RevisionVerdict {
@@ -203,7 +211,7 @@ final class SyncLoop {
             try await server.markPushSuperseded(reviewId: reviewId, cloudRevision: cloudRevision, signature: signature)
             throw SyncError.superseded
         case .same:
-            return [] // 同一次发布已在云端:只确认,不重写
+            return Self.attachmentNames(of: existing) // 同一次发布已在云端:只确认,不重写;附件名照样报给服务(上次确认可能没送到)
         case .proceed:
             break
         }
@@ -296,6 +304,7 @@ final class SyncLoop {
                 break
             }
             guard let fresh = existing else { throw error }
+            if accountChanged.peek() { throw SyncError.accountChanged } // 冲突重写之前也再看一眼
             for key in record.allKeys() { fresh[key] = record[key] }
             // allKeys() 不含这次清掉的字段:处理结果在别的状态下要清空,搬到新鲜记录上时也得清
             for key in ["results", "appliedCount", "wontfixCount"] where record[key] == nil { fresh[key] = nil }
@@ -373,6 +382,8 @@ final class SyncLoop {
         }
 
         let acceptedIds = (receipt["acceptedIds"] as? [String]) ?? []
+        // 导入等待期间换了号:回执不写进(已经是新账号的)云端;本地已收下,下一轮从原账号的区重拉时按批次编号补写回执
+        if accountChanged.peek() { throw SyncError.accountChanged }
         try await writeReceipt(batchId: batchId, docId: batch["docId"] as? String ?? "", reviewId: reviewId,
                                accepted: (receipt["accepted"] as? Bool) == true, reason: receipt["reason"] as? String ?? "",
                                message: receipt["message"] as? String ?? "", acceptedIds: acceptedIds,
