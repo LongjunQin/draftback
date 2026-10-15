@@ -10,6 +10,9 @@ struct LibraryView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var importing = false
     @State private var query = ""
+    /// 收起的大类(2026-10-15 用户提:已结束越积越长,大类要能收起、点开)。默认收起「已结束」与「本机文件」,
+    /// 「轮到你」「已交出」展开;用户点过就记住。搜索时全部展开,搜到的不会藏在收起的大类里
+    @AppStorage("library.collapsedSections") private var collapsedStore = "ended,local"
 
     /// 「文件」App 里显示的文件夹名就是 App 的显示名(测试版是「回稿 测试」)。
     private var appFolderName: String {
@@ -73,6 +76,38 @@ struct LibraryView: View {
         return entries
     }
 
+    private var collapsedKeys: Set<String> { Set(collapsedStore.split(separator: ",").map(String.init)) }
+    private func isCollapsed(_ key: String) -> Bool { query.isEmpty && collapsedKeys.contains(key) }
+    private func toggle(_ key: String) {
+        var keys = collapsedKeys
+        if keys.contains(key) { keys.remove(key) } else { keys.insert(key) }
+        collapsedStore = keys.sorted().joined(separator: ",")
+    }
+
+    /// 大类标题:名字、篇数、收起时里面有没看过的就带一个蓝点;点一下收起 / 展开
+    private func sectionHeader(_ title: String, key: String, count: Int, unread: Bool) -> some View {
+        let collapsed = isCollapsed(key)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) { toggle(key) }
+        } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                Text("\(count)").foregroundStyle(.tertiary)
+                if collapsed && unread { Circle().fill(Palette.unread).frame(width: 7, height: 7) }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!query.isEmpty)
+        .accessibilityLabel("\(title),\(count) 篇\(collapsed && unread ? ",有新的" : "")")
+        .accessibilityValue(collapsed ? "已收起" : "已展开")
+        .accessibilityHint(query.isEmpty ? (collapsed ? "点按展开" : "点按收起") : "")
+    }
+
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
@@ -87,35 +122,44 @@ struct LibraryView: View {
                 }
                 ForEach(DraftGroup.allCases) { group in
                     if let items = groups[group], !items.isEmpty {
-                        Section(group.title) {
-                            ForEach(items) { item in
-                                Button { store.openSynced(item.doc) } label: { DraftRowView(title: item.doc.title, state: item.state) }
-                                    .swipeActions {
-                                        Button { store.hide(item.doc) } label: { Label("从列表移除", systemImage: "eye.slash") }
-                                            .tint(.gray)
-                                    }
+                        Section {
+                            if !isCollapsed(group.rawValue) {
+                                ForEach(items) { item in
+                                    Button { store.openSynced(item.doc) } label: { DraftRowView(title: item.doc.title, state: item.state) }
+                                        .swipeActions {
+                                            Button { store.hide(item.doc) } label: { Label("从列表移除", systemImage: "eye.slash") }
+                                                .tint(.gray)
+                                        }
+                                }
                             }
+                        } header: {
+                            sectionHeader(group.title, key: group.rawValue, count: items.count, unread: items.contains { $0.state.unread })
                         }
                     }
                 }
                 let local = localEntries
                 if !local.isEmpty {
                     Section {
-                        ForEach(local) { entry in localRow(entry) }
+                        if !isCollapsed("local") {
+                            ForEach(local) { entry in localRow(entry) }
+                        }
                     } header: {
-                        Text("本机文件")
+                        sectionHeader("本机文件", key: "local", count: local.count, unread: false)
                     } footer: {
-                        Text("只在这台手机上,不会同步到 Mac。「文件」App → 我的 iPhone → \(appFolderName) 里的 Markdown 也列在这里。")
+                        if !isCollapsed("local") {
+                            Text("只在这台手机上,不会同步到 Mac。「文件」App → 我的 iPhone → \(appFolderName) 里的 Markdown 也列在这里。")
+                        }
                     }
                 }
                 Section {} footer: { syncFooter.id("sync-footer") }
             }
             .listStyle(.insetGrouped)
             #if DEBUG
-            // 仅调试版:截图时滚到最底(--demo-scroll-bottom)
+            // 仅调试版:截图时滚到最底(--demo-scroll-bottom)、全部展开(--demo-expand-all)
             .onAppear {
+                if CommandLine.arguments.contains("--demo-expand-all") { collapsedStore = "" }
                 if CommandLine.arguments.contains("--demo-scroll-bottom") {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { withAnimation { proxy.scrollTo("sample", anchor: .top) } }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { withAnimation { proxy.scrollTo("sync-footer", anchor: .bottom) } }
                 }
             }
             #endif
