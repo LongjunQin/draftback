@@ -802,7 +802,10 @@ async function handleAppApi(req, res, pathname, q) {
     if (!body || typeof body.from !== 'string' || typeof body.to !== 'string') {
       return sendJson(res, 400, { error: 'bad_request', message: '请提供旧路径与新路径。' });
     }
-    const result = await plainDocuments.relinkDocument(body.from, body.to);
+    const result = await plainDocuments.relinkDocument(body.from, body.to, {
+      expectedDocId: typeof body.expectedDocId === 'string' ? body.expectedDocId : undefined,
+      expectedHash: typeof body.expectedHash === 'string' ? body.expectedHash : undefined,
+    });
     return sendJson(res, 200, { ...result, document: await plainDocuments.readDocument(result.to) });
   }
   if (pathname === '/api/app/document/open') {

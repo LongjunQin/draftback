@@ -1,15 +1,14 @@
 import XCTest
 @testable import Draftback
 
-/// 跨端规则第 9 节:换 iCloud 账号时,原账号的本地镜像与待上传批次整份收起、不显示;换回原账号再放回来接着用。
+/// 跨端规则第 9 节:每个 iCloud 账号一个目录;第一次知道账号时把老位置的数据整理进去(只搬一次、目标已有不动、绝不删),
+/// 之后换账号只换指针。原账号的稿件、待上传批次、批注、定稿请求不显示也不上传,换回来接着用。
 @MainActor
 final class AccountSwitchTests: XCTestCase {
-    func testSwitchShelvesAndRestoresMirrorAndOutbox() throws {
-        let fm = FileManager.default
-        let dir = fm.temporaryDirectory.appendingPathComponent("draftback-account-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: dir) }
-        _ = CloudSyncEngine(dataDirectory: dir) // 建好目录
-        // 原账号 A 的镜像:一篇稿件 + 一批没传上去的批注
+    private let fm = FileManager.default
+
+    private func makeLegacy(in dir: URL) throws {
+        _ = CloudSyncEngine(dataDirectory: dir) // 老位置的目录
         let doc = SyncedDocument(docId: "dA", reviewId: "rA", title: "A 的稿子.md", round: 1, status: "", applyMode: "", phoneState: "reviewing",
                                  contentHash: "h", summary: "", openCount: 0, pushedAt: Date(), pusher: "Mac", contentAvailable: true,
                                  updatedAt: Date(), revision: 1)
@@ -17,20 +16,59 @@ final class AccountSwitchTests: XCTestCase {
         try fm.createDirectory(at: dir.appendingPathComponent("synced/dA"), withIntermediateDirectories: true)
         try Data("# A".utf8).write(to: dir.appendingPathComponent("synced/dA/content.md"))
         try Data("{}".utf8).write(to: dir.appendingPathComponent("sync/outbox/bA.json"))
+        try fm.createDirectory(at: dir.appendingPathComponent("annotations"), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: dir.appendingPathComponent("annotations/\(Hashing.sha256("synced:dA")).annotations.json"))
+        try Data("{}".utf8).write(to: dir.appendingPathComponent("annotations/\(Hashing.sha256("local:x")).annotations.json"))
+        try Data(#"{"dA":{}}"#.utf8).write(to: dir.appendingPathComponent("finalize.json"))
+    }
 
+    func testFirstAccountAdoptsLegacyThenSwitchesByPointer() throws {
+        let dir = fm.temporaryDirectory.appendingPathComponent("draftback-account-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try makeLegacy(in: dir)
         let engine = CloudSyncEngine(dataDirectory: dir)
+        XCTAssertEqual(engine.documents.map(\.docId), ["dA"], "还不知道账号时用老位置")
+
+        try engine.useAccount("acctA")
+        let base = dir.appendingPathComponent("accounts/acctA")
+        XCTAssertEqual(engine.accountBase.standardizedFileURL, base.standardizedFileURL)
         XCTAssertEqual(engine.documents.map(\.docId), ["dA"])
         XCTAssertEqual(engine.pendingUploads, 1)
+        XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("synced/dA/content.md").path))
+        XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("annotations/\(Hashing.sha256("synced:dA")).annotations.json").path), "稿件的批注跟进账号目录")
+        XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("finalize.json").path), "定稿请求跟进账号目录")
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("annotations/\(Hashing.sha256("local:x")).annotations.json").path), "本机文件的批注留在原处")
+        XCTAssertEqual(try String(contentsOf: dir.appendingPathComponent("sync-account"), encoding: .utf8), "acctA")
 
-        engine.switchAccount(from: "acctA", to: "acctB")
+        try engine.useAccount("acctB")
         XCTAssertTrue(engine.documents.isEmpty, "换成 B:不显示 A 的稿件")
         XCTAssertEqual(engine.pendingUploads, 0, "A 的待上传批次不在 B 的队列里")
-        XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent("synced/dA/content.md").path))
-        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("sync/container").path), "新账号的同步目录也写好容器标记(下次启动不会被当成换容器清掉)")
+        XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("sync/outbox/bA.json").path), "A 的东西原地留着,没有搬也没有删")
 
-        engine.switchAccount(from: "acctB", to: "acctA")
-        XCTAssertEqual(engine.documents.map(\.docId), ["dA"], "换回 A:稿件回来")
-        XCTAssertEqual(engine.pendingUploads, 1, "A 的待上传批次回来,接着传")
-        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("synced/dA/content.md").path))
+        try engine.useAccount("acctA")
+        XCTAssertEqual(engine.documents.map(\.docId), ["dA"], "换回 A:接着用")
+        XCTAssertEqual(engine.pendingUploads, 1)
+
+        // 重启后按指针直接用 A 的目录
+        let restarted = CloudSyncEngine(dataDirectory: dir)
+        XCTAssertEqual(restarted.documents.map(\.docId), ["dA"])
+    }
+
+    func testInterruptedAdoptionResumesWithoutDeleting() throws {
+        let dir = fm.temporaryDirectory.appendingPathComponent("draftback-account-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try makeLegacy(in: dir)
+        // 上次整理到一半就退出了:镜像已经搬过去,同步状态还在老位置,指针没写
+        let base = dir.appendingPathComponent("accounts/acctA")
+        try fm.createDirectory(at: base, withIntermediateDirectories: true)
+        try fm.moveItem(at: dir.appendingPathComponent("synced"), to: base.appendingPathComponent("synced"))
+        try fm.removeItem(at: dir.appendingPathComponent("finalize.json")) // 只能从新位置的清单认出 dA
+        let engine = CloudSyncEngine(dataDirectory: dir) // 老位置会重建一个空的 synced/
+        try engine.useAccount("acctA")
+        XCTAssertEqual(engine.documents.map(\.docId), ["dA"], "已搬过去的镜像没被空目录覆盖")
+        XCTAssertEqual(engine.pendingUploads, 1, "剩下的同步状态这次搬过去了")
+        XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("synced/dA/content.md").path))
+        XCTAssertTrue(fm.fileExists(atPath: base.appendingPathComponent("annotations/\(Hashing.sha256("synced:dA")).annotations.json").path),
+                      "清单已经搬过去也认得出哪些批注属于稿件")
     }
 }

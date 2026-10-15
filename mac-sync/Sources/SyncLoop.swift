@@ -61,15 +61,18 @@ final class SyncLoop {
         do {
             for item in try await server.cleanupList() {
                 guard let docId = item["docId"] as? String, let reviewId = item["reviewId"] as? String else { continue }
-                var names = [docId]
+                // 附件:服务累计的(包括后来不再引用的)加上云端文档记录里现在的清单
+                var others = Set((item["attachments"] as? [String]) ?? [])
                 if let record = try await cloud.fetch([docId])[docId], let json = record["attachments"] as? String,
                    let list = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
-                    names += list.compactMap { $0["recordName"] as? String }
+                    others.formUnion(list.compactMap { $0["recordName"] as? String })
                 }
-                for batchId in (item["batchIds"] as? [String]) ?? [] { names += [batchId, CloudSchema.receiptName(batchId: batchId)] }
-                try await cloud.deleteIgnoringMissing(names)
+                for batchId in (item["batchIds"] as? [String]) ?? [] { others.formUnion([batchId, CloudSchema.receiptName(batchId: batchId)]) }
+                // 先删附件、批次、回执,最后删文档记录:中途失败时文档记录还在,下次还读得到附件清单,整套重来
+                try await cloud.deleteIgnoringMissing(Array(others))
+                try await cloud.deleteIgnoringMissing([docId])
                 try await server.markCloudCleaned(reviewId: reviewId)
-                log.info("云端清理:\(item["title"] as? String ?? docId) 定稿或作废满 30 天,删掉云端 \(names.count) 条记录")
+                log.info("云端清理:\(item["title"] as? String ?? docId) 定稿或作废满 30 天,删掉云端 \(others.count + 1) 条记录")
             }
         } catch {
             log.error("云端清理失败(一小时后再试): \(Describe.error(error))")
@@ -115,6 +118,7 @@ final class SyncLoop {
             heartbeat["environment"] = environmentName()
             guard status == .available else {
                 accountKey = nil // 登出 / 受限期间可能换了账号:恢复后重新核对
+                reportedAccount = nil // 这次心跳不带账号,服务端会当作账号未知;恢复后要先重报再取队列
                 heartbeat["error"] = "iCloud 账号不可用(\(describe(status))),请在系统设置里登录 iCloud"
                 try? await server.heartbeat(heartbeat)
                 return false
@@ -152,16 +156,21 @@ final class SyncLoop {
         var pushed = 0
         for item in items {
             guard let reviewId = item["reviewId"] as? String, let docId = item["docId"] as? String else { continue }
+            // 换号通知到了:这一轮剩下的都不推(CloudKit 按当前账号写,再推就进了新账号),下一轮按新账号重取队列
+            if accountChanged.peek() { throw SyncError.accountChanged }
             do {
                 let payload = try await server.pushPayload(reviewId: reviewId)
-                try await pushDocument(docId: docId, reviewId: reviewId, payload: payload)
+                let attachments = try await pushDocument(docId: docId, reviewId: reviewId, payload: payload)
                 try await server.markPushed(reviewId: reviewId,
                                             signature: payload["signature"] as? String ?? "",
-                                            contentHash: payload["contentHash"] as? String ?? "")
+                                            contentHash: payload["contentHash"] as? String ?? "",
+                                            attachments: attachments)
                 log.info("已推送 \(item["title"] as? String ?? docId) 第 \(item["round"] ?? 1) 轮(\(item["phoneState"] ?? "?"))")
                 pushed += 1
             } catch SyncError.superseded {
                 continue // 已按云端更新的发布处理,不记错误
+            } catch SyncError.accountChanged {
+                throw SyncError.accountChanged
             } catch {
                 let message = Describe.error(error)
                 // 服务端错误里带请求编号和时间,逐字比较永远不同;只看开头(错误码与类别)是否一样
@@ -184,7 +193,8 @@ final class SyncLoop {
         return .proceed
     }
 
-    private func pushDocument(docId: String, reviewId: String, payload: [String: Any]) async throws {
+    /// 返回这次推上去(或已在云端)的附件记录名
+    private func pushDocument(docId: String, reviewId: String, payload: [String: Any]) async throws -> [String] {
         var existing = try await cloud.fetch([docId])[docId]
         let signature = payload["signature"] as? String ?? ""
         switch compareRevision(existing, payload) {
@@ -193,7 +203,7 @@ final class SyncLoop {
             try await server.markPushSuperseded(reviewId: reviewId, cloudRevision: cloudRevision, signature: signature)
             throw SyncError.superseded
         case .same:
-            return // 同一次发布已在云端:只确认,不重写
+            return [] // 同一次发布已在云端:只确认,不重写
         case .proceed:
             break
         }
@@ -228,6 +238,7 @@ final class SyncLoop {
         record["pusher"] = Host.current().localizedName ?? "Mac"
 
         var records: [CKRecord] = []
+        var attachmentNames: [String] = []
         if let content = payload["content"] as? String {
             // 正文走 CKAsset(没有 1 MB 的字段上限);附件按清单逐个上传,校验码没变的跳过
             let contentFile = tempDir.appendingPathComponent("\(docId)-\(UUID().uuidString).md")
@@ -250,6 +261,7 @@ final class SyncLoop {
                 listed.append(["relPath": rel, "recordName": name, "sha256": sha, "bytes": entry["bytes"] ?? 0,
                                "included": included, "reason": entry["reason"] ?? NSNull()])
                 guard included else { continue }
+                attachmentNames.append(name)
                 if let prior = existingAttachments[name], (prior["sha256"] as? String) == sha { continue }
                 let data = try await server.attachment(reviewId: reviewId, relPath: rel)
                 let file = tempDir.appendingPathComponent("\(name)-\(UUID().uuidString)")
@@ -268,6 +280,7 @@ final class SyncLoop {
             record["contentAvailable"] = Int64(0)
         }
         records.append(record)
+        if accountChanged.peek() { throw SyncError.accountChanged } // 写之前再看一眼:换号了就不写
         do {
             try await cloud.saveIfUnchanged(records)
         } catch let error as CKError where error.code == .serverRecordChanged {
@@ -278,7 +291,7 @@ final class SyncLoop {
                 try await server.markPushSuperseded(reviewId: reviewId, cloudRevision: cloudRevision, signature: signature)
                 throw SyncError.superseded
             case .same:
-                return // 重读发现同一次发布已经在云端(比如上一次写入其实成功了):只确认,不重写(跨端规则第 12 节)
+                return attachmentNames // 重读发现同一次发布已经在云端(比如上一次写入其实成功了):只确认,不重写(跨端规则第 12 节)
             case .proceed:
                 break
             }
@@ -290,6 +303,7 @@ final class SyncLoop {
         }
         try? FileManager.default.removeItem(at: tempDir)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        return attachmentNames
     }
 
     // MARK: 拉:云 → Mac(手机提交的批次)
@@ -299,9 +313,12 @@ final class SyncLoop {
         let batches = changes.changed.filter { $0.recordType == CloudSchema.annotationBatch }
         var worked = false
         for record in batches {
+            // 换号通知到了:不再往(已经是新账号的)云端写回执,也不推进令牌,下一轮按新账号重来
+            if accountChanged.peek() { throw SyncError.accountChanged }
             try await handleBatch(record)
             worked = true
         }
+        if accountChanged.peek() { throw SyncError.accountChanged }
         // 全部处理成功才推进令牌;中途失败则下一轮从同一位置重拉(服务端按批次编号去重,不会重复写入)
         if let token = changes.token { try cloud.saveToken(token) }
         return worked
@@ -455,4 +472,5 @@ final class AccountChangeFlag: @unchecked Sendable {
     private var value = false
     func set() { lock.lock(); value = true; lock.unlock() }
     func take() -> Bool { lock.lock(); defer { lock.unlock() }; let current = value; value = false; return current }
+    func peek() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
 }

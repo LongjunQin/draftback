@@ -39,6 +39,8 @@ struct SyncedDocument: Identifiable, Codable, Equatable {
     var results: RoundResults? = nil
     /// 这台 Mac 能收的批次协议(v2.4):≥ 3 才给「稿子回来后接着批」和「定稿」;旧 Mac 没有这个字段
     var macProtocol: Int? = nil
+    /// 云端记录已被删(Mac 的云端清理:定稿或作废满 30 天):手机上的副本留着,只读,用户自己从列表移除
+    var cloudRemoved: Bool? = nil
     /// 终态(稿子回来、通过、恢复、定稿、作废):Mac 支持时,手机上划词就开始下一轮
     var isTerminal: Bool { ["completed", "restored", "finalized", "cancelled"].contains(phoneState) }
     var supportsIntents: Bool { (macProtocol ?? 0) >= 3 }
@@ -121,20 +123,39 @@ final class CloudSyncEngine: ObservableObject {
     private let container = CKContainer(identifier: CloudSchema.containerID)
     private var database: CKDatabase { container.privateCloudDatabase }
     private let zoneID = CKRecordZone.ID(zoneName: CloudSchema.zoneName, ownerName: CKCurrentUserDefaultName)
-    private let root: URL       // …/Draftback/synced
-    private let stateDir: URL   // …/Draftback/sync
     private let dataDirectory: URL
     private let fileManager = FileManager.default
-    /// 当前 iCloud 账号(用户记录名的指纹,跨端规则第 9 节)。换账号时整份本地镜像与待上传队列收起来,
-    /// 放出新账号的那一份;原账号登回来再换回去。系统通知账号变了、或账号暂时不可用时作废重查
+    /// 跨端规则第 9 节:每个 iCloud 账号一个目录 accounts/<账号指纹>/,里面是这个账号的稿件镜像(synced/)、同步状态(sync/:
+    /// 变更令牌、待上传批次、回执)、这些稿件的批注(annotations/)与定稿请求(finalize.json)。换账号只换指针(sync-account),
+    /// 不搬目录;中途退出也不丢。还不知道账号(升级上来第一次、从没联网)时用老位置,也就是数据目录本身
+    private(set) var accountBase: URL
+    private var root: URL { accountBase.appendingPathComponent("synced", isDirectory: true) }
+    private var stateDir: URL { accountBase.appendingPathComponent("sync", isDirectory: true) }
     private var accountKey: String?
     private var accountMarker: URL { dataDirectory.appendingPathComponent("sync-account") }
+    /// 账号代次:系统通知账号变了就加一;正在跑的同步每次上传、应用下载前都核对,变了就停(旧账号的东西不进新账号)
+    private var accountGeneration = 0
+    private var refreshAgain = false
 
     init(dataDirectory: URL) {
         self.dataDirectory = dataDirectory
-        root = dataDirectory.appendingPathComponent("synced", isDirectory: true)
-        stateDir = dataDirectory.appendingPathComponent("sync", isDirectory: true)
-        // 云端容器换了(改名):本地镜像、变更令牌、回执全部作废,重新从新容器拉;没上传的批次保留,会投到新容器
+        let marker = (try? String(contentsOf: dataDirectory.appendingPathComponent("sync-account"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        accountBase = marker.flatMap { $0.isEmpty ? nil : dataDirectory.appendingPathComponent("accounts/\($0)", isDirectory: true) } ?? dataDirectory
+        prepareBase()
+        documents = loadIndex()
+        pendingUploads = outboxFiles().count
+        NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.accountGeneration += 1
+                self.accountKey = nil
+                if self.syncing { self.refreshAgain = true } else { await self.refresh() }
+            }
+        }
+    }
+
+    /// 当前账号目录的准备:云端容器换了(改名)就把这个目录里的镜像、变更令牌、回执作废,重新从新容器拉;没上传的批次保留
+    private func prepareBase() {
         let marker = stateDir.appendingPathComponent("container")
         let previous = (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
         if previous != CloudSchema.containerID {
@@ -147,14 +168,6 @@ final class CloudSyncEngine: ObservableObject {
         }
         for dir in [root, stateDir, stateDir.appendingPathComponent("outbox"), stateDir.appendingPathComponent("receipts")] {
             try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        documents = loadIndex()
-        pendingUploads = outboxFiles().count
-        NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in
-                self?.accountKey = nil
-                await self?.refresh()
-            }
         }
     }
 
@@ -248,42 +261,65 @@ final class CloudSyncEngine: ObservableObject {
 
     // MARK: 刷新(启动、回到前台、收到静默推送时调用)
 
-    /// 核对当前账号;和上次记下的不同就换镜像。查不到(离线)就抛错:这一轮不上传、不拉取,免得投进别的账号
+    /// 核对当前账号,切到它的目录。查不到(离线)、或查的时候账号又变了,就抛错:这一轮不上传、不拉取,免得投进别的账号
     private func ensureAccount() async throws {
         if accountKey != nil { return }
+        let generation = accountGeneration
         let key = String(Hashing.sha256(try await container.userRecordID().recordName).prefix(16))
-        let previous = (try? String(contentsOf: accountMarker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let previous, !previous.isEmpty, previous != key { switchAccount(from: previous, to: key) }
-        if previous != key { try? key.write(to: accountMarker, atomically: true, encoding: .utf8) }
+        guard generation == accountGeneration else { throw CancellationError() }
+        try useAccount(key)
         accountKey = key
     }
 
-    func switchAccount(from old: String, to new: String) {
-        let shelf = dataDirectory.appendingPathComponent("accounts", isDirectory: true)
-        let oldShelf = shelf.appendingPathComponent(old, isDirectory: true)
-        let newShelf = shelf.appendingPathComponent(new, isDirectory: true)
-        try? fileManager.createDirectory(at: oldShelf, withIntermediateDirectories: true)
-        // 收起原账号的镜像(文档、正文、附件)与同步状态(变更令牌、待上传批次、回执)
-        for (dir, name) in [(root, "synced"), (stateDir, "sync")] {
-            let target = oldShelf.appendingPathComponent(name, isDirectory: true)
-            try? fileManager.removeItem(at: target)
-            try? fileManager.moveItem(at: dir, to: target)
+    enum AccountError: LocalizedError {
+        case adoptFailed(String)
+        var errorDescription: String? {
+            if case .adoptFailed(let what) = self { return "整理本机的同步数据没成功(\(what)),这一轮先不同步,稍后自动再试。" }
+            return nil
         }
-        // 放回新账号以前收起的那一份;没有就从空的开始
-        for (dir, name) in [(root, "synced"), (stateDir, "sync")] {
-            let stored = newShelf.appendingPathComponent(name, isDirectory: true)
-            if fileManager.fileExists(atPath: stored.path) { try? fileManager.moveItem(at: stored, to: dir) }
-        }
-        for dir in [root, stateDir, stateDir.appendingPathComponent("outbox"), stateDir.appendingPathComponent("receipts")] {
-            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        try? CloudSchema.containerID.write(to: stateDir.appendingPathComponent("container"), atomically: true, encoding: .utf8)
-        UserDefaults.standard.removeObject(forKey: subscribedKey) // 订阅跟着账号走:新账号要重新订阅
+    }
+
+    /// 切到某个账号的目录。第一次知道账号(还没有指针)时,先把老位置的数据搬进这个账号的目录:
+    /// 稿件镜像、同步状态、这些稿件的批注、定稿请求。只搬一次;目标已有就不动,绝不删;有一样搬不动就停下(不写指针,下次再来)
+    func useAccount(_ key: String) throws {
+        let target = dataDirectory.appendingPathComponent("accounts/\(key)", isDirectory: true)
+        let previous = (try? String(contentsOf: accountMarker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if previous == key && accountBase == target { return }
+        if previous == nil || previous?.isEmpty == true { try adoptLegacy(into: target) }
+        try? fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+        try key.write(to: accountMarker, atomically: true, encoding: .utf8)
+        accountBase = target
+        prepareBase()
+        UserDefaults.standard.removeObject(forKey: subscribedKey) // 订阅跟着账号走:换了账号要重新核对、订阅
         subscriptionVerified = false
         documents = loadIndex()
         pendingUploads = outboxFiles().count
         lastError = nil
         onAccountSwitched?()
+    }
+
+    private func adoptLegacy(into target: URL) throws {
+        try? fileManager.createDirectory(at: target.appendingPathComponent("annotations", isDirectory: true), withIntermediateDirectories: true)
+        let legacyDocIds = documents.map(\.docId)
+        var moves: [(URL, URL)] = [
+            (dataDirectory.appendingPathComponent("synced", isDirectory: true), target.appendingPathComponent("synced", isDirectory: true)),
+            (dataDirectory.appendingPathComponent("sync", isDirectory: true), target.appendingPathComponent("sync", isDirectory: true)),
+            (dataDirectory.appendingPathComponent("finalize.json"), target.appendingPathComponent("finalize.json")),
+        ]
+        // 这些稿件的批注:批注文件名是「synced:<文档标识>」的指纹(DocumentStore.annotationsFile)。
+        // 稿件清单老位置、新位置都看:上次整理到一半退出时,清单可能已经搬过去了
+        var docIds = Set(legacyDocIds)
+        if let data = try? Data(contentsOf: target.appendingPathComponent("synced/index.json")),
+           let moved = try? JSONDecoder().decode([SyncedDocument].self, from: data) { docIds.formUnion(moved.map(\.docId)) }
+        if let data = try? Data(contentsOf: dataDirectory.appendingPathComponent("finalize.json")),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { docIds.formUnion(object.keys) }
+        for docId in docIds {
+            let name = "\(Hashing.sha256("synced:\(docId)")).annotations.json"
+            moves.append((dataDirectory.appendingPathComponent("annotations/\(name)"), target.appendingPathComponent("annotations/\(name)")))
+        }
+        for (from, to) in moves where fileManager.fileExists(atPath: from.path) && !fileManager.fileExists(atPath: to.path) {
+            do { try fileManager.moveItem(at: from, to: to) } catch { throw AccountError.adoptFailed(from.lastPathComponent) }
+        }
     }
 
     func refresh() async {
@@ -292,7 +328,11 @@ final class CloudSyncEngine: ObservableObject {
         #endif
         if syncing { return }
         syncing = true
-        defer { syncing = false }
+        defer {
+            syncing = false
+            // 跑的时候账号变了:这一轮已经停下,按新账号再来一轮
+            if refreshAgain { refreshAgain = false; Task { await self.refresh() } }
+        }
         do {
             accountStatus = try await container.accountStatus()
             guard accountStatus == .available else {
@@ -301,9 +341,10 @@ final class CloudSyncEngine: ObservableObject {
                 return
             }
             try await ensureAccount()
+            let generation = accountGeneration
             await subscribeIfNeeded()
-            await retryOutbox()
-            try await pull()
+            await retryOutbox(generation: generation)
+            try await pull(generation: generation)
             lastError = nil
             lastPullAt = Date()
         } catch let error as CKError where error.code == .zoneNotFound || error.code == .userDeletedZone {
@@ -328,7 +369,7 @@ final class CloudSyncEngine: ObservableObject {
         }
     }
 
-    func pull() async throws {
+    func pull(generation: Int) async throws {
         var cursor = loadToken()
         var moreComing = true
         var touched = false
@@ -342,17 +383,23 @@ final class CloudSyncEngine: ObservableObject {
                 cursor = nil
                 continue
             }
+            // 拉的时候账号变了:这一页不应用、不推进令牌(它属于原账号)
+            guard generation == accountGeneration else { throw CancellationError() }
             for (_, result) in page.modificationResultsByID {
                 guard case .success(let modification) = result else { continue }
                 // 回执写不进手机就抛错:这一页不推进拉取进度,下次重拉(v2.4:手机应用回执可恢复)
                 if try apply(record: modification.record) { touched = true }
             }
             for deletion in page.deletions where deletion.recordType == CloudSchema.reviewDocument {
-                // Mac 的云端清理(定稿或作废满 30 天):手机上的副本留着,用户自己删;别的删除照旧移出
+                // 云端记录被删(Mac 的云端清理:定稿或作废满 30 天):手机上的副本留着、标「云端已清理」,用户自己从列表移除。
+                // 手机可能没收到终态(Mac 那边同步程序停过),所以不看状态,一律留着
                 let docId = deletion.recordID.recordName
-                if let local = documents.first(where: { $0.docId == docId }), ["finalized", "cancelled"].contains(local.phoneState) { continue }
-                remove(docId: docId)
-                touched = true
+                if let index = documents.firstIndex(where: { $0.docId == docId }), documents[index].cloudRemoved != true {
+                    var next = documents
+                    next[index].cloudRemoved = true
+                    documents = next
+                    touched = true
+                }
             }
             saveToken(page.changeToken)
             cursor = page.changeToken
@@ -467,21 +514,18 @@ final class CloudSyncEngine: ObservableObject {
         return false
     }
 
-    private func remove(docId: String) {
-        documents.removeAll { $0.docId == docId }
-        try? fileManager.removeItem(at: directory(for: docId))
-    }
-
     // MARK: 提交批次:AnnotationBatch(失败进待上传队列)
 
     /// 返回 true 表示已上传;false 表示暂存在待上传队列,联网后自动重试
     func submit(batch: AnnotationBatch) async -> Bool {
         guard let data = try? batch.asJSONData() else { return false }
+        let base = accountBase
         let queued = stateDir.appendingPathComponent("outbox/\(batch.batchId).json")
         try? data.write(to: queued, options: .atomic)
         pendingUploads = outboxFiles().count
-        // 先核对账号:换了账号(或查不到)就留在队列里,不投进别的账号;核对时会把这批随原账号一起收起来
-        guard (try? await ensureAccount()) != nil, fileManager.fileExists(atPath: queued.path) else { return false }
+        // 先核对账号:换了账号(或查不到、或核对时又变了)就留在原账号的队列里,不投进别的账号
+        let generation = accountGeneration
+        guard (try? await ensureAccount()) != nil, accountBase == base, generation == accountGeneration else { return false }
         let uploaded = await upload(batchData: data)
         if uploaded {
             try? fileManager.removeItem(at: queued)
@@ -499,8 +543,9 @@ final class CloudSyncEngine: ObservableObject {
         (try? fileManager.contentsOfDirectory(at: stateDir.appendingPathComponent("outbox"), includingPropertiesForKeys: nil)) ?? []
     }
 
-    func retryOutbox() async {
+    func retryOutbox(generation: Int) async {
         for file in outboxFiles() {
+            guard generation == accountGeneration else { return } // 账号变了:剩下的属于原账号,不传
             guard let data = try? Data(contentsOf: file) else { continue }
             if await upload(batchData: data) { try? fileManager.removeItem(at: file) }
         }

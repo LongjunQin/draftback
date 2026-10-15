@@ -40,6 +40,10 @@ enum DraftStatus {
         let round = "第 \(doc.round) 轮"
         let when = TimeText.clock(doc.pushedAt, now: now)
         let stamp = when.isEmpty ? "" : " · \(when)"
+        // Mac 清掉了云端记录(定稿或作废满 30 天):只剩本机副本,放在已结束里
+        if doc.cloudRemoved == true {
+            return DraftRowState(group: .ended, tone: .idle, subtitle: "云端已清理 · 本机副本", spoken: "云端已清理,这是本机副本")
+        }
         switch doc.phoneState {
         case "reviewing":
             let openedThisRound = seen?.hasPrefix(doc.reviewId + "|") ?? false
@@ -153,6 +157,10 @@ struct ReaderStatus: Equatable {
 
     static func make(_ input: Inputs) -> ReaderStatus {
         guard let sync = input.sync else { return local(input) }
+        if sync.cloudRemoved == true {
+            return ReaderStatus(subtitle: "云端已清理", subtitleTone: .idle, statusLine: "这是本机留着的副本", statusDetail: "要再改,在 Mac 上打开这篇",
+                                canAnnotate: false, blockedReason: "这篇的云端记录已经清理(定稿或作废满 30 天),手机上只能看。要再改,在 Mac 上打开。")
+        }
         var status = synced(sync, input)
         if input.newerVersionAvailable {
             let round = input.latestRound.map { "第 \($0) 轮" } ?? ""

@@ -163,8 +163,10 @@ enum SyncError: Error, CustomStringConvertible {
     case cloud(String)
     case payload(String)
     case superseded
+    case accountChanged
     var description: String {
         switch self {
+        case .accountChanged: return "iCloud 账号刚换了,这一轮停下,下一轮按新账号重来"
         case .cloud(let message): return message
         case .payload(let message): return message
         case .superseded: return "云端已有更新的发布,本次作废"

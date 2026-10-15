@@ -520,7 +520,8 @@
     if (choice !== 'accept') { rememberRelinkDeclined(candidate, newPath); return false; }
     try {
       const result = await requestJson('/api/app/document/relink', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: candidate.oldPath, to: newPath }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: candidate.oldPath, to: newPath, expectedDocId: candidate.docId, expectedHash: candidate.hash }),
       });
       const reopened = result.document || {};
       const session = reopened.activeReview && reopened.activeReview.id ? reopened.activeReview : (reopened.latestReview && reopened.latestReview.id ? reopened.latestReview : null);

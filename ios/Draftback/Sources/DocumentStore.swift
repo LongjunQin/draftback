@@ -31,6 +31,7 @@ final class OpenedDocument: ObservableObject, Identifiable {
     /// 这一轮能不能批注:状态允许,且正文字节就是这一轮的
     var annotationAllowed: Bool {
         guard let sync else { return true }
+        if sync.cloudRemoved == true { return false } // 云端记录已清理:只读副本
         let ownRound = sync.contentHash == hash && contentReviewId == sync.reviewId
         if sync.canAnnotate { return ownRound }
         // v2.4 第 6.9 条:稿子回来后(终态),Mac 支持时手机上接着批,写的就是「为下一轮」的批注
@@ -181,10 +182,14 @@ final class DocumentStore: ObservableObject {
         loadRecents()
         refreshLocalFiles()
         cloud.onReceipt = { [weak self] receipt in self?.apply(receipt: receipt) }
-        // 换了 iCloud 账号:列表换成那个账号的;正开着的原账号稿件关掉(它的批注、待上传都随原账号收着)
+        // 换了 iCloud 账号(或第一次知道账号、把老位置的数据整理进账号目录):列表、批注、定稿请求都换成那个账号的;
+        // 正开着的原账号稿件关掉;那个账号没处理完的回执与出站事务接着做
         cloud.onAccountSwitched = { [weak self] in
-            guard let self, let docId = self.current?.sync?.docId else { return }
-            if !self.cloud.documents.contains(where: { $0.docId == docId }) { self.current = nil }
+            guard let self else { return }
+            if let docId = self.current?.sync?.docId, !self.cloud.documents.contains(where: { $0.docId == docId }) { self.current = nil }
+            self.loadFinalizeRequests()
+            self.reapplyPendingReceipts()
+            self.recoverOutbound()
         }
         cloud.$documents.receive(on: RunLoop.main).sink { [weak self] docs in self?.syncedDocumentsChanged(docs) }.store(in: &cancellables)
         cloud.$lastError.receive(on: RunLoop.main).sink { [weak self] error in self?.syncError = error }.store(in: &cancellables)
@@ -372,6 +377,12 @@ final class DocumentStore: ObservableObject {
         try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
+    /// Mac 推来的稿件的批注跟着 iCloud 账号放(跨端规则第 9 节):accounts/<账号>/annotations/;本机文件的批注照旧放在 annotations/
+    private var syncedAnnotationsDirectory: URL {
+        let url = cloud.accountBase.appendingPathComponent("annotations", isDirectory: true)
+        try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
     private var recentsFile: URL { dataDirectory.appendingPathComponent("recent.json") }
 
     /// 文档的稳定键。iOS 更新或重装 App 时会换沙盒路径,所以 App 自己的文件夹(Documents)
@@ -388,7 +399,7 @@ final class DocumentStore: ObservableObject {
 
     /// 批注文件按"文档稳定键的 SHA-256"命名,与文档内容版本无关;每条批注自带它所依据的版本指纹。
     private func annotationsFile(forKey key: String) -> URL {
-        annotationsDirectory.appendingPathComponent("\(Hashing.sha256(key)).annotations.json")
+        (key.hasPrefix("synced:") ? syncedAnnotationsDirectory : annotationsDirectory).appendingPathComponent("\(Hashing.sha256(key)).annotations.json")
     }
 
     // MARK: App 文件夹
@@ -482,13 +493,15 @@ final class DocumentStore: ObservableObject {
     private static func collectAssets(markdown: String, around url: URL) -> [String: String] {
         var assets: [String: String] = [:]
         // 行内图片 `![](pic.png)` 与引用式定义 `[ref]: pic.png`(引用式图片渲染出来也是 <img src="pic.png">)
-        let patterns = [#"!\[[^\]]*\]\(<?([^)\s>]+)"#, #"(?m)^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)"#]
+        // 地址可以写在尖括号里(允许空格):第一组是尖括号里的,第二组是普通写法
+        let patterns = [#"!\[[^\]]*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))"#, #"(?m)^\s{0,3}\[[^\]]+\]:\s*(?:<([^>\n]+)>|([^\s<>]+))"#]
         let regexes = patterns.compactMap { try? NSRegularExpression(pattern: $0) }
         let base = url.deletingLastPathComponent()
         let text = markdown as NSString
         let matches = regexes.flatMap { $0.matches(in: markdown, range: NSRange(location: 0, length: text.length)) }
         for match in matches {
-            let rawPath = text.substring(with: match.range(at: 1))
+            let group = match.range(at: 1).location != NSNotFound ? 1 : 2
+            let rawPath = text.substring(with: match.range(at: group))
             if rawPath.hasPrefix("http") || rawPath.hasPrefix("data:") { continue }
             let key = rawPath.removingPercentEncoding ?? rawPath
             if assets[key] != nil { continue }
@@ -640,8 +653,9 @@ final class DocumentStore: ObservableObject {
     }
     /// 文档标识 → 在途或被拒的定稿请求;回执接受后清掉
     @Published private(set) var finalizeRequests: [String: FinalizeRequest] = [:]
-    private var finalizeFile: URL { dataDirectory.appendingPathComponent("finalize.json") }
+    private var finalizeFile: URL { cloud.accountBase.appendingPathComponent("finalize.json") } // 跟着 iCloud 账号放
     private func loadFinalizeRequests() {
+        finalizeRequests = [:]
         guard let data = try? Data(contentsOf: finalizeFile),
               let items = try? JSONDecoder().decode([String: FinalizeRequest].self, from: data) else { return }
         finalizeRequests = items

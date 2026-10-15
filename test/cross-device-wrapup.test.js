@@ -175,7 +175,7 @@ test('受控重关联:挪过位置的已知文档打开时给出提示;接上后
   fs.renameSync(doc, moved);
   const opened = await documents.readDocument(moved, f.options);
   assert.equal(opened.docId, null);
-  assert.deepEqual(opened.relinkCandidate, { docId: review.docId, oldPath: doc, file: '挪动.md', round: 1 });
+  assert.deepEqual(opened.relinkCandidate, { docId: review.docId, oldPath: doc, file: '挪动.md', round: 1, hash: sha(fs.readFileSync(moved)) });
   const result = await documents.relinkDocument(doc, moved, f.options);
   assert.equal(result.docId, review.docId);
   const again = await documents.readDocument(moved, f.options);
@@ -205,4 +205,96 @@ test('恢复到某一轮:我自己改之后,按「最新一轮」(我自己改�
     expectedLatestReviewId: manualDone.id, clientRequestId: 'req-after-manual' }, f.options);
   assert.ok(result, '按我自己改那条核对,恢复照常进行');
   assert.equal(fs.readFileSync(doc, 'utf8'), '# 方案\n\n原来的正文。\n', '回到第 1 轮改稿前');
+});
+
+test('复核修补:账号记在文档身份上——A 下开的新一轮还没推就换到 B,也不进 B 的推送队列;账号又不明时一篇都不推', async (t) => {
+  const f = setup(t);
+  await sync.writeHelperState({ account: 'acctA' }, f.options);
+  const { doc, review } = await finishedDoc(f, '新一轮.md');
+  await sync.markPushed(review.id, {}, f.options);
+  const second = (await store.openReview(doc, f.options)).review; // 还没推
+  assert.ok((await sync.listOutbox(f.options)).some((item) => item.reviewId === second.id));
+  await sync.writeHelperState({ account: 'acctB' }, f.options);
+  assert.ok(!(await sync.listOutbox(f.options)).some((item) => item.reviewId === second.id), '新一轮跟着文档归 A,不推进 B');
+  // 新文档在 B 下建立:身份上直接记 B
+  const { review: fresh } = await finishedDoc(f, 'B 的新文档.md');
+  assert.equal(require('../lib/version-store').getDocument(fresh.docId, f.options).account, 'acctB');
+  // 账号又不明(iCloud 暂时不可用):一篇都不推
+  await sync.writeHelperState({ accountStatus: 'temporarilyUnavailable' }, f.options);
+  assert.deepEqual(await sync.listOutbox(f.options), []);
+});
+
+test('复核修补:快照恢复后的重新发布被云端更高的旧发布挡住,仍要在更高序号上再发,不算推过', async (t) => {
+  const f = setup(t);
+  const snapshot = require('../lib/snapshot');
+  const { review } = await finishedDoc(f, '高水位.md');
+  await sync.markPushed(review.id, {}, f.options);
+  const snap = await snapshot.createSnapshot({ ...f.options, reason: 'test' });
+  await snapshot.restoreSnapshot({ ...f.options, id: snap.id, confirm: true });
+  let current = await store.getReviewById(review.id, f.options);
+  assert.equal(current.sync.republishRequired, true);
+  assert.equal(sync.needsPush(current, f.options), true);
+  await sync.markPushSuperseded(review.id, 10, sync.pushSignature(current, f.options), f.options);
+  current = await store.getReviewById(review.id, f.options);
+  assert.equal(sync.needsPush(current, f.options), true, '被旧发布挡住:还要再推');
+  assert.equal(current.sync.revision, undefined, '序号作废,下次在抬高的水位上重新分配');
+  assert.ok(require('../lib/version-store').getDocument(review.docId, f.options).nextRevision > 10);
+  await sync.markPushed(review.id, {}, f.options);
+  current = await store.getReviewById(review.id, f.options);
+  assert.equal(current.sync.republishRequired, undefined, '推成功后清掉标记');
+  assert.equal(sync.needsPush(current, f.options), false);
+});
+
+test('复核修补:快照里的旧路径已被现在另一篇占着时,恢复后不出现两篇占同一路径', async (t) => {
+  const f = setup(t);
+  const snapshot = require('../lib/snapshot');
+  const documents = require('../lib/documents');
+  const versionStore = require('../lib/version-store');
+  const { doc, review } = await finishedDoc(f, '原位.md');
+  const snap = await snapshot.createSnapshot({ ...f.options, reason: 'test' });
+  const moved = path.join(f.docDir, '挪走.md');
+  fs.renameSync(doc, moved);
+  await documents.relinkDocument(doc, moved, f.options);
+  fs.writeFileSync(doc, '# 原位上的新文档\n');
+  const { review: other } = await store.openReview(doc, f.options);
+  await snapshot.restoreSnapshot({ ...f.options, id: snap.id, confirm: true });
+  const index = versionStore.readIndex(f.options).documents;
+  assert.equal(index[review.docId].currentPath, moved, '挪走的那篇路径以现在为准');
+  assert.equal(index[other.docId].currentPath, doc);
+  const paths = Object.values(index).map((item) => item.currentPath).filter(Boolean);
+  assert.equal(new Set(paths).size, paths.length, '路径不重复');
+});
+
+test('复核修补:重关联只认最后一版——挪走前的旧原稿副本不提示;提示后文件又改过,接上时拒绝', async (t) => {
+  const f = setup(t);
+  const documents = require('../lib/documents');
+  const { doc, review } = await finishedDoc(f, '旧副本.md'); // 原稿「原来的正文」,完成稿「改完的正文」
+  const elsewhere = path.join(f.docDir, '别处');
+  fs.mkdirSync(elsewhere);
+  fs.renameSync(doc, path.join(elsewhere, '旧副本.md'));
+  const oldCopy = path.join(f.docDir, '旧原稿副本.md');
+  fs.writeFileSync(oldCopy, '# 方案\n\n原来的正文。\n');
+  assert.equal((await documents.readDocument(oldCopy, f.options)).relinkCandidate, null, '旧原稿不算最后一版');
+  const moved = path.join(elsewhere, '旧副本.md');
+  const offered = (await documents.readDocument(moved, f.options)).relinkCandidate;
+  assert.equal(offered.docId, review.docId);
+  fs.appendFileSync(moved, '提示之后又改了。\n');
+  await assert.rejects(() => documents.relinkDocument(doc, moved, { ...f.options, expectedDocId: offered.docId, expectedHash: offered.hash }), (error) => error.code === 'RELINK_STALE');
+});
+
+test('复核修补:云端清理带上推过的全部附件(包括后来不再引用的);尖括号里带空格的图片路径照样打包', async (t) => {
+  const f = setup(t);
+  await sync.writeHelperState({ account: 'acctA' }, f.options);
+  const { review } = await finishedDoc(f, '附件清理.md');
+  await sync.markPushed(review.id, { attachments: ['att_x_old'] }, f.options);
+  await sync.markPushed(review.id, { attachments: ['att_x_new'] }, f.options);
+  await store.finalizeReview(review.id, f.options);
+  const due = await sync.listCloudCleanup({ ...f.options, now: Date.now() + 31 * 86400000 });
+  assert.deepEqual(due[0].attachments.sort(), ['att_x_new', 'att_x_old']);
+  const doc = path.join(f.docDir, '空格.md');
+  fs.writeFileSync(path.join(f.docDir, 'image name.png'), Buffer.from([1, 2, 3]));
+  const text = '![a][pic]\n\n![b](<image name.png>)\n\n[pic]: <image name.png>\n';
+  fs.writeFileSync(doc, text);
+  const items = sync.collectAttachments(doc, text);
+  assert.deepEqual(items.map((item) => [item.relPath, item.included]), [['image name.png', true]]);
 });

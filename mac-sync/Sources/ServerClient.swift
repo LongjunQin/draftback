@@ -89,8 +89,9 @@ struct ServerClient {
     func attachment(reviewId: String, relPath: String) async throws -> Data {
         try await getData(rawPath: "/api/app/file?r=\(reviewId.urlQueryEncoded)&path=\(relPath.urlQueryEncoded)")
     }
-    func markPushed(reviewId: String, signature: String, contentHash: String) async throws {
-        try await postJSON("/api/app/sync/pushed", ["reviewId": reviewId, "signature": signature, "contentHash": contentHash])
+    func markPushed(reviewId: String, signature: String, contentHash: String, attachments: [String] = []) async throws {
+        // attachments:这次推上云端的附件记录名,服务累计下来,云端清理时连不再引用的旧附件一起删
+        try await postJSON("/api/app/sync/pushed", ["reviewId": reviewId, "signature": signature, "contentHash": contentHash, "attachments": attachments])
     }
     func markPushError(reviewId: String, error: String) async throws {
         try await postJSON("/api/app/sync/error", ["reviewId": reviewId, "error": error])
