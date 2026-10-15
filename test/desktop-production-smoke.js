@@ -652,6 +652,11 @@ async function main() {
     })()`));
     // 第二批布局(UI 方案 3.2、3.6):一条工具栏;左栏通顶,红绿灯在左栏顶上;窗口里不写品牌名
     const titlebarSafeArea = await chrome.cdp.evaluate(`(() => {
+      // macOS 红绿灯约占左上角 x 0~80、y 0~40:实际可见的控件不得落进去(看真实边界,不只看外层留白)
+      const inTrafficZone = Array.from(document.querySelectorAll('.sidebar-top button, #documentToolbar button, #documentToolbar [role="status"]'))
+        .filter((node) => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden')
+        .map((node) => node.getBoundingClientRect())
+        .filter((box) => box.width && box.height && box.left < 80 && box.top < 40).length;
       const top = document.querySelector('.sidebar-top');
       const toolbar = document.querySelector('#documentToolbar');
       const left = document.querySelector('#leftSidebar').getBoundingClientRect();
@@ -664,8 +669,10 @@ async function main() {
         toolbarHeight: toolbar.getBoundingClientRect().height,
         brandName: Boolean(document.querySelector('.brand-name')),
         interactiveControls: toolbar.querySelectorAll('button').length,
+        inTrafficZone,
       };
     })()`);
+    assert.equal(titlebarSafeArea.inTrafficZone, 0, '展开左栏时没有控件落进红绿灯区域');
     assert.equal(titlebarSafeArea.sidebarTopDraggable, true, '左栏顶上(红绿灯那一条)必须是可拖动区');
     assert.ok(titlebarSafeArea.trafficSafeLeft >= 80, `左栏顶上的按钮必须避开 macOS 三个窗口按钮:${titlebarSafeArea.trafficSafeLeft}`);
     assert.equal(titlebarSafeArea.toolbarDraggable, true, '工具栏背景必须是 Electron 可拖动区');
@@ -869,13 +876,20 @@ async function main() {
       const toolbar = document.querySelector('#documentToolbar');
       const gap = pinBox.left - content.right;
       const vertical = Math.abs((pinBox.top + pinBox.height / 2) - (startBox.top + startBox.height / 2));
+      // macOS 红绿灯约占左上角 x 0~80、y 0~40:实际可见的控件不得落进去(看真实边界,不只看外层留白)
+      const inTrafficZone = Array.from(document.querySelectorAll('.sidebar-top button, #documentToolbar button, #documentToolbar [role="status"]'))
+        .filter((node) => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden')
+        .map((node) => node.getBoundingClientRect())
+        .filter((box) => box.width && box.height && box.left < 80 && box.top < 40).length;
       return gap >= 4 && gap <= 30 && vertical < 22 ? {
+        inTrafficZone,
         sidebarWidth: document.querySelector('#leftSidebar').getBoundingClientRect().width,
         toolbarPadding: parseFloat(getComputedStyle(toolbar).paddingLeft),
         revealVisible: getComputedStyle(document.querySelector('#toggleLeftTop')).display !== 'none',
       } : null;
     })()`));
     assert.equal(collapsed.sidebarWidth, 0, '左栏可以完全收起');
+    assert.equal(collapsed.inTrafficZone, 0, '收起左栏后也没有控件落进红绿灯区域');
     assert.ok(collapsed.toolbarPadding >= 80, '收起左栏后工具栏仍避开 macOS 窗口按钮');
     assert.equal(collapsed.revealVisible, true, '收起后工具栏上出现「显示稿件栏」');
     await chrome.cdp.click('#toggleLeftTop');

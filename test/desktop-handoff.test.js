@@ -53,6 +53,7 @@ test('状态表:稿子在谁手里只有这几种,主按钮随之变化', () => 
   assert.equal(back.primary.label, '通过 · 定稿');
   assert.equal(back.primary.action, 'finalize');
   assert.equal(Handoff.describe({ review: { status: 'complete', outcome: 'finalized' } }).text, '已定稿');
+  assert.equal(Handoff.describe({ review: { status: 'complete' }, editedSinceReturn: true }).text, '稿子回来了 · 已在最新版上编辑过', '回稿后又改过要说清楚');
   assert.equal(Handoff.describe({ review: { status: 'complete', outcome: 'finalized', finalizedAt: '2026-10-14T08:00:00Z' } }).text, '已定稿 · 10 月 14 日');
   assert.equal(Handoff.describe({ review: { status: 'complete', outcome: 'approved' } }).primary.action, 'finalize');
   assert.match(Handoff.describe({ review: { status: 'conflict' } }).text, /外面被改/);

@@ -109,6 +109,10 @@
       view = { status: 'unknown', text: `未知状态:${review.status || 'unknown'}`, detail: '无法识别当前状态。', icon: 'ph-question', primary: HIDDEN, secondary: HIDDEN };
     }
     let text = view.text;
+    if (input.editedSinceReturn && review.status === 'complete' && review.outcome !== 'finalized') {
+      text = text.replace(' · 已是最新版', '') + ' · 已在最新版上编辑过';
+      view.detail = `${view.detail} 回稿卡和对比说的是这一轮的完成稿;之后正文又改过。`;
+    }
     if (input.remotePending) text += ' · 远程更新待同步';
     if (input.readOnly) text += ` · ${String(input.encoding || '非 UTF-8').toUpperCase()} 只读`;
     if (input.mode === 'edit' && !input.plain) view.secondary = HIDDEN;

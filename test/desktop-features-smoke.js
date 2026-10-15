@@ -126,6 +126,7 @@ async function main() {
     await key(cdp, '/', 'Slash', 191, META);
     await sleep(200);
     assert.equal(await cdp.evaluate(`document.querySelector('#editorPane').hidden`), true, '只读文件 ⌘/ 不进编辑');
+    assert.match(await cdp.evaluate(`document.querySelector('#stateCard').hidden ? '' : document.querySelector('#stateCard').textContent`), /GBK 编码 · 只读.*另存为 UTF-8/, '批注栏顶部说明只读与怎么办');
 
     // 2. ⌘/ 切换到编辑;粘贴图片 → 存到 images/,编辑器里显示;⌘S 写回相对路径
     await openRecent(cdp, '普通稿.md');
@@ -218,6 +219,12 @@ async function main() {
     await cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast-action')).find((b) => b.textContent === '撤销').click()`);
     await waitUntil('撤销后放回', () => store.readAnnotations(reviewed).annotations[0].id === 'n-first');
     await waitUntil('界面也放回', () => cdp.evaluate(`!!document.querySelector('#openNotesList .note-card[data-note-id="n-first"]')`));
+    // 在「历史」页时按 ⌥⌘↓ 定位本轮批注:右栏切回「本轮」,卡片看得见(Codex 审查第二步第 7 条)
+    await cdp.evaluate(`document.querySelector('#notesHistoryTab').click()`);
+    await waitUntil('切到历史', () => cdp.evaluate(`!document.querySelector('#historySection').hidden`));
+    await key(cdp, 'ArrowDown', 'ArrowDown', 40, ALT | META);
+    await waitUntil('定位时切回本轮', () => cdp.evaluate(`document.querySelector('#historySection').hidden && !document.querySelector('#currentPane').hidden && !!document.querySelector('#openNotesList .note-card.focused')`));
+    assert.equal(await cdp.evaluate(`document.querySelector('#openNotesLabel').textContent`), '未交');
 
     // 7. 审阅中点「编辑」:原文已锁定,选「另存为副本」→ 新文件、原稿与批注不动
     const copyPath = path.join(docs, '审阅稿 副本.md');
@@ -238,6 +245,7 @@ async function main() {
     await waitUntil('切走', async () => (await activeTitle(cdp)).includes('普通稿.md'));
     await cdp.evaluate(`Array.from(document.querySelectorAll('#tabList .tab')).find((t) => t.textContent.includes('冲突稿.md')).click()`);
     await waitUntil('冲突状态与「处理…」', () => cdp.evaluate(`document.querySelector('#reviewStateText').textContent.includes('外面被改') && document.querySelector('#primaryAction').textContent === '处理…'`));
+    assert.equal(await cdp.evaluate(`!document.querySelector('#stateCard').hidden && document.querySelector('#stateCard').dataset.tone`), 'conflict', '批注栏顶部一张冲突说明卡');
     const forkPath = path.join(docs, '冲突稿 我的版本.md');
     await cdp.evaluate(`window.__db.copyPath = ${JSON.stringify(forkPath)}`);
     await cdp.evaluate(`document.querySelector('#primaryAction').click()`);

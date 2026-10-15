@@ -147,6 +147,7 @@
           </div>
           <div id="welcomeRecent" class="welcome-recent"></div>
         </div>
+        <div id="readerBanner" class="reader-banner" role="status" hidden></div>
         <div id="readerScroll" class="reader-scroll" hidden>
           <article id="documentContent" class="markdown-body"></article>
         </div>
@@ -203,6 +204,7 @@
       </div>
       <div id="notesContent" class="notes-content">
         <div id="currentPane" class="notes-pane">
+          <section id="stateCard" class="state-card" role="note" hidden></section>
           <section id="returnCard" class="return-card" aria-label="回稿卡" hidden></section>
           <button id="docNoteButton" class="doc-note-button" type="button" hidden>
             <i class="ph ph-note-pencil" aria-hidden="true"></i>写总体意见
@@ -210,7 +212,7 @@
           </button>
           <section id="openNotesSection">
             <div class="notes-section-heading">
-              <span>未交 · <span id="openNotesCount">0</span></span>
+              <span><span id="openNotesLabel">未交</span> · <span id="openNotesCount">0</span></span>
               <span class="notes-section-hint">交出前都能改、能删</span>
             </div>
             <div id="openNotesList" class="notes-list"></div>

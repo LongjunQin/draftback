@@ -75,7 +75,8 @@
         if (latest.outcome === 'approved') return { group: 'yours', dot: 'back', subtitle: `${r} · 已通过,没有批注`, unread: false, activity };
         if (latest.outcome === 'restored') return { group: 'yours', dot: 'back', subtitle: `${r} · 已恢复到改稿前`, unread: false, activity };
         if (latest.applyMode === 'manual') return { group: 'yours', dot: 'back', subtitle: `${r} · 我自己改完了`, unread: false, activity };
-        const counts = latest.applied || latest.wontfix ? ` · 采纳 ${latest.applied || 0} · 未采纳 ${latest.wontfix || 0}` : '';
+        const counts = Number.isInteger(latest.applied) && Number.isInteger(latest.wontfix) && (latest.applied || latest.wontfix)
+          ? ` · 采纳 ${latest.applied} · 未采纳 ${latest.wontfix}` : '';
         return { group: 'yours', dot: 'back', subtitle: `${r}回稿${counts}`, unread: Boolean(latest.unread), activity };
       }
       case 'cancelled':

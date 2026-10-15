@@ -1254,6 +1254,22 @@ button.review-state:hover { filter: brightness(.97); }
 .note-footer .note-actions { width: auto; margin: 0; }
 .return-card { margin: 4px 12px 8px; border-radius: 12px; }
 
+/* 正在看的那条批注:高光加深 */
+::highlight(draftback-focus) { background: var(--amber-focus); }
+/* AI 在改:正文上方一行 */
+.reader-banner { position: absolute; top: 12px; left: 50%; z-index: 5; transform: translateX(-50%); padding: 6px 14px; border: 1px solid var(--violet-line); border-radius: 999px; background: var(--violet-soft); color: var(--violet-text); font-size: 12px; box-shadow: var(--shadow-pop); white-space: nowrap; }
+/* 冲突与只读:批注栏顶部一张说明卡 */
+.state-card { margin: 4px 12px 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.state-card strong { display: block; color: var(--text-strong); font-size: 13px; }
+.state-card p { margin: 6px 0 10px; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.state-card[data-tone="conflict"] { border-color: var(--red-line); background: var(--red-soft); }
+.state-card[data-tone="conflict"] strong { color: var(--red-text); }
+.state-card[data-tone="readonly"] { background: var(--gray-soft); }
+.state-card[data-tone="readonly"] p { margin-bottom: 0; }
+
+/* 已交出的批注卡:锁定 */
+.note-handed { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px; background: var(--slate-soft); color: var(--slate-text); font-size: 10.5px; font-weight: 600; }
+
 /* 新版正文换进来时淡入 */
 .markdown-body.content-refresh { animation: draftback-fade-in .25s ease-out; }
 @keyframes draftback-fade-in { from { opacity: .35; } to { opacity: 1; } }
@@ -1365,3 +1381,9 @@ button.review-state:hover { filter: brightness(.97); }
 #annotationDialog.modal-backdrop { z-index: 140; }
 /* 编辑模式查找:命中落在代码块里时整块闪一下(代码块由 CodeMirror 画,看不到行内高亮) */
 .db-find-in-block { box-shadow: 0 0 0 2px var(--amber) !important; transition: box-shadow .2s; border-radius: 8px; }
+
+/* 层级(Codex 审查第二步第 8 条):窄窗口里浮出的批注栏是 60;查找条与各种小弹层都在它之上 */
+.find-bar { z-index: 75; }
+.popover-menu, .timeline-popover, .doc-info.popover-menu { z-index: 80; }
+/* 圆钉数字的对比度:琥珀底上用深色字(白字只有约 2.2:1) */
+.annotation-overlay .note-pin { color: #2b1a00; }

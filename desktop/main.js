@@ -343,31 +343,34 @@ function cliStatus() {
 async function installCli() {
   const script = cliLauncher();
   const dir = path.dirname(CLI_PATH);
-  // 先在同一目录写临时文件再改名替换:改名换掉的是目录项本身,旧的 mdreview 若是指向别处的符号链接,
-  // 不会顺着链接把别人的文件改写掉
+  const done = () => (CliInstall.verifyInstalled(fs, CLI_PATH, script)
+    ? { ok: true, ...cliStatus() }
+    : { ok: false, message: '装完核对时发现 /usr/local/bin/mdreview 不是这份脚本(可能是目录或被替换了),请检查后再试。' });
+  // 先在同一目录排他地写临时文件再改名替换:改名换掉的是目录项本身,旧的 mdreview 若是指向别处的符号链接,
+  // 不会顺着链接把别人的文件改写掉;目标若是真正的目录,改名会失败
   const staged = path.join(dir, `.mdreview-draftback-${process.pid}-${Date.now()}`);
   try {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(staged, script, { mode: 0o755, flag: 'wx' });
     fs.chmodSync(staged, 0o755);
     fs.renameSync(staged, CLI_PATH);
-    return { ok: true, ...cliStatus() };
+    return done();
   } catch (error) {
     try { fs.unlinkSync(staged); } catch {}
     if (!error || (error.code !== 'EACCES' && error.code !== 'EPERM')) return { ok: false, message: String(error && error.message || error) };
   }
-  // /usr/local/bin 要管理员权限:内容先写到只有本程序控制名字的临时位置,再请系统弹出授权框完成同样的「写临时文件 → 改名」
+  // /usr/local/bin 要管理员权限:内容先写到只有本程序控制的临时目录,再请系统弹出授权框完成同样的替换
   const tmpDir = fs.mkdtempSync(path.join('/tmp', 'draftback-cli-'));
   const tmp = path.join(tmpDir, 'mdreview');
   fs.writeFileSync(tmp, script, { mode: 0o755 });
-  const script_ = CliInstall.privilegedInstallCommand({ tmpFile: tmp, dir, staged: path.join(dir, `.mdreview-draftback-${process.pid}`), target: CLI_PATH });
+  const command = CliInstall.privilegedInstallCommand({ tmpFile: tmp, dir, target: CLI_PATH });
   try {
     const ok = await new Promise((resolve) => {
-      const child = spawn('/usr/bin/osascript', ['-e', script_], { stdio: 'ignore' });
+      const child = spawn('/usr/bin/osascript', ['-e', command], { stdio: 'ignore' });
       child.on('exit', (code) => resolve(code === 0));
       child.on('error', () => resolve(false));
     });
-    return ok ? { ok: true, ...cliStatus() } : { ok: false, message: '没有拿到管理员授权,命令没有装上。' };
+    return ok ? done() : { ok: false, message: '没有拿到管理员授权,或安装位置不对(见系统提示),命令没有装上。' };
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   }

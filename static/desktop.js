@@ -43,7 +43,7 @@
     tabStrip: $('#tabStrip'), docTitleButton: $('#docTitleButton'), docTitleText: $('#docTitleText'), docInfoPopover: $('#docInfoPopover'),
     compareToggleButton: $('#compareToggleButton'), toolbarMoreButton: $('#toolbarMoreButton'), toolbarMoreMenu: $('#toolbarMoreMenu'),
     syncFooter: $('#syncFooter'), syncFooterText: $('#syncFooterText'), syncFooterIcon: $('#syncFooterIcon'),
-    notesFooter: $('#notesFooter'), notesSectionHint: document.querySelector('.notes-section-hint'),
+    notesFooter: $('#notesFooter'), openNotesLabel: $('#openNotesLabel'), readerBanner: $('#readerBanner'), stateCard: $('#stateCard'), notesSectionHint: document.querySelector('.notes-section-hint'),
     notesCurrentTab: $('#notesCurrentTab'), notesHistoryTab: $('#notesHistoryTab'), currentPane: $('#currentPane'), openNotesSection: $('#openNotesSection'),
     quickOpen: $('#quickOpen'), quickOpenInput: $('#quickOpenInput'), quickOpenList: $('#quickOpenList'),
     settingsDialog: $('#settingsDialog'), settingsClose: $('#settingsClose'), appearanceSegment: $('#appearanceSegment'),
@@ -436,13 +436,18 @@
   // 回稿后看过就记一笔,左栏的未读蓝点消失
   function markSeenIfReturned(tab) {
     if (!tab || isPlain(tab) || tab.review.status !== 'complete' || tab.review.outcome || tab.review.applyMode === 'manual') return;
+    // 窗口在后台(最小化、切到别的程序)时稿子回来,不算看过:等用户真的看到再记
+    if (document.visibilityState !== 'visible' || !document.hasFocus() || tab.id !== state.activeId) return;
     const key = `${tab.id}:${tab.review.completedAt || ''}`;
-    if (state.seenMarked && state.seenMarked.has(key)) return;
-    (state.seenMarked = state.seenMarked || new Set()).add(key);
+    state.seenMarked = state.seenMarked || new Set();
+    state.seenPending = state.seenPending || new Set();
+    if (state.seenMarked.has(key) || state.seenPending.has(key)) return;
+    state.seenPending.add(key);
     const entry = state.recents.find((item) => item.latest && item.latest.id === tab.id && item.latest.unread);
     void requestJson(`/api/app/review/seen?r=${encodeURIComponent(tab.id)}`, { method: 'POST' })
-      .then(() => { if (entry) void refreshRecents(); })
-      .catch(() => {});
+      .then(() => { state.seenMarked.add(key); if (entry) void refreshRecents(); })
+      .catch(() => {})
+      .finally(() => state.seenPending.delete(key));
   }
 
   const Handoff = window.DraftbackHandoff;
@@ -1162,6 +1167,7 @@
     const open = typeof force === 'boolean' ? force : nodes.toolbarMoreMenu.hidden;
     nodes.toolbarMoreMenu.hidden = !open;
     nodes.toolbarMoreButton.setAttribute('aria-expanded', String(open));
+    if (open) { const first = nodes.toolbarMoreMenu.querySelector('button'); if (first) first.focus(); }
   }
   function installExportMenu() {
     nodes.toolbarMoreButton.addEventListener('click', (event) => { event.stopPropagation(); toggleToolbarMore(); });
@@ -1180,7 +1186,7 @@
       handleDesktopCommand(item.dataset.command);
     });
     document.addEventListener('click', (event) => { if (!nodes.exportMenu.hidden && !event.target.closest('#exportMenu, #exportMenuButton')) toggleExportMenu(false); });
-    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !nodes.exportMenu.hidden) { toggleExportMenu(false); nodes.exportMenuButton.focus(); } });
+    // Esc 由主键盘处理按层级关(最上层的弹层先关)
   }
 
   // ---------- 查找(阅读模式,正文内) ----------
@@ -1219,7 +1225,7 @@
   }
   function textNodesOf(root) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: (node) => (node.parentElement && node.parentElement.closest('script, style, .note-pin') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      acceptNode: (node) => (node.parentElement && node.parentElement.closest('script, style, .note-pin, .task-marker') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
     const nodes_ = [];
     for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes_.push(node);
@@ -1503,6 +1509,7 @@
       review, plain: isPlain(tab), mode: tab.mode, openCount: openAnnotations(tab).length,
       readOnly: isReadOnly(tab), encoding: tab.sourceMeta && tab.sourceMeta.encoding,
       remotePending: Boolean(tab.remotePending),
+      editedSinceReturn: Boolean(review.status === 'complete' && review.finalHash && tab.sourceHash && tab.sourceHash !== review.finalHash),
     });
     nodes.reviewState.dataset.status = view.status;
     nodes.reviewStateText.textContent = view.text;
@@ -2146,18 +2153,21 @@
     const descriptors = blockDescriptors(leaves);
     const ranges = [];
     const groups = new Map();
+    state.noteRanges = new Map();
     open.forEach((note) => {
       const resolved = Anchor.resolveAnchor(note, descriptors);
       if (!resolved.matched || !resolved.segments.length) return;
       let markerRange = null;
+      const own = [];
       resolved.segments.forEach((segment) => {
         const block = leaves[segment.blockIndex]; if (!block) return;
         const range = rangeForSegment(block, segment);
         if (range) {
-          ranges.push(range);
+          ranges.push(range); own.push(range);
           if (!markerRange) markerRange = range;
         }
       });
+      state.noteRanges.set(note.id, own);
       // Prefer the exact quote/offset range for every annotation that can be
       // resolved precisely, including legacy annotations upgraded at read
       // time.  Whole-block tinting is only a last-resort fallback for browsers
@@ -2174,6 +2184,7 @@
       groups.get(key).notes.push(note);
     });
     if (ranges.length && globalThis.Highlight && CSS.highlights) CSS.highlights.set('draftback-open', new Highlight(...ranges));
+    paintFocusedHighlight(tab);
     groups.forEach(({ block, range, notes }) => {
       if (!block) return;
       const button = document.createElement('button'); button.type = 'button'; button.className = 'note-pin';
@@ -2200,7 +2211,28 @@
     if (review.status === 'complete' && review.outcome === 'finalized') return '这篇已定稿。再划词批注会开始新一轮。';
     return `要继续改:直接在正文划词批注,自动开始${next ? `第 ${next} 轮` : '下一轮'}。`;
   }
+  function renderStateNotice(tab) {
+    const status = tab ? tab.review.status : null;
+    const aiEditing = Boolean(tab && (status === 'applying' && tab.review.applyMode !== 'manual' || (status === 'ready_to_apply' && tab.review.agentState === 'claimed')));
+    nodes.readerBanner.hidden = !aiEditing || tab.mode !== 'read';
+    nodes.readerBanner.textContent = aiEditing ? 'AI 正在按批注修改。原文只读,改完会自动换成新版。' : '';
+    nodes.stateCard.replaceChildren();
+    let card = null;
+    if (tab && status === 'conflict') {
+      card = { tone: 'conflict', title: '文件在外面被改了', text: '审阅期间有别的程序改了这个文件,回稿已停止写入。选一条路:以磁盘上的版本重新开始,或把锁定时的版本另存一份。', action: ['处理…', () => resolveConflict(tab)] };
+    } else if (tab && isReadOnly(tab)) {
+      card = { tone: 'readonly', title: `${String(tab.sourceMeta.encoding || '非 UTF-8').toUpperCase()} 编码 · 只读`, text: '回稿按原样显示这个文件,不会改写它。要编辑,请先用其他工具另存为 UTF-8。' };
+    }
+    nodes.stateCard.hidden = !card;
+    if (!card) return;
+    nodes.stateCard.dataset.tone = card.tone;
+    const title = document.createElement('strong'); title.textContent = card.title;
+    const text = document.createElement('p'); text.textContent = card.text;
+    nodes.stateCard.append(title, text);
+    if (card.action) { const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary-button compact-button'; button.textContent = card.action[0]; button.addEventListener('click', () => { void card.action[1](); }); nodes.stateCard.appendChild(button); }
+  }
   function renderNotesPane(tab) {
+    renderStateNotice(tab);
     nodes.notesFooter.textContent = notesFooterText(tab);
     nodes.notesFooter.hidden = !nodes.notesFooter.textContent;
     if (nodes.notesSectionHint) nodes.notesSectionHint.hidden = !(tab && tab.review.status === 'reviewing');
@@ -2235,6 +2267,7 @@
         if (!grouped.rounds.length) nodes.historyNotesList.appendChild(emptyBlock('还没有历史。'));
         else grouped.rounds.forEach((round) => nodes.historyNotesList.appendChild(roundGroup(tab, round)));
       }
+      renderCompareToggle(tab);
       return;
     }
     void ensureVersions(tab);
@@ -2245,6 +2278,8 @@
     renderReturnCard(tab, card);
     nodes.notesTotal.textContent = String(organized.totalCount);
     nodes.openNotesCount.textContent = String(organized.open.count);
+    const status = tab.review.status;
+    nodes.openNotesLabel.textContent = status === 'reviewing' ? '未交' : status === 'applying' && tab.review.applyMode === 'manual' ? '待处理' : status === 'ready_to_apply' || status === 'applying' ? '已交出' : '本轮';
     // 总体意见(scope=document)固定置顶,组内仍保持最新在前。
     const openItems = organized.open.items.slice()
       .sort((left, right) => (isDocNote(right) ? 1 : 0) - (isDocNote(left) ? 1 : 0));
@@ -2478,16 +2513,18 @@
     return true;
   }
 
+  // 「这一轮可以对比吗」:工具栏开关、⇧⌘D、菜单都用它,三处出现与否一致
+  function currentCompareTarget(tab) {
+    if (!tab || isPlain(tab)) return null;
+    const card = History.returnCard({ review: tab.review, versions: tab.versions || [], annotations: tab.annotations });
+    return card.show && card.canCompare && card.version ? { versionId: card.version.versionId, round: card.version.round, kind: card.version.kind } : null;
+  }
   function toggleCompare() {
     if (Compare.isOpen()) { Compare.close(); return; }
     const tab = activeTab();
     if (!tab) return;
-    if (isPlain(tab) && !tab.review.docId) { toast('普通文档没有轮次,没有可对比的改动。'); return; }
-    const versions = tab.versions || [];
-    const card = History.returnCard({ review: tab.review, versions, annotations: tab.annotations });
-    let target = card.show && card.canCompare && card.version ? { versionId: card.version.versionId, round: card.version.round, kind: card.version.kind } : null;
-    if (!target) target = History.buildRounds({ review: tab.review, versions, annotations: tab.annotations }).rounds.find((round) => round.canCompare) || null;
-    if (!target) { toast('还没有可对比的轮次:稿子回来后才有原稿与完成稿。'); return; }
+    const target = currentCompareTarget(tab);
+    if (!target) { toast('这一轮没有可对比的改动。更早轮次的改动在右栏「历史」里点「显示改动」看。'); return; }
     void openCompareFor(tab, target);
   }
 
@@ -2599,6 +2636,10 @@
         actions.append(actionButton('修改', () => openAnnotationDialog({ note })), actionButton('删除', () => deleteNote(note), 'danger'));
       } else if (tab.review.status === 'applying' && tab.review.applyMode === 'manual') {
         actions.append(actionButton('不改', () => resolveNote(note, 'wontfix'), 'skip'), actionButton('标记已处理', () => resolveNote(note, 'applied'), 'resolve'));
+      } else if (tab.review.status === 'ready_to_apply' || tab.review.status === 'applying') {
+        // 已交出:卡片锁定,标一下(UI 方案 3.3)
+        const handed = document.createElement('span'); handed.className = 'note-handed'; handed.textContent = '已交出';
+        actions.appendChild(handed);
       }
       if (actions.childElementCount) footer.appendChild(actions);
     }
@@ -2611,9 +2652,17 @@
     button.addEventListener('click', (event) => { event.stopPropagation(); void handler(); }); return button;
   }
 
+  function paintFocusedHighlight(tab) {
+    if (!globalThis.Highlight || !CSS.highlights) return;
+    const ranges = tab && tab.focusedNoteId && state.noteRanges ? state.noteRanges.get(tab.focusedNoteId) : null;
+    if (ranges && ranges.length) CSS.highlights.set('draftback-focus', new Highlight(...ranges));
+    else CSS.highlights.delete('draftback-focus');
+  }
   function focusNote(noteId, options = {}) {
     const tab = activeTab(); if (!tab) return;
-    tab.focusedNoteId = noteId; toggleRight(false); renderNotes(tab);
+    const target = tab.annotations.find((item) => item.id === noteId);
+    if (target && effectiveStatus(target) === 'open') tab.historyOpen = false; // 本轮的批注卡在「本轮」页
+    tab.focusedNoteId = noteId; toggleRight(false); renderNotes(tab); paintFocusedHighlight(tab);
     const note = tab.annotations.find((item) => item.id === noteId); if (!note) return;
     if (tab.mode === 'edit') {
       const line = Math.max(1, Number(note.lineStart) || 1);
@@ -2635,7 +2684,7 @@
     requestAnimationFrame(() => {
       const card = nodes.right.querySelector(`[data-note-id="${CSS.escape(noteId)}"]`); if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
-    if (!options.scrollOnly) setTimeout(() => { tab.focusedNoteId = null; renderNotes(tab); }, 2600);
+    if (!options.scrollOnly) setTimeout(() => { tab.focusedNoteId = null; renderNotes(tab); paintFocusedHighlight(tab); }, 2600);
   }
 
   function orderedOpenNotes(tab) {
@@ -2860,6 +2909,7 @@
       }
       closeAnnotationDialog();
       window.getSelection()?.removeAllRanges(); state.cachedAnchor = null; nodes.annotate.hidden = true;
+      tab.historyOpen = false; // 新写的批注在「本轮」页
       if (tab.id === state.activeId) {
         renderMarkers(tab); renderNotes(tab); renderStatus(tab);
       }
@@ -3240,7 +3290,8 @@
   // ---------- 工具栏左边:文档名,点开看字数等(UI 方案 3.2) ----------
   function renderDocTitle(tab) {
     nodes.docTitleButton.hidden = !tab;
-    if (!tab) { toggleDocInfo(false); return; }
+    if (!tab || (state.docInfoTabId && state.docInfoTabId !== tab.id)) toggleDocInfo(false);
+    if (!tab) return;
     nodes.docTitleText.textContent = tab.review.title || tab.review.file || '文档';
     nodes.docTitleButton.title = tab.review.sourceFile || '';
   }
@@ -3256,9 +3307,10 @@
     const open = typeof force === 'boolean' ? force : nodes.docInfoPopover.hidden;
     nodes.docInfoPopover.hidden = !open;
     nodes.docTitleButton.setAttribute('aria-expanded', String(open));
-    if (!open) return;
+    if (!open) { state.docInfoTabId = null; return; }
     const tab = activeTab();
     if (!tab) { nodes.docInfoPopover.hidden = true; return; }
+    state.docInfoTabId = tab.id;
     const stats = docStats(tab.mode === 'edit' && tab.editorDraft != null ? tab.editorDraft : tab.source);
     const root = nodes.docInfoPopover;
     root.replaceChildren();
@@ -3275,9 +3327,10 @@
     root.appendChild(table);
     const actions = document.createElement('div'); actions.className = 'doc-info-actions';
     const reveal = document.createElement('button'); reveal.type = 'button'; reveal.className = 'secondary-button compact-button'; reveal.textContent = '在访达中显示';
-    reveal.addEventListener('click', () => { toggleDocInfo(false); revealActive(); });
+    reveal.addEventListener('click', () => { if (activeTab() !== tab) return; toggleDocInfo(false); revealActive(); });
     const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'secondary-button compact-button'; copy.textContent = '另存为副本…';
-    copy.addEventListener('click', () => { toggleDocInfo(false); void saveCopy(); });
+    copy.addEventListener('click', () => { if (activeTab() !== tab) return; toggleDocInfo(false); void saveCopy(tab); });
+    setTimeout(() => reveal.focus(), 20);
     actions.append(reveal, copy);
     root.appendChild(actions);
   }
@@ -3285,10 +3338,7 @@
   // 工具栏上的「对比视图」开关:只在有可对比的一轮时出现(情境层)
   function renderCompareToggle(tab) {
     if (!tab) { nodes.compareToggleButton.hidden = true; return; }
-    const versions = tab.versions || [];
-    const reviewTab = !isPlain(tab);
-    const card = reviewTab ? History.returnCard({ review: tab.review, versions, annotations: tab.annotations }) : { show: false };
-    const available = Compare.isOpen() || Boolean(card.show && card.canCompare);
+    const available = Compare.isOpen() || Boolean(currentCompareTarget(tab));
     nodes.compareToggleButton.hidden = !available || tab.mode !== 'read';
     nodes.compareToggleButton.classList.toggle('active', Compare.isOpen());
     nodes.compareToggleButton.setAttribute('aria-pressed', String(Compare.isOpen()));
@@ -3531,7 +3581,7 @@
       primary: nodes.primaryAction.hidden ? null : nodes.primaryAction.dataset.action || null,
       secondary: nodes.secondaryAction.hidden ? null : nodes.secondaryAction.dataset.action || null,
       returnCard: Boolean(card.show),
-      canCompare: Boolean((card.show && card.canCompare) || rounds.some((round) => round.canCompare)),
+      canCompare: Boolean(currentCompareTarget(tab)),
       compareOpen: Compare.isOpen(),
       canRestore: Boolean(tab && tab.mode === 'read' && !tab.dirty && !ACTIVE_REVIEW.has(tab.review.status) && rounds.some((round) => round.canRestore)),
       hasRounds: Boolean(tab && (reviewTab || tab.review.docId)),
@@ -3814,7 +3864,10 @@
         if (!nodes.annotationDialog.hidden) dismissAnnotationDialog();
         else if (!nodes.confirmDialog.hidden) { if (state.confirmFinish) state.confirmFinish(null); }
         else if (!nodes.quickOpen.hidden || !nodes.settingsDialog.hidden || !nodes.infoDialog.hidden) closePanels();
-        else if (!nodes.timelinePopover.hidden) toggleTimeline(false);
+        else if (!nodes.exportMenu.hidden) { toggleExportMenu(false); nodes.exportMenuButton.focus(); }
+        else if (!nodes.toolbarMoreMenu.hidden) { toggleToolbarMore(false); nodes.toolbarMoreButton.focus(); }
+        else if (!nodes.docInfoPopover.hidden) { toggleDocInfo(false); nodes.docTitleButton.focus(); }
+        else if (!nodes.timelinePopover.hidden) { toggleTimeline(false); nodes.reviewState.focus(); }
         else if (Compare.isOpen()) Compare.close();
         else if (!nodes.findBar.hidden) closeFind();
         else if (activeTab() && activeTab().mode === 'edit') { /* 交给编辑器:这里清空选区会让光标消失 */ }
@@ -3926,7 +3979,8 @@
     applyNarrowLayout();
     void renderSyncFooter();
     setInterval(() => { void renderSyncFooter(); }, 60_000);
-    window.addEventListener('focus', () => { void renderSyncFooter(); });
+    window.addEventListener('focus', () => { void renderSyncFooter(); markSeenIfReturned(activeTab()); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) markSeenIfReturned(activeTab()); });
     renderLayoutState();
     applyReaderZoom();
     await refreshRecents();

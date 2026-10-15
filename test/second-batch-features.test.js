@@ -264,3 +264,67 @@ test('Codex 审查修补:副本不覆盖有批注或审阅历史的文件;冲突
   assert.equal(help.status, 409);
   assert.deepEqual(fs.readdirSync(outside), []);
 });
+
+test('升级兼容:旧版存下的大小写不同的路径,启动时改成磁盘上的真实写法,会话与文档身份都对得上', async (t) => {
+  const f = fixture(t);
+  const doc = path.join(f.docDir, 'Mixed Case.md');
+  fs.writeFileSync(doc, '# 大小写\n');
+  const alias = path.join(f.docDir, 'mixed case.md');
+  if (!fs.existsSync(alias)) return; // 区分大小写的卷上不存在这个问题
+  const { review } = await store.openReview(doc, f.options);
+  // 模拟旧版:记录里存的是另一种大小写
+  await store.mutateReviews((data) => { data.reviews[review.id].absPath = alias; return null; }, f.options);
+  const versions = require('../lib/version-store');
+  const index = JSON.parse(fs.readFileSync(versions.documentsFile(f.options), 'utf8'));
+  index.documents[review.docId].currentPath = alias;
+  fs.writeFileSync(versions.documentsFile(f.options), JSON.stringify(index));
+  // 迁移前:命令行可能在服务启动(做启动归一)之前就运行,查找本身要认得大小写不同的旧写法(Codex 审查第二步 P1)
+  assert.equal((await store.getReviewByPath(doc, { ...f.options, activeOnly: true })).id, review.id, '迁移前也找得到');
+  assert.equal(versions.documentByPath(doc, f.options).docId, review.docId, '文档身份迁移前也找得到');
+  assert.equal((await store.canonicalizeReviewPaths(f.options)).changed, 1);
+  assert.equal((await versions.canonicalizeDocumentPaths(f.options)).changed, 1);
+  assert.equal((await store.getReviewByPath(doc, { ...f.options, activeOnly: true })).id, review.id, '迁移后对上了');
+  assert.equal(versions.documentByPath(doc, f.options).docId, review.docId);
+  assert.equal((await store.canonicalizeReviewPaths(f.options)).changed, 0, '再跑一次没有要改的');
+});
+
+test('升级兼容:路径后来变成指向别处的链接时,启动归一不改它(只改大小写)', async (t) => {
+  const f = fixture(t);
+  const target = path.join(f.docDir, 'CLAUDE.md');
+  fs.writeFileSync(target, '# 目标\n');
+  const link = path.join(f.docDir, 'AGENTS.md');
+  fs.writeFileSync(link, '# 原来是普通文件\n');
+  const { review } = await store.openReview(link, f.options);
+  fs.rmSync(link); fs.symlinkSync('CLAUDE.md', link);
+  assert.equal((await store.canonicalizeReviewPaths(f.options)).changed, 0);
+  assert.equal((await store.getReviewById(review.id, f.options)).absPath, link);
+});
+
+test('Codex 审查(第二步)修补:副本目标正文被删、但旁注或身份还在,也不能放;左栏采纳数读归档', async (t) => {
+  const f = fixture(t);
+  const ghost = path.join(f.docDir, '删了正文.md');
+  fs.writeFileSync(ghost, '# 曾经有过\n');
+  fs.writeFileSync(`${ghost}.annotations.json`, JSON.stringify({ version: 1, file: '删了正文.md', annotations: [{ id: 'old', comment: '旧批注', status: 'open' }] }));
+  fs.rmSync(ghost);
+  await assert.rejects(documents.saveDocumentCopy(ghost, { content: '# 新\n' }, f.options), (error) => error.code === 'COPY_TARGET_HAS_HISTORY');
+  assert.equal(fs.existsSync(ghost), false);
+
+  const doc = path.join(f.docDir, '计数.md');
+  fs.writeFileSync(doc, '# 计数\n\n正文。\n');
+  const { review } = await store.openReview(doc, f.options);
+  fs.writeFileSync(`${doc}.annotations.json`, JSON.stringify({ version: 1, file: '计数.md', annotations: [
+    { id: 'a', comment: '一', status: 'open', reviewSessionId: review.id }, { id: 'b', comment: '二', status: 'open', reviewSessionId: review.id }] }));
+  await store.submitReview(review.id, f.options);
+  await store.beginApply(doc, { applyMode: 'agent', ...f.options });
+  fs.writeFileSync(`${doc}.annotations.json`, JSON.stringify({ version: 1, file: '计数.md', annotations: [
+    { id: 'a', comment: '一', status: 'applied', reviewSessionId: review.id }, { id: 'b', comment: '二', status: 'wontfix', reviewSessionId: review.id }] }));
+  await store.completeReview(doc, { summary: '改了一处', ...f.options });
+  // 完成后旁注又被改了:左栏仍按归档显示采纳 1 · 未采纳 1
+  fs.writeFileSync(`${doc}.annotations.json`, JSON.stringify({ version: 1, file: '计数.md', annotations: [
+    { id: 'a', comment: '一', status: 'wontfix', reviewSessionId: review.id }, { id: 'b', comment: '二', status: 'wontfix', reviewSessionId: review.id }] }));
+  const item = (await documents.listRecent(f.options)).find((entry) => entry.absPath === doc);
+  assert.deepEqual([item.latest.applied, item.latest.wontfix], [1, 1]);
+  assert.equal(item.latest.unread, true, '回稿后没看过');
+  await store.markReviewSeen(review.id, f.options);
+  assert.equal((await documents.listRecent(f.options)).find((entry) => entry.absPath === doc).latest.unread, false);
+});

@@ -1120,9 +1120,15 @@ if (Number.isInteger(parentPid) && parentPid > 0) {
         const done = results.filter((item) => item && item.receipt).length;
         if (done) console.log(`批次导入收敛: ${done} 个中途断掉的导入已补齐`);
       }).catch((error) => console.error(`批次导入收敛失败: ${error.message || error}`));
-      store.pruneReviews().then((result) => {
-        if (result.removed || result.cancelled) console.log(`审阅索引清理: 删除 ${result.removed} 条,取消 ${result.cancelled} 条文件已不存在的会话`);
-      }).catch((error) => console.error('审阅索引清理失败:', error.message));
+      store.canonicalizeReviewPaths()
+        .then((result) => { if (result.changed) console.log(`路径归一: ${result.changed} 条会话的路径改成磁盘上的真实写法`); })
+        .then(() => versionStore.canonicalizeDocumentPaths())
+        .then((result) => { if (result && result.changed) console.log(`路径归一: ${result.changed} 篇文档身份的路径改成磁盘上的真实写法`); })
+        .catch((error) => console.error('路径归一失败:', error.message))
+        .then(() => store.pruneReviews())
+        .then((result) => {
+          if (result && (result.removed || result.cancelled)) console.log(`审阅索引清理: 删除 ${result.removed} 条,取消 ${result.cancelled} 条文件已不存在的会话`);
+        }).catch((error) => console.error('审阅索引清理失败:', error.message));
     } catch (error) {
       console.error('写入端口文件失败:', error.message);
       server.close(() => process.exit(1));
