@@ -209,6 +209,14 @@ async function main() {
     await sleep(800);
     assert.equal(await cdp.evaluate(`document.querySelector('#compareView').hidden`), true, '稿子回来不自动打开对比视图');
     assert.equal(await cdp.evaluate(`document.querySelector('#documentContent').textContent.includes('第二段要被删掉')`), false, '正文是改完的干净稿');
+    // 回稿卡能收起(用户提):收起只剩一行,重画后还是收着;展开回来
+    await cdp.evaluate(`document.querySelector('#returnCard .return-collapse').click()`);
+    await waitUntil('回稿卡收起', () => cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed') && !document.querySelector('#returnCard .result-list') && !document.querySelector('#returnCard [data-compare-style="card"]') && document.querySelector('#returnCard .return-collapse').textContent.includes('展开')`));
+    await cdp.evaluate(`window.dispatchEvent(new Event('focus'))`);
+    await sleep(600);
+    assert.equal(await cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed')`), true, '重画后还是收着');
+    await cdp.evaluate(`document.querySelector('#returnCard .return-collapse').click()`);
+    await waitUntil('回稿卡展开', () => cdp.evaluate(`!document.querySelector('#returnCard').classList.contains('collapsed') && Boolean(document.querySelector('#returnCard [data-compare-style="card"]'))`));
     const cardButton = `document.querySelector('#returnCard [data-compare-style="card"]')`;
     assert.equal(await cdp.evaluate(`${cardButton}.textContent`), '显示改动');
     await cdp.evaluate(`${cardButton}.click()`);
@@ -225,7 +233,7 @@ async function main() {
     // 页面没有 <link rel=icon>,Chrome 自动请求 /favicon.ico 得到 404,这条资源错误不算脚本问题
     const errors = cdp.exceptions.concat(cdp.consoleMessages.filter((m) => m.type === 'error').map((m) => m.text)).filter((text) => !/favicon|ERR_|net::|Failed to load resource.*404/.test(text));
     assert.deepEqual(errors, [], `页面不应有脚本异常或 console.error: ${errors.join(' | ')}`);
-    console.log('PASS: 回稿卡(事件数据、计数、逐条结果、改动处数)、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、「显示改动 / 隐藏改动」开关。');
+    console.log('PASS: 回稿卡(事件数据、计数、逐条结果、改动处数)、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、「显示改动 / 隐藏改动」开关、回稿卡收起 / 展开。');
   } finally {
     if (chrome) await stopChild(chrome.child);
     if (server) await stopChild(server.child);

@@ -2399,19 +2399,51 @@
     document.querySelectorAll('[data-compare-version]').forEach(paintCompareButton);
   }
 
+  // 回稿卡能收起(2026-10-15 用户提):收起后只留一行标题与计数,下面的总体意见与批注露出来。
+  // 按这一轮记在本机(换一轮回来默认展开:那是新消息);只是看的人自己的偏好,写不进去也不影响
+  function returnCardKey(tab, card) {
+    const id = (card.version && card.version.versionId) || tab.review.id;
+    return `draftback.returnCard.collapsed.${id}`;
+  }
+  function returnCardCollapsed(tab, card) {
+    try { return localStorage.getItem(returnCardKey(tab, card)) === '1'; } catch (_) { return false; }
+  }
+  function setReturnCardCollapsed(tab, card, collapsed) {
+    try {
+      if (collapsed) localStorage.setItem(returnCardKey(tab, card), '1');
+      else localStorage.removeItem(returnCardKey(tab, card));
+    } catch (_) {}
+    renderNotes(tab);
+  }
+
   function renderReturnCard(tab, card) {
     const root = nodes.returnCard;
     root.replaceChildren();
     root.hidden = !card.show;
     if (!card.show) return;
     root.dataset.kind = card.kind;
+    const collapsed = returnCardCollapsed(tab, card);
+    root.classList.toggle('collapsed', collapsed);
     const head = el('div', 'return-card-head');
     const title = document.createElement('h3');
     title.append(icon(card.kind === 'restored' ? 'ph-clock-counter-clockwise' : card.kind === 'cancelled' ? 'ph-x-circle' : card.kind === 'approved' ? 'ph-check-circle' : card.kind === 'manual' ? 'ph-pencil-simple-line' : 'ph-arrow-u-down-left'), document.createTextNode(card.title));
     head.appendChild(title);
+    const toggle = smallButton('', () => setReturnCardCollapsed(tab, card, !collapsed), 'return-collapse');
+    toggle.append(document.createTextNode(collapsed ? '展开' : '收起'), icon(collapsed ? 'ph-caret-down' : 'ph-caret-up'));
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.title = collapsed ? '展开回稿卡:摘要、显示改动、逐条结果' : '收起回稿卡,只留一行';
+    head.appendChild(toggle);
     root.appendChild(head);
-    if (card.subtitle) root.appendChild(el('p', 'return-card-sub', card.subtitle));
     const version = card.version;
+    if (collapsed) {
+      // 收起:一行里写采纳 / 未采纳,点「展开」回来;「显示改动」还在工具栏和 ⇧⌘D
+      if (card.counts) {
+        const line = el('p', 'return-card-sub return-collapsed-line', [`采纳 ${card.counts.applied}`, `未采纳 ${card.counts.wontfix}`].join(' · '));
+        root.appendChild(line);
+      }
+      return;
+    }
+    if (card.subtitle) root.appendChild(el('p', 'return-card-sub', card.subtitle));
     if (card.counts) {
       const badges = el('div', 'return-badges');
       badges.appendChild(el('span', 'return-badge applied', `采纳 ${card.counts.applied}`));
