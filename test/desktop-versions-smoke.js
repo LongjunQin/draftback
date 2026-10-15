@@ -138,8 +138,8 @@ async function main() {
     await waitUntil('⇧⌘D 关闭', () => cdp.evaluate(`document.querySelector('#compareView').hidden`));
 
     // 3. 历史按轮折叠 + 时间线
-    await cdp.evaluate(`document.querySelector('#historySection summary').click()`);
-    await waitUntil('历史展开', () => cdp.evaluate(`document.querySelector('#historySection').open && document.querySelectorAll('#historyNotesList .round-group').length === 1`));
+    await cdp.evaluate(`document.querySelector('#notesHistoryTab').click()`);
+    await waitUntil('历史展开', () => cdp.evaluate(`!document.querySelector('#historySection').hidden && document.querySelectorAll('#historyNotesList .round-group').length === 1`));
     const history = await cdp.evaluate(`(() => {
       const group = document.querySelector('#historyNotesList .round-group');
       return { kind: group.dataset.kind, summary: group.querySelector('summary').textContent.replace(/\\s+/g, ' ').trim(), count: document.querySelector('#historyNotesCount').textContent, open: group.open };

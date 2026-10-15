@@ -83,6 +83,10 @@ const findPlugin = $prose(() => new Plugin({
         const caseSensitive = meta.caseSensitive !== undefined ? meta.caseSensitive : value.caseSensitive;
         const matches = collectMatches(newState.doc, query, caseSensitive);
         let index = meta.index !== undefined ? meta.index : value.index;
+        if (meta.after !== undefined) {
+          const next = matches.findIndex((m) => m.from >= meta.after);
+          index = next >= 0 ? next : 0;
+        }
         if (!matches.length) index = -1; else index = Math.min(Math.max(index, 0), matches.length - 1);
         return { query, caseSensitive, matches, index };
       }
@@ -136,11 +140,12 @@ function imagePastePlugin(uploadImage) {
             if (src) nodes.push(schema.nodes.image.createAndFill({ src, alt: '' }));
           } catch (error) { console.error('图片没能插入', error); }
         }
+        if (view.isDestroyed) return; // 图片已经存好;编辑器没了就不插,用户回来再插
         const at = findPlaceholder(view.state, id);
         if (at < 0) return;
         const tr = view.state.tr.setMeta(imageUploadKey, { remove: { id } });
         if (nodes.length) tr.replaceWith(at, at, nodes);
-        view.dispatch(tr);
+        try { view.dispatch(tr); } catch (error) { console.warn('图片插入时编辑器已变化', error); }
       })();
     };
     return new Plugin({
@@ -362,7 +367,16 @@ function scrollToCurrent(view) {
   try {
     const { node } = view.domAtPos(match.from);
     const element = node instanceof Element ? node : node && node.parentElement;
-    if (element) element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!element) return;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // 代码块由 CodeMirror 自己画,看不到 ProseMirror 的命中高亮:整块闪一下提示「在这里」
+    const block = element.closest('.milkdown-code-block, pre');
+    if (block && view.dom.contains(block)) {
+      block.classList.remove('db-find-in-block');
+      void block.offsetWidth;
+      block.classList.add('db-find-in-block');
+      setTimeout(() => block.classList.remove('db-find-in-block'), 1400);
+    }
   } catch (_) {}
 }
 function withView(handle, fn, fallback) {
@@ -394,8 +408,8 @@ function replaceCurrent(handle, replacement) {
     const match = value.matches[value.index];
     const text = String(replacement ?? '');
     const tr = text ? view.state.tr.insertText(text, match.from, match.to) : view.state.tr.delete(match.from, match.to);
-    // 替换后停在原位置的下一处(文档变了,插件会按新文档重算匹配)
-    view.dispatch(tr.setMeta(findKey, { index: value.index }));
+    // 替换后停在替换结束位置之后的下一处(文档变了,插件会按新文档重算匹配;不在刚换上的文字里再找)
+    view.dispatch(tr.setMeta(findKey, { after: match.from + text.length }));
     scrollToCurrent(view);
     return findState(view);
   }, { count: 0, index: -1, query: '' });

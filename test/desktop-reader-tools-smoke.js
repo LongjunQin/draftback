@@ -83,7 +83,7 @@ async function main() {
         text: lum(getComputedStyle(document.querySelector('#documentContent p')).color),
         code: lum(getComputedStyle(document.querySelector('#documentContent pre')).backgroundColor),
         card: lum(getComputedStyle(document.querySelector('#openNotesList')).backgroundColor),
-        titlebar: lum(getComputedStyle(document.querySelector('.titlebar')).backgroundColor),
+        titlebar: lum(getComputedStyle(document.querySelector('#leftSidebar')).backgroundColor),
         toolbar: lum(getComputedStyle(document.querySelector('#documentToolbar')).backgroundColor),
         outlineFont: parseFloat(getComputedStyle(document.querySelector('#outlinePanel .outline-link')).fontSize),
       };
@@ -92,7 +92,7 @@ async function main() {
     assert.ok(dark.paper < 0.25, `深色下正文背景应很暗,实际亮度 ${dark.paper}`);
     assert.ok(dark.text > 0.7, `深色下正文文字应很亮,实际亮度 ${dark.text}`);
     assert.ok(dark.code < 0.3, `深色下代码块背景应很暗,实际亮度 ${dark.code}`);
-    assert.ok(dark.titlebar < 0.25, `深色下标签栏不得仍是浅色,实际亮度 ${dark.titlebar}`);
+    assert.ok(dark.titlebar < 0.25, `深色下侧栏不得仍是浅色,实际亮度 ${dark.titlebar}`);
     assert.ok(dark.toolbar < 0.25, `深色下工具栏不得仍是浅色,实际亮度 ${dark.toolbar}`);
     assert.ok(dark.outlineFont >= 13, `大纲字号应不小于 13px,实际 ${dark.outlineFont}`);
     await screenshot(chrome.cdp, 'dark-reading.png');
@@ -104,7 +104,7 @@ async function main() {
     await sleep(200);
     const print = await chrome.cdp.evaluate(`(() => {
       const visible = (selector) => { const node = document.querySelector(selector); if (!node) return null; const style = getComputedStyle(node); return style.display !== 'none' && style.visibility !== 'hidden'; };
-      return { left: visible('#leftSidebar'), right: visible('#rightSidebar'), toolbar: visible('#documentToolbar'), titlebar: visible('.titlebar'), content: visible('#documentContent'), detailsOpen: document.querySelector('#documentContent details').open };
+      return { left: visible('#leftSidebar'), right: visible('#rightSidebar'), toolbar: visible('#documentToolbar'), titlebar: visible('#tabStrip'), content: visible('#documentContent'), detailsOpen: document.querySelector('#documentContent details').open };
     })()`);
     assert.deepEqual({ left: print.left, right: print.right, toolbar: print.toolbar, titlebar: print.titlebar, content: print.content }, { left: false, right: false, toolbar: false, titlebar: false, content: true }, JSON.stringify(print));
     assert.equal(print.detailsOpen, true, '打印时折叠块必须展开');

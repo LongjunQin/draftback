@@ -1,6 +1,6 @@
 {
   "name": "draftback-desktop",
-  "version": "1.0.0-beta.9",
+  "version": "1.0.0-beta.10",
   "private": true,
   "description": "Draftback (回稿) desktop app: you mark up the draft, the AI revises it, the draft comes back",
   "main": "main.js",
@@ -43,6 +43,7 @@
       "service.js",
       "user-data-migration.js",
       "export-docx.js",
+      "cli-install.js",
       "dock-icon.png",
       "package.json"
     ],

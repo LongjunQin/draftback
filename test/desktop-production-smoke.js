@@ -650,33 +650,29 @@ async function main() {
       const item = document.querySelector('#welcomeRecent .recent-item');
       return document.readyState === 'complete' && item && item.textContent.includes('MDTurn桌面真实回归.md');
     })()`));
+    // 第二批布局(UI 方案 3.2、3.6):一条工具栏;左栏通顶,红绿灯在左栏顶上;窗口里不写品牌名
     const titlebarSafeArea = await chrome.cdp.evaluate(`(() => {
-      const titlebar = document.querySelector('.titlebar');
-      const brand = document.querySelector('.brand');
-      const mark = document.querySelector('.brand-mark');
-      const name = document.querySelector('.brand-name');
-      const brandBox = brand.getBoundingClientRect();
-      const markBox = mark.getBoundingClientRect();
+      const top = document.querySelector('.sidebar-top');
+      const toolbar = document.querySelector('#documentToolbar');
+      const left = document.querySelector('#leftSidebar').getBoundingClientRect();
       return {
-        brandLeft: brandBox.left,
-        markLeft: markBox.left,
-        safeWidth: parseFloat(getComputedStyle(document.documentElement)
-          .getPropertyValue('--traffic-controls-safe-width')),
-        nameVisible: name.getClientRects().length > 0,
-        titlebarDraggable: titlebar.classList.contains('drag-region'),
-        interactiveControls: titlebar.querySelectorAll('button, .tab').length,
+        sidebarTopDraggable: top.classList.contains('drag-region'),
+        trafficSafeLeft: parseFloat(getComputedStyle(top).paddingLeft),
+        toolbarDraggable: toolbar.classList.contains('drag-region'),
+        toolbarLeft: toolbar.getBoundingClientRect().left,
+        sidebarRight: left.right,
+        toolbarHeight: toolbar.getBoundingClientRect().height,
+        brandName: Boolean(document.querySelector('.brand-name')),
+        interactiveControls: toolbar.querySelectorAll('button').length,
       };
     })()`);
-    assert.equal(titlebarSafeArea.brandLeft, 0, '品牌区应从窗口左缘开始');
-    assert.equal(titlebarSafeArea.safeWidth, 96, 'macOS 窗口按钮安全区宽度被意外改动');
-    assert.ok(titlebarSafeArea.markLeft >= titlebarSafeArea.safeWidth,
-      'MDTurn Logo 必须位于 macOS 三个窗口按钮的安全区之外');
-    assert.equal(titlebarSafeArea.nameVisible, true, '常规窗口宽度下应显示 MDTurn 名称');
-    assert.equal(titlebarSafeArea.titlebarDraggable, true,
-      '整条标题栏背景必须是 Electron 可拖动区');
-    // 主按钮已搬到工具栏(规划 v3 第 4.2 节),标题栏只剩新建标签与两侧栏开关
-    assert.ok(titlebarSafeArea.interactiveControls >= 3,
-      '标题栏的按钮应继续由 no-drag 规则排除');
+    assert.equal(titlebarSafeArea.sidebarTopDraggable, true, '左栏顶上(红绿灯那一条)必须是可拖动区');
+    assert.ok(titlebarSafeArea.trafficSafeLeft >= 80, `左栏顶上的按钮必须避开 macOS 三个窗口按钮:${titlebarSafeArea.trafficSafeLeft}`);
+    assert.equal(titlebarSafeArea.toolbarDraggable, true, '工具栏背景必须是 Electron 可拖动区');
+    assert.equal(Math.round(titlebarSafeArea.toolbarLeft), Math.round(titlebarSafeArea.sidebarRight), '工具栏从左栏右边缘开始');
+    assert.equal(Math.round(titlebarSafeArea.toolbarHeight), 52, '只有一条 52 像素的工具栏');
+    assert.equal(titlebarSafeArea.brandName, false, '窗口里不写品牌名');
+    assert.ok(titlebarSafeArea.interactiveControls >= 3, '工具栏的按钮由 no-drag 规则排除');
     await chrome.cdp.click('#welcomeRecent .recent-item');
     await waitUntil('最近审阅打开并渲染正文', () => chrome.cdp.evaluate(`(() => {
       const title = document.querySelector('#tabList .tab-title');
@@ -779,7 +775,7 @@ async function main() {
     // marker/highlight even though it has a valid v3 anchor.
     // 规则⑤第三段起历史按轮折叠:这些旧批注的 reviewSessionId 没有对应的版本事件,归成一个「未归档」的轮,逐条结果在轮里
     const initialHistory = await chrome.cdp.evaluate(`(() => ({
-      open: document.querySelector('#historySection').open,
+      open: !document.querySelector('#historySection').hidden, // 第二批起:右栏「本轮 / 历史」分段,默认在「本轮」
       count: document.querySelector('#historyNotesCount').textContent,
       cardCount: document.querySelectorAll('#historyNotesList .result-item').length,
       cardVisible: Array.from(document.querySelectorAll('#historyNotesList .result-item'))
@@ -836,7 +832,7 @@ async function main() {
     // 图标在高亮落地后异步定位(字体、右栏布局稳定后才是终位),所以等它落到选区起点附近再判定;
     // 一直不到位才失败,并报出最后一次的实际距离。
     let lastMarkerGeometry = null;
-    const markerGeometry = await waitUntil('批注图标贴近选区起点', async () => {
+    const markerGeometry = await waitUntil('批注圆钉在版心右侧、与选区起点同一行', async () => {
       lastMarkerGeometry = await chrome.cdp.evaluate(`(() => {
         const pin = document.querySelector('#annotationOverlay .note-pin:not([hidden])');
         const highlight = CSS.highlights && CSS.highlights.get('draftback-open');
@@ -845,21 +841,22 @@ async function main() {
         const pinBox = pin.getBoundingClientRect();
         const start = range.cloneRange(); start.collapse(true);
         const startBox = start.getClientRects()[0] || range.getClientRects()[0];
+        const content = document.querySelector('#documentContent').getBoundingClientRect();
         return {
           pinInBody: Boolean(document.querySelector('#documentContent .note-pin')),
-          horizontalDistance: Math.abs((pinBox.left + pinBox.width / 2) - startBox.left),
+          gapFromMeasure: pinBox.left - content.right,
           verticalDistance: Math.abs((pinBox.top + pinBox.height / 2) - (startBox.top + startBox.height / 2)),
         };
       })()`);
       const g = lastMarkerGeometry;
-      return g && g.horizontalDistance < 58 && g.verticalDistance < 22 ? g : null;
+      return g && g.gapFromMeasure >= 4 && g.gapFromMeasure <= 30 && g.verticalDistance < 22 ? g : null;
     }, 5_000).catch(() => {
-      throw new Error(`FAIL: 批注图标应显示在精确选区起点附近:${JSON.stringify(lastMarkerGeometry)}`);
+      throw new Error(`FAIL: 批注圆钉应在版心右侧、与选区起点同一行:${JSON.stringify(lastMarkerGeometry)}`);
     });
     assert.equal(markerGeometry.pinInBody, false, '批注图标不得插入段尾改变正文排版');
 
     await chrome.cdp.click('#collapseLeft');
-    const collapsedBrand = await waitUntil('左栏收起后批注图标与标题栏自动重定位', () => chrome.cdp.evaluate(`(() => {
+    const collapsed = await waitUntil('左栏完全收起后圆钉重定位、工具栏避开窗口按钮', () => chrome.cdp.evaluate(`(() => {
       if (!document.querySelector('#appShell').classList.contains('left-collapsed')) return null;
       const pin = document.querySelector('#annotationOverlay .note-pin:not([hidden])');
       const highlight = CSS.highlights && CSS.highlights.get('draftback-open');
@@ -868,21 +865,20 @@ async function main() {
       const pinBox = pin.getBoundingClientRect();
       const start = range.cloneRange(); start.collapse(true);
       const startBox = start.getClientRects()[0] || range.getClientRects()[0];
-      const horizontal = Math.abs((pinBox.left + pinBox.width / 2) - startBox.left);
+      const content = document.querySelector('#documentContent').getBoundingClientRect();
+      const toolbar = document.querySelector('#documentToolbar');
+      const gap = pinBox.left - content.right;
       const vertical = Math.abs((pinBox.top + pinBox.height / 2) - (startBox.top + startBox.height / 2));
-      const mark = document.querySelector('.brand-mark');
-      const name = document.querySelector('.brand-name');
-      const safeWidth = parseFloat(getComputedStyle(document.documentElement)
-        .getPropertyValue('--traffic-controls-safe-width'));
-      return horizontal < 58 && vertical < 22
-        ? { markLeft: mark.getBoundingClientRect().left, safeWidth,
-          nameVisible: name.getClientRects().length > 0 }
-        : null;
+      return gap >= 4 && gap <= 30 && vertical < 22 ? {
+        sidebarWidth: document.querySelector('#leftSidebar').getBoundingClientRect().width,
+        toolbarPadding: parseFloat(getComputedStyle(toolbar).paddingLeft),
+        revealVisible: getComputedStyle(document.querySelector('#toggleLeftTop')).display !== 'none',
+      } : null;
     })()`));
-    assert.ok(collapsedBrand.markLeft >= collapsedBrand.safeWidth,
-      '收起左栏后 Logo 仍必须避开 macOS 窗口按钮');
-    assert.equal(collapsedBrand.nameVisible, false, '收起左栏后应隐藏名称以腾出标签页空间');
-    await chrome.cdp.click('#expandLeft');
+    assert.equal(collapsed.sidebarWidth, 0, '左栏可以完全收起');
+    assert.ok(collapsed.toolbarPadding >= 80, '收起左栏后工具栏仍避开 macOS 窗口按钮');
+    assert.equal(collapsed.revealVisible, true, '收起后工具栏上出现「显示稿件栏」');
+    await chrome.cdp.click('#toggleLeftTop');
     await waitUntil('左栏重新展开', () => chrome.cdp.evaluate(
       `!document.querySelector('#appShell').classList.contains('left-collapsed')`,
     ));
@@ -962,7 +958,7 @@ async function main() {
       const highlight = CSS.highlights && CSS.highlights.get('draftback-open');
       const ranges = highlight ? Array.from(highlight).map((range) => range.toString()) : [];
       return {
-        historyOpen: document.querySelector('#historySection').open,
+        historyOpen: !document.querySelector('#historySection').hidden,
         historyVisible: Array.from(document.querySelectorAll('#historyNotesList .result-item'))
           .some((card) => card.getClientRects().length > 0),
         historyTint: document.querySelector('#history-target').classList.contains('legacy-note-block'),
@@ -1355,7 +1351,9 @@ async function main() {
         return count === expectedOpen;
       });
     }
-    await chrome.cdp.click('#finishManualButton');
+    // 「提交修改」只在工具栏主按钮(第二批起编辑条里不再重复)
+    assert.equal(await chrome.cdp.evaluate(`document.querySelector('#primaryAction').dataset.action`), 'finish-manual');
+    await chrome.cdp.click('#primaryAction');
     await waitUntil('完成手工修改确认框', () => chrome.cdp.evaluate(
       `!document.querySelector('#confirmDialog').hidden && document.querySelector('#confirmTitle').textContent.includes('提交本轮修改')`,
     ));

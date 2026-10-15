@@ -1,27 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-<defs>
- <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#13a08f"/><stop offset="1" stop-color="#0a5057"/></linearGradient>
- <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f7"/></linearGradient><radialGradient id="sheen" cx="0.18" cy="0.08" r="0.9"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset="0.6" stop-color="#fff" stop-opacity="0"/></radialGradient><filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="26" stdDeviation="26" flood-color="#000" flood-opacity=".38"/></filter><filter id="psh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="-10" dy="22" stdDeviation="16" flood-color="#000" flood-opacity=".42"/></filter>
-</defs>
-<rect width="1024" height="1024" fill="url(#bg)"/><rect width="1024" height="1024" fill="url(#sheen)"/>
-
-<g transform="rotate(-5 512 512)">
-  <g filter="url(#sh)"><path d="M 296 176 H 728 A 104 104 0 0 1 832 280 V 640 A 104 104 0 0 1 728 744 H 452 L 310 868 L 332 744 H 296 A 104 104 0 0 1 192 640 V 280 A 104 104 0 0 1 296 176 Z" fill="url(#pg)" stroke="#f4f6fa" stroke-width="18" stroke-linejoin="round"/></g>
-  <g fill="#c5ccda">
-    <rect x="284" y="282" width="312" height="38" rx="19"/>
-    <rect x="284" y="368" width="456" height="38" rx="19"/>
-    <rect x="284" y="556" width="456" height="38" rx="19"/>
-    <rect x="284" y="642" width="260" height="38" rx="19"/>
-  </g>
-  <rect x="262" y="446" width="620" height="72" rx="24" fill="#ffb21f"/>
-  <rect x="284" y="463" width="372" height="38" rx="19" fill="#2a3040"/>
-</g>
-<g transform="translate(812 462) rotate(62)" filter="url(#psh)">
-  <defs><linearGradient id="pb62" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7f8fb"/><stop offset="1" stop-color="#cfd5e0"/></linearGradient></defs>
-  <polygon points="0,0 96,-34.56 96,34.56" fill="#2a3040"/>
-  <rect x="88" y="-48.0" width="342" height="96" rx="29.759999999999998" fill="url(#pb62)"/>
-  <rect x="88" y="-48.0" width="64" height="96" rx="18" fill="#ffb21f"/>
-  <rect x="360" y="-42.0" width="70" height="84" rx="22" fill="#ffb21f"/>
-  <rect x="190" y="-26.0" width="150" height="14" rx="7" fill="#1f2937" opacity=".12"/>
-</g>
+  <!-- 回稿图标 A「回」字(UI 方案 2.5 推荐方向):折角稿纸套一个方块就是「回」;中间琥珀色是你的批注。满版画布,macOS 外形在生成时套上 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#13a08f"/><stop offset="1" stop-color="#0a5057"/></linearGradient>
+    <radialGradient id="sheen" cx="0.18" cy="0.08" r="0.9"><stop offset="0" stop-color="#fff" stop-opacity=".2"/><stop offset="0.6" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f7"/></linearGradient>
+    <linearGradient id="inner" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#109283"/><stop offset="1" stop-color="#0b6a63"/></linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc23d"/><stop offset="1" stop-color="#ffa514"/></linearGradient>
+    <filter id="drop" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#000" flood-opacity=".32"/></filter>
+    <filter id="fold" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="-6" dy="8" stdDeviation="8" flood-color="#000" flood-opacity=".18"/></filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#sheen)"/>
+  <!-- 折了角的稿纸:左上、左下、右下三个圆角,右上斜切 -->
+  <path filter="url(#drop)" fill="url(#page)" d="M 342 191 H 655 L 833 369 V 683 A 150 150 0 0 1 683 833 H 342 A 150 150 0 0 1 192 683 V 341 A 150 150 0 0 1 342 191 Z"/>
+  <path filter="url(#fold)" fill="#cfd6e2" d="M 655 191 V 314 A 55 55 0 0 0 710 369 H 833 Z"/>
+  <!-- 「回」的内框与中心的琥珀(批注) -->
+  <rect x="335" y="335" width="355" height="355" rx="76" fill="url(#inner)"/>
+  <rect x="417" y="417" width="191" height="191" rx="41" fill="url(#amber)"/>
 </svg>

@@ -13,8 +13,7 @@
 
   const nodes = {
     shell: $('#appShell'), tabList: $('#tabList'), openTabButton: $('#openTabButton'), primaryAction: $('#primaryAction'), secondaryAction: $('#secondaryAction'), findButton: $('#findButton'),
-    left: $('#leftSidebar'), right: $('#rightSidebar'), collapseLeft: $('#collapseLeft'), expandLeft: $('#expandLeft'),
-    collapseRight: $('#collapseRight'), expandRight: $('#expandRight'), toggleLeftTop: $('#toggleLeftTop'),
+    left: $('#leftSidebar'), right: $('#rightSidebar'), collapseLeft: $('#collapseLeft'), toggleLeftTop: $('#toggleLeftTop'),
     toggleRightTop: $('#toggleRightTop'), outlineMode: $('#outlineModeButton'), filesMode: $('#filesModeButton'),
     outlinePanel: $('#outlinePanel'), filesPanel: $('#filesPanel'), recentList: $('#recentList'), openFileButton: $('#openFileButton'),
     toolbar: $('#documentToolbar'), reviewState: $('#reviewStatePill'), reviewStateIcon: $('#reviewStateIcon'),
@@ -41,6 +40,11 @@
     comparePrev: $('#comparePrev'), compareNext: $('#compareNext'), compareClose: $('#compareClose'), compareScroll: $('#compareScroll'),
     compareContent: $('#compareContent'), compareNote: $('#compareNote'),
     confirmAlt: $('#confirmAlt'),
+    tabStrip: $('#tabStrip'), docTitleButton: $('#docTitleButton'), docTitleText: $('#docTitleText'), docInfoPopover: $('#docInfoPopover'),
+    compareToggleButton: $('#compareToggleButton'), toolbarMoreButton: $('#toolbarMoreButton'), toolbarMoreMenu: $('#toolbarMoreMenu'),
+    syncFooter: $('#syncFooter'), syncFooterText: $('#syncFooterText'), syncFooterIcon: $('#syncFooterIcon'),
+    notesFooter: $('#notesFooter'), notesSectionHint: document.querySelector('.notes-section-hint'),
+    notesCurrentTab: $('#notesCurrentTab'), notesHistoryTab: $('#notesHistoryTab'), currentPane: $('#currentPane'), openNotesSection: $('#openNotesSection'),
     quickOpen: $('#quickOpen'), quickOpenInput: $('#quickOpenInput'), quickOpenList: $('#quickOpenList'),
     settingsDialog: $('#settingsDialog'), settingsClose: $('#settingsClose'), appearanceSegment: $('#appearanceSegment'),
     zoomRange: $('#zoomRange'), zoomValue: $('#zoomValue'), zoomResetButton: $('#zoomResetButton'),
@@ -202,7 +206,7 @@
         file: document.file, title: document.title || document.file, directory: document.directory,
         docId: payload.docId || null, // 会话被清理后仍能按文档身份看历史、对比、恢复
       },
-      source: { content: String(source.content || ''), hash: source.hash, revision: 0, readOnly: Boolean(source.readOnly), readOnlyReason: source.readOnlyReason || '', encoding: source.encoding || 'utf-8' },
+      source: { content: String(source.content || ''), hash: source.hash, revision: 0, readOnly: Boolean(source.readOnly), readOnlyReason: source.readOnlyReason || '', encoding: source.encoding || 'utf-8', mtimeMs: source.mtimeMs || null },
       annotations: [],
       activeReview: payload.activeReview || null,
       editing: payload.editing || null,
@@ -273,7 +277,7 @@
 
   // 编码与只读信息(GBK / UTF-16 只读显示):tab.source 是正文字符串,这些放在 tab.sourceMeta
   function sourceMetaOf(source = {}) {
-    return { readOnly: Boolean(source.readOnly), readOnlyReason: source.readOnlyReason || '', encoding: source.encoding || 'utf-8' };
+    return { readOnly: Boolean(source.readOnly), readOnlyReason: source.readOnlyReason || '', encoding: source.encoding || 'utf-8', mtimeMs: Number(source.mtimeMs) || null };
   }
   function isReadOnly(tab) { return Boolean(tab && tab.sourceMeta && tab.sourceMeta.readOnly); }
 
@@ -389,31 +393,56 @@
     return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(new Date(time));
   }
 
+  const Drafts = window.DraftbackDrafts;
+  function draftRow(row) {
+    const { item } = row;
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'recent-item draft-row';
+    button.title = item.absPath;
+    const dot = document.createElement('span'); dot.className = `draft-dot ${row.dot}`; dot.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span'); text.className = 'draft-text';
+    const title = document.createElement('strong'); title.textContent = item.file || 'Markdown';
+    const meta = document.createElement('span'); meta.textContent = row.subtitle;
+    text.append(title, meta);
+    button.append(dot, text);
+    if (row.unread) { const unread = document.createElement('span'); unread.className = 'draft-unread'; unread.title = '稿子回来了,还没看'; button.appendChild(unread); }
+    const active = activeTab();
+    if (active && active.review.sourceFile === item.absPath) button.classList.add('current');
+    button.disabled = !item.exists;
+    button.addEventListener('click', () => (item.activeReview ? openReviewId(item.activeReview.id) : openDocumentPath(item.absPath)));
+    return button;
+  }
   function renderRecents() {
-    const containers = [nodes.recentList, nodes.welcomeRecent];
-    containers.forEach((container) => {
-      container.replaceChildren();
-      if (!state.recents.length) {
-        container.appendChild(emptyBlock('还没有最近文件。打开一篇 Markdown 后会出现在这里。', 'recent-empty'));
-        return;
-      }
-      const fragment = document.createDocumentFragment();
-      state.recents.slice(0, container === nodes.welcomeRecent ? 5 : 18).forEach((item) => {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'recent-item';
-        const title = document.createElement('strong'); title.textContent = item.file || 'Markdown';
-        const meta = document.createElement('span');
-        const active = item.activeReview;
-        const stateText = !item.exists ? '文件已不存在'
-          : active ? `${statusLabel(active.status, active.applyMode)}${active.openCount ? ` · ${active.openCount} 条未处理` : ''}`
-            : item.editing ? '编辑中' : item.lastReview ? statusLabel(item.lastReview.status, item.lastReview.applyMode, item.lastReview.outcome) : '普通文档';
-        meta.textContent = `${formatDirectory(item.directory)} · ${stateText}`;
-        button.append(title, meta);
-        button.disabled = !item.exists;
-        button.addEventListener('click', () => (active ? openReviewId(active.id) : openDocumentPath(item.absPath)));
-        fragment.appendChild(button);
-      });
-      container.appendChild(fragment);
-    });
+    const now = Date.now();
+    nodes.recentList.replaceChildren();
+    nodes.welcomeRecent.replaceChildren();
+    if (!state.recents.length) {
+      nodes.recentList.appendChild(emptyBlock('还没有稿件。打开一篇 Markdown 后会出现在这里。', 'recent-empty'));
+      return;
+    }
+    for (const group of Drafts.groupDrafts(state.recents, now)) {
+      const section = document.createElement('section'); section.className = 'draft-group'; section.dataset.group = group.key;
+      const heading = document.createElement('div'); heading.className = 'draft-group-heading';
+      const label = document.createElement('span'); label.textContent = group.label;
+      const count = document.createElement('span'); count.textContent = String(group.rows.length);
+      heading.append(label, count);
+      section.appendChild(heading);
+      group.rows.forEach((row) => section.appendChild(draftRow(row)));
+      nodes.recentList.appendChild(section);
+    }
+    const welcome = Drafts.welcomeRows(state.recents, now);
+    welcome.forEach((row) => nodes.welcomeRecent.appendChild(draftRow(row)));
+  }
+
+  // 回稿后看过就记一笔,左栏的未读蓝点消失
+  function markSeenIfReturned(tab) {
+    if (!tab || isPlain(tab) || tab.review.status !== 'complete' || tab.review.outcome || tab.review.applyMode === 'manual') return;
+    const key = `${tab.id}:${tab.review.completedAt || ''}`;
+    if (state.seenMarked && state.seenMarked.has(key)) return;
+    (state.seenMarked = state.seenMarked || new Set()).add(key);
+    const entry = state.recents.find((item) => item.latest && item.latest.id === tab.id && item.latest.unread);
+    void requestJson(`/api/app/review/seen?r=${encodeURIComponent(tab.id)}`, { method: 'POST' })
+      .then(() => { if (entry) void refreshRecents(); })
+      .catch(() => {});
   }
 
   const Handoff = window.DraftbackHandoff;
@@ -952,7 +981,7 @@
       const tab = activeTab();
       if (!tab || isPlain(tab)) { toast('普通文档没有轮次,没有可恢复的改稿。'); return; }
       tab.historyOpen = true; toggleRight(false); renderNotes(tab);
-      nodes.historySection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      nodes.historyNotesList.scrollTop = 0;
       toast('在右栏「历史」里选一轮,点「恢复到这轮改稿前」。'); return;
     }
     if (command === 'timeline') { toggleTimeline(); return; }
@@ -1129,7 +1158,20 @@
     nodes.exportMenuButton.setAttribute('aria-expanded', String(open));
     if (open) { const first = nodes.exportMenu.querySelector('button'); if (first) first.focus(); }
   }
+  function toggleToolbarMore(force) {
+    const open = typeof force === 'boolean' ? force : nodes.toolbarMoreMenu.hidden;
+    nodes.toolbarMoreMenu.hidden = !open;
+    nodes.toolbarMoreButton.setAttribute('aria-expanded', String(open));
+  }
   function installExportMenu() {
+    nodes.toolbarMoreButton.addEventListener('click', (event) => { event.stopPropagation(); toggleToolbarMore(); });
+    nodes.toolbarMoreMenu.addEventListener('click', (event) => {
+      const item = event.target.closest('button[data-command]');
+      if (!item) return;
+      toggleToolbarMore(false);
+      handleDesktopCommand(item.dataset.command);
+    });
+    document.addEventListener('click', (event) => { if (!nodes.toolbarMoreMenu.hidden && !event.target.closest('#toolbarMoreMenu, #toolbarMoreButton')) toggleToolbarMore(false); });
     nodes.exportMenuButton.addEventListener('click', (event) => { event.stopPropagation(); toggleExportMenu(); });
     nodes.exportMenu.addEventListener('click', (event) => {
       const item = event.target.closest('button[data-command]');
@@ -1338,6 +1380,7 @@
   }
 
   function renderTabs() {
+    nodes.shell.classList.toggle('multi-tab', state.tabs.length > 1);
     nodes.tabList.replaceChildren();
     state.tabs.forEach((tab) => {
       const button = document.createElement('button');
@@ -1345,7 +1388,7 @@
       button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(tab.id === state.activeId));
       button.title = tab.review.sourceFile || tab.review.title;
       const title = document.createElement('span'); title.className = 'tab-title'; title.textContent = tab.review.title || 'Markdown';
-      const dot = document.createElement('span'); dot.className = `tab-state ${tab.review.status || ''}`;
+      const dot = document.createElement('span'); dot.className = `tab-state ${tab.review.status || ''}${tab.review.applyMode === 'manual' ? ' manual' : ''}`;
       dot.title = tab.remotePending
         ? `${statusLabel(tab.review.status, tab.review.applyMode, tab.review.outcome)}（有远程更新待同步）`
         : statusLabel(tab.review.status, tab.review.applyMode, tab.review.outcome);
@@ -1366,10 +1409,12 @@
     renderLayoutState();
     renderTabs();
     const tab = activeTab();
+    nodes.shell.classList.toggle('no-doc', !tab);
+    renderDocTitle(tab);
     if (!tab) {
       destroyEditor();
       clearMarkerOverlay();
-      nodes.toolbar.hidden = true;
+      nodes.reviewState.hidden = true; nodes.compareToggleButton.hidden = true;
       nodes.readerPane.hidden = false;
       nodes.welcome.hidden = false;
       nodes.readerScroll.hidden = true;
@@ -1382,9 +1427,10 @@
       return;
     }
 
-    nodes.toolbar.hidden = false;
+    nodes.reviewState.hidden = false;
     nodes.welcome.hidden = true;
     renderStatus(tab);
+    markSeenIfReturned(tab);
     renderNotes(tab);
     if (tab.mode === 'edit') { if (Compare.isOpen()) Compare.close(); renderEditor(tab); }
     else renderReader(tab);
@@ -1395,12 +1441,15 @@
   function renderLayoutState() {
     nodes.shell.classList.toggle('left-collapsed', state.leftCollapsed);
     nodes.shell.classList.toggle('right-collapsed', state.rightCollapsed);
-    nodes.outlineMode.classList.toggle('active', state.leftMode === 'outline');
-    nodes.filesMode.classList.toggle('active', state.leftMode === 'files');
-    nodes.outlineMode.setAttribute('aria-selected', String(state.leftMode === 'outline'));
-    nodes.filesMode.setAttribute('aria-selected', String(state.leftMode === 'files'));
-    nodes.outlinePanel.hidden = state.leftMode !== 'outline';
-    nodes.filesPanel.hidden = state.leftMode !== 'files';
+    nodes.shell.classList.toggle('multi-tab', state.tabs.length > 1);
+    // 没有打开文档时大纲是空的:左栏显示稿件(不改用户的选择)
+    const leftMode = activeTab() ? state.leftMode : 'files';
+    nodes.outlineMode.classList.toggle('active', leftMode === 'outline');
+    nodes.filesMode.classList.toggle('active', leftMode === 'files');
+    nodes.outlineMode.setAttribute('aria-selected', String(leftMode === 'outline'));
+    nodes.filesMode.setAttribute('aria-selected', String(leftMode === 'files'));
+    nodes.outlinePanel.hidden = leftMode !== 'outline';
+    nodes.filesPanel.hidden = leftMode !== 'files';
     publishMenuState();
   }
 
@@ -1419,9 +1468,20 @@
     requestAnimationFrame(scheduleMarkerPositions);
   }
 
+  const NARROW_WIDTH = 1280;
+  function applyNarrowLayout() {
+    const narrow = window.innerWidth < NARROW_WIDTH;
+    if (narrow === Boolean(state.narrow)) return;
+    if (narrow) { state.wideRightCollapsed = state.rightCollapsed; state.rightCollapsed = true; }
+    else if (typeof state.wideRightCollapsed === 'boolean') state.rightCollapsed = state.wideRightCollapsed;
+    state.narrow = narrow;
+    renderLayoutState();
+    requestAnimationFrame(scheduleMarkerPositions);
+  }
   function toggleRight(force) {
     state.rightCollapsed = typeof force === 'boolean' ? force : !state.rightCollapsed;
-    storeLocal('draftback.rightCollapsed', state.rightCollapsed ? '1' : '0');
+    // 窄窗口里打开的批注栏浮在稿纸上,只是临时的;偏好只记宽窗口下的选择
+    if (!state.narrow) storeLocal('draftback.rightCollapsed', state.rightCollapsed ? '1' : '0');
     renderLayoutState();
     requestAnimationFrame(scheduleMarkerPositions);
   }
@@ -1430,7 +1490,9 @@
     node.hidden = !spec || spec.hidden;
     if (node.hidden) { node.dataset.action = ''; return; }
     node.disabled = Boolean(spec.disabled);
-    node.textContent = spec.label;
+    node.replaceChildren();
+    if (spec.icon) { const icon = document.createElement('i'); icon.className = `ph ${spec.icon}`; icon.setAttribute('aria-hidden', 'true'); node.appendChild(icon); }
+    node.appendChild(document.createTextNode(spec.label));
     node.title = spec.title || '';
     node.dataset.action = spec.action;
   }
@@ -1452,6 +1514,7 @@
     nodes.editingMode.disabled = review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual') || isReadOnly(tab);
     paintAction(nodes.primaryAction, view.primary);
     paintAction(nodes.secondaryAction, view.secondary);
+    publishMenuState();
   }
 
   function renderReader(tab) {
@@ -1462,8 +1525,11 @@
     nodes.readerScroll.hidden = false;
     nodes.editorPane.hidden = true;
     if (tab.renderedHash !== tab.sourceHash || nodes.content.dataset.tabId !== tab.id) {
+      const refreshing = nodes.content.dataset.tabId === tab.id && Boolean(tab.renderedOnce);
       void renderMarkdown(nodes.content, tab.source, tab, { interactive: true }).then((rendered) => {
         if (!rendered || activeTab()?.id !== tab.id || tab.mode !== 'read') return;
+        tab.renderedOnce = true;
+        if (refreshing) { nodes.content.classList.remove('content-refresh'); void nodes.content.offsetWidth; nodes.content.classList.add('content-refresh'); }
         tab.renderedHash = tab.sourceHash;
         nodes.content.dataset.tabId = tab.id;
         buildOutline(tab);
@@ -1528,7 +1594,9 @@
         first.content = first.content.slice(match[0].length);
         const checked = match[1] !== ' ';
         const box = new core.Token('html_inline', '', 0);
-        box.content = `<span class="task-check${checked ? ' checked' : ''}" role="img" aria-label="${checked ? '已完成' : '未完成'}"></span>`;
+        // 「[ ] 」原文仍留在正文文字里(只是看不见):批注锚点按文字偏移算,去掉它旧批注会错位
+        const marker = match[0].replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+        box.content = `<span class="task-check${checked ? ' checked' : ''}" role="img" aria-label="${checked ? '已完成' : '未完成'}"><span class="task-marker">${marker}</span></span>`;
         inline.children.unshift(box);
         tokens[i - 2].attrJoin('class', 'task-list-item');
         for (let j = i - 3; j >= 0; j -= 1) {
@@ -1580,6 +1648,7 @@
     loadVersion: (docId, versionId, which) => requestJson(`/api/app/version?docId=${encodeURIComponent(docId)}&versionId=${encodeURIComponent(versionId)}&which=${which}`),
     onChange: ({ open }) => {
       publishMenuState();
+      renderCompareToggle(activeTab());
       nodes.readerPane.classList.toggle('compare-open', open);
       nodes.annotate.hidden = true;
       if (open) { toggleTimeline(false); window.getSelection()?.removeAllRanges(); }
@@ -1810,8 +1879,27 @@
     state.outlineFrame = requestAnimationFrame(updateOutlineActive);
   }
 
+  // 本轮每节的批注数:按批注记下的章节路径,从最深的一级往上找到大纲里有的那一级;总体意见算在第一个标题上
+  function outlineCounts(outline) {
+    const tab = activeTab();
+    const counts = new Map();
+    if (!tab || isPlain(tab) || !outline || !outline.length) return counts;
+    const texts = new Set(outline.map((item) => item.text));
+    for (const note of openAnnotations(tab)) {
+      let key = null;
+      if (isDocNote(note)) key = outline[0].text;
+      else {
+        const path = Array.isArray(note.headingPath) ? note.headingPath : [];
+        for (let i = path.length - 1; i >= 0 && !key; i -= 1) if (texts.has(path[i])) key = path[i];
+      }
+      if (key) counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return counts;
+  }
+
   function renderOutline(outline) {
     nodes.outlinePanel.replaceChildren();
+    const counts = outlineCounts(outline);
     if (!outline || !outline.length) {
       nodes.outlinePanel.appendChild(emptyBlock(activeTab() ? '这篇文档没有一级或二级标题。' : '打开文档后，这里会显示文章结构。', 'outline-empty'));
       return;
@@ -1825,6 +1913,8 @@
       const number = document.createElement('span'); number.className = 'outline-number'; number.textContent = item.level === 1 ? String(h1Index) : '';
       const text = document.createElement('span'); text.className = 'outline-text'; text.textContent = item.text;
       button.append(number, text);
+      const count = counts.get(item.text);
+      if (count) { const badge = document.createElement('span'); badge.className = 'outline-count'; badge.textContent = String(count); badge.title = `本轮这一节有 ${count} 条批注`; button.appendChild(badge); counts.delete(item.text); }
       button.addEventListener('click', () => {
         const tab = activeTab();
         setOutlineActive(item.id);
@@ -1995,9 +2085,9 @@
 
   function renderPinContent(button, notes) {
     button.__mdturnNotes = notes;
-    button.title = `打开 ${notes.length} 条批注`;
-    button.innerHTML = '<i class="ph ph-chat-circle-dots" aria-hidden="true"></i>' +
-      (notes.length > 1 ? `<span>${notes.length}</span>` : '');
+    button.title = `${notes.length} 条批注:${notes.map((note) => String(note.comment || '').slice(0, 24)).join(' / ')}`;
+    button.setAttribute('aria-label', `打开这一行的 ${notes.length} 条批注`);
+    button.textContent = String(notes.length);
   }
 
   function positionMarkerPins() {
@@ -2005,6 +2095,9 @@
     const tab = activeTab();
     if (!tab || tab.mode !== 'read' || !nodes.annotationOverlay || nodes.readerScroll.hidden) return;
     const overlayRect = nodes.annotationOverlay.getBoundingClientRect();
+    const contentRect = nodes.content.getBoundingClientRect();
+    // 圆钉放在版心右侧 22 像素(UI 方案 3.2),不压在正文上;窗口太窄时贴着右边
+    const pinLeft = Math.min(contentRect.right - overlayRect.left + 12, Math.max(4, overlayRect.width - 26));
     const positions = [];
     state.markerEntries.forEach((entry) => {
       entry.button.hidden = false;
@@ -2014,18 +2107,16 @@
         entry.button.hidden = true;
         return;
       }
-      let left = rect.left - overlayRect.left - 34;
-      if (left < 4) left = rect.right - overlayRect.left + 6;
-      left = Math.min(Math.max(4, left), Math.max(4, overlayRect.width - 34));
-      const top = Math.min(Math.max(4, rect.top - overlayRect.top - 1), Math.max(4, overlayRect.height - 28));
+      const left = pinLeft;
+      const lineHeight = rect.height || 24;
+      const top = Math.min(Math.max(4, rect.top - overlayRect.top + (lineHeight - 20) / 2), Math.max(4, overlayRect.height - 24));
       positions.push({ entry, left, top });
     });
 
     positions.sort((a, b) => a.top - b.top || a.left - b.left);
     const clusters = [];
     positions.forEach((position) => {
-      const nearby = clusters.find((cluster) =>
-        Math.abs(cluster.top - position.top) < 18 && Math.abs(cluster.left - position.left) < 34);
+      const nearby = clusters.find((cluster) => Math.abs(cluster.top - position.top) < 16);
       if (nearby) {
         nearby.notes.push(...position.entry.baseNotes);
         position.entry.button.hidden = true;
@@ -2097,10 +2188,39 @@
     scheduleMarkerPositions();
   }
 
+  function notesFooterText(tab) {
+    if (!tab) return '';
+    const review = tab.review;
+    const next = Number.isInteger(review.round) ? review.round + 1 : null;
+    if (isPlain(tab)) return '划词写下第一条批注,就开始第 1 轮。⌥⌘M 批注所选文字。';
+    if (review.status === 'reviewing') return '⌥⌘M 批注 · ⌘↩ 交给 AI · ⌥⌘↓ 下一条批注';
+    if (review.status === 'ready_to_apply' || (review.status === 'applying' && review.applyMode !== 'manual')) return 'AI 改完稿子会自己回来;这期间不能批注。';
+    if (review.status === 'applying') return '对照批注逐条处理;改完点「提交修改」。';
+    if (review.status === 'conflict') return '文件在外面被改了:点工具栏的「处理…」。';
+    if (review.status === 'complete' && review.outcome === 'finalized') return '这篇已定稿。再划词批注会开始新一轮。';
+    return `要继续改:直接在正文划词批注,自动开始${next ? `第 ${next} 轮` : '下一轮'}。`;
+  }
+  function renderNotesPane(tab) {
+    nodes.notesFooter.textContent = notesFooterText(tab);
+    nodes.notesFooter.hidden = !nodes.notesFooter.textContent;
+    if (nodes.notesSectionHint) nodes.notesSectionHint.hidden = !(tab && tab.review.status === 'reviewing');
+    const history = Boolean(tab && tab.historyOpen);
+    nodes.currentPane.hidden = history; nodes.historySection.hidden = !history;
+    nodes.notesCurrentTab.classList.toggle('active', !history); nodes.notesHistoryTab.classList.toggle('active', history);
+    nodes.notesCurrentTab.setAttribute('aria-selected', String(!history)); nodes.notesHistoryTab.setAttribute('aria-selected', String(history));
+  }
+  function showNotesPane(pane) {
+    const tab = activeTab();
+    if (!tab) return;
+    tab.historyOpen = pane === 'history';
+    renderNotes(tab);
+  }
+
   function renderNotes(tab) {
     nodes.openNotesList.replaceChildren(); nodes.historyNotesList.replaceChildren();
     nodes.docNoteButton.hidden = !tab || tab.mode !== 'read' || !ANNOTATABLE.has(tab.review.status) || isReadOnly(tab);
-    const openSection = nodes.openNotesList.parentElement;
+    const openSection = nodes.openNotesSection;
+    renderNotesPane(tab);
     if (!tab || isPlain(tab)) {
       nodes.returnCard.hidden = true; nodes.returnCard.replaceChildren(); openSection.hidden = false;
       nodes.notesTotal.textContent = '0'; nodes.openNotesCount.textContent = '0'; nodes.historyNotesCount.textContent = '0';
@@ -2110,7 +2230,6 @@
       // 普通文档也可能有历史(会话被 90 天清理,版本记录还在):按文档身份显示
       if (tab && tab.review.docId) {
         void ensureVersions(tab);
-        state.renderingHistory = true; nodes.historySection.open = !!tab.historyOpen; state.renderingHistory = false;
         const grouped = History.buildRounds({ review: tab.review, versions: tab.versions || [], annotations: [] });
         nodes.historyNotesCount.textContent = grouped.rounds.length ? `${grouped.rounds.length} 轮` : '0';
         if (!grouped.rounds.length) nodes.historyNotesList.appendChild(emptyBlock('还没有历史。'));
@@ -2119,10 +2238,7 @@
       return;
     }
     void ensureVersions(tab);
-    state.renderingHistory = true;
-    nodes.historySection.open = !!tab.historyOpen;
-    state.renderingHistory = false;
-    const organized = Anchor.organizeAnnotations(tab.annotations, { historyExpanded: nodes.historySection.open });
+    const organized = Anchor.organizeAnnotations(tab.annotations, { historyExpanded: Boolean(tab.historyOpen) });
     const versions = tab.versions || [];
     // 回稿卡(规则⑤第三段):稿子回来 / 通过 / 恢复 / 作废时右栏顶部;数据来自版本事件,不读会继续变的旁注
     const card = History.returnCard({ review: tab.review, versions, annotations: tab.annotations });
@@ -2145,6 +2261,7 @@
       if (grouped.legacy) nodes.historyNotesList.appendChild(legacyGroup(tab, grouped.legacy));
     }
     maybeAutoCompare(tab, card);
+    renderCompareToggle(tab);
   }
 
   // ---------- 版本记录(回稿卡、历史分轮、时间线、对比视图共用) ----------
@@ -2457,18 +2574,18 @@
   function noteCard(tab, note, historical) {
     const card = document.createElement('article');
     card.className = `note-card${tab.focusedNoteId === note.id ? ' focused' : ''}`; card.dataset.noteId = note.id;
-    const meta = document.createElement('div'); meta.className = 'note-meta';
-    const author = document.createElement('strong'); author.textContent = note.author || '我(本机)';
-    const time = document.createElement('span'); time.className = 'note-time'; time.textContent = formatRelativeTime(note.createdAt || note.updatedAt);
-    meta.append(author, time);
     const quote = document.createElement('p'); quote.className = 'note-quote';
-    if (isDocNote(note)) { quote.classList.add('doc-scope'); quote.textContent = '全篇 · 总体意见'; }
-    else quote.textContent = `引用：“${String(note.quote || '').slice(0, 150)}”`;
+    if (isDocNote(note)) { quote.classList.add('doc-scope'); quote.textContent = '总体意见'; }
+    else quote.textContent = String(note.quote || '').slice(0, 150);
     const comment = document.createElement('p'); comment.className = 'note-comment'; comment.textContent = note.comment || '';
+    const footer = document.createElement('div'); footer.className = 'note-footer';
     const location = document.createElement('div'); location.className = 'note-location';
-    location.textContent = isDocNote(note) ? '全篇'
-      : Array.isArray(note.headingPath) && note.headingPath.length ? note.headingPath.join(' › ') : '正文';
-    card.append(meta, quote, comment, location);
+    const where = isDocNote(note) ? '全篇' : Array.isArray(note.headingPath) && note.headingPath.length ? note.headingPath[note.headingPath.length - 1] : '正文';
+    const author = note.author && note.author !== '我(本机)' ? `${note.author} · ` : '';
+    location.textContent = `${author}${where} · ${formatRelativeTime(note.createdAt || note.updatedAt)}`;
+    location.title = Array.isArray(note.headingPath) ? note.headingPath.join(' › ') : '';
+    footer.appendChild(location);
+    card.append(quote, comment, footer);
     if (historical) {
       const status = document.createElement('div'); const effective = effectiveStatus(note);
       status.className = `note-status-badge${effective === 'wontfix' || effective === 'cancelled' ? ' wontfix' : ''}`;
@@ -2479,11 +2596,11 @@
     } else {
       const actions = document.createElement('div'); actions.className = 'note-actions';
       if (tab.review.status === 'reviewing') {
-        actions.append(actionButton('编辑', () => openAnnotationDialog({ note })), actionButton('删除', () => deleteNote(note), 'danger'));
+        actions.append(actionButton('修改', () => openAnnotationDialog({ note })), actionButton('删除', () => deleteNote(note), 'danger'));
       } else if (tab.review.status === 'applying' && tab.review.applyMode === 'manual') {
         actions.append(actionButton('不改', () => resolveNote(note, 'wontfix'), 'skip'), actionButton('标记已处理', () => resolveNote(note, 'applied'), 'resolve'));
       }
-      card.appendChild(actions);
+      if (actions.childElementCount) footer.appendChild(actions);
     }
     card.addEventListener('click', (event) => { if (!event.target.closest('button')) focusNote(note.id, { scrollOnly: historical }); });
     return card;
@@ -2894,7 +3011,8 @@
     nodes.readerPane.hidden = true; nodes.editorPane.hidden = false;
     if (state.editorTabId !== tab.id) createEditor(tab);
     updateSaveState(tab);
-    nodes.finishManual.hidden = !(tab.review.status === 'applying' && tab.review.applyMode === 'manual');
+    // 「提交修改」只有一个家:工具栏右边的主按钮(编辑条里不再重复一个)
+    nodes.finishManual.hidden = true;
     renderOutline(tab.outline);
   }
 
@@ -3117,6 +3235,87 @@
     const text = Handoff.instructionText({ absPath: tab.review.sourceFile, cliScript: tab.review.cliScript });
     const ok = await Handoff.copyText(text);
     toast(ok ? '改稿指令已复制。贴给任何智能体(Claude Code、Codex…),它就能接上这一轮。' : '没能复制到剪贴板,请检查系统权限。', ok ? 'info' : 'error');
+  }
+
+  // ---------- 工具栏左边:文档名,点开看字数等(UI 方案 3.2) ----------
+  function renderDocTitle(tab) {
+    nodes.docTitleButton.hidden = !tab;
+    if (!tab) { toggleDocInfo(false); return; }
+    nodes.docTitleText.textContent = tab.review.title || tab.review.file || '文档';
+    nodes.docTitleButton.title = tab.review.sourceFile || '';
+  }
+  function docStats(text) {
+    const body = splitFrontMatter(String(text || '')).body;
+    const prose = body.replace(/```[\s\S]*?```/g, ' ').replace(/<[^>]+>/g, ' ').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1');
+    const cjk = (prose.match(/[\u3400-\u9fff\uf900-\ufaff]/g) || []).length;
+    const words = (prose.replace(/[\u3400-\u9fff\uf900-\ufaff]/g, ' ').match(/[A-Za-z0-9]+(?:['’][A-Za-z]+)?/g) || []).length;
+    const paragraphs = body.split(/\n\s*\n/).filter((part) => part.trim() && !/^\s*(---|\*\*\*)\s*$/.test(part)).length;
+    return { cjk, words, total: cjk + words, paragraphs };
+  }
+  function toggleDocInfo(force) {
+    const open = typeof force === 'boolean' ? force : nodes.docInfoPopover.hidden;
+    nodes.docInfoPopover.hidden = !open;
+    nodes.docTitleButton.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    const tab = activeTab();
+    if (!tab) { nodes.docInfoPopover.hidden = true; return; }
+    const stats = docStats(tab.mode === 'edit' && tab.editorDraft != null ? tab.editorDraft : tab.source);
+    const root = nodes.docInfoPopover;
+    root.replaceChildren();
+    const name = document.createElement('div'); name.className = 'doc-info-name'; name.textContent = tab.review.sourceFile || tab.review.title;
+    root.appendChild(name);
+    const rows = [
+      ['字数', `${stats.total.toLocaleString('zh-CN')}${stats.cjk && stats.words ? `(中文 ${stats.cjk.toLocaleString('zh-CN')} 字 · 英文 ${stats.words.toLocaleString('zh-CN')} 词)` : ''}`],
+      ['段落', String(stats.paragraphs)],
+      ['本轮批注', isPlain(tab) ? '还没开始审阅' : `${openAnnotations(tab).length} 条未处理`],
+      ['最后修改', tab.sourceMeta && tab.sourceMeta.mtimeMs ? formatRelativeTime(new Date(tab.sourceMeta.mtimeMs).toISOString()) : '—'],
+    ];
+    const table = document.createElement('dl'); table.className = 'doc-info-table';
+    rows.forEach(([label, value]) => { const dt = document.createElement('dt'); dt.textContent = label; const dd = document.createElement('dd'); dd.textContent = value; table.append(dt, dd); });
+    root.appendChild(table);
+    const actions = document.createElement('div'); actions.className = 'doc-info-actions';
+    const reveal = document.createElement('button'); reveal.type = 'button'; reveal.className = 'secondary-button compact-button'; reveal.textContent = '在访达中显示';
+    reveal.addEventListener('click', () => { toggleDocInfo(false); revealActive(); });
+    const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'secondary-button compact-button'; copy.textContent = '另存为副本…';
+    copy.addEventListener('click', () => { toggleDocInfo(false); void saveCopy(); });
+    actions.append(reveal, copy);
+    root.appendChild(actions);
+  }
+
+  // 工具栏上的「对比视图」开关:只在有可对比的一轮时出现(情境层)
+  function renderCompareToggle(tab) {
+    if (!tab) { nodes.compareToggleButton.hidden = true; return; }
+    const versions = tab.versions || [];
+    const reviewTab = !isPlain(tab);
+    const card = reviewTab ? History.returnCard({ review: tab.review, versions, annotations: tab.annotations }) : { show: false };
+    const available = Compare.isOpen() || Boolean(card.show && card.canCompare);
+    nodes.compareToggleButton.hidden = !available || tab.mode !== 'read';
+    nodes.compareToggleButton.classList.toggle('active', Compare.isOpen());
+    nodes.compareToggleButton.setAttribute('aria-pressed', String(Compare.isOpen()));
+  }
+
+  // 左栏底部:iCloud 一行(点开到设置)
+  async function renderSyncFooter() {
+    let text = 'iCloud', icon = 'ph-cloud', tone = '';
+    try {
+      const settings = state.settings || (bridge && typeof bridge.getSettings === 'function' ? await bridge.getSettings().catch(() => null) : null);
+      if (settings) state.settings = settings;
+      if (settings && !settings.syncHelperAvailable) { text = '这个安装包不带同步'; icon = 'ph-cloud-slash'; tone = 'muted'; }
+      else if (settings && !settings.syncEnabled) { text = 'iCloud 同步已关闭'; icon = 'ph-cloud-slash'; tone = 'muted'; }
+      else {
+        const status = await requestJson('/api/app/sync/status');
+        const helper = status.helper;
+        const last = helper ? Date.parse(helper.lastPollAt || '') : NaN;
+        if (!helper) { text = '同步程序没有运行'; icon = 'ph-cloud-slash'; tone = 'warn'; }
+        else if (helper.accountStatus && helper.accountStatus !== 'available') { text = '未登录 iCloud'; icon = 'ph-cloud-slash'; tone = 'warn'; }
+        else if (helper.error) { text = 'iCloud 同步出错'; icon = 'ph-cloud-warning'; tone = 'warn'; }
+        else if (!Number.isFinite(last) || Date.now() - last > 3 * 60 * 1000) { text = '同步程序没有在运行'; icon = 'ph-cloud-slash'; tone = 'warn'; }
+        else { text = `iCloud 已同步 · ${formatRelativeTime(helper.lastPollAt)}`; icon = 'ph-cloud-check'; }
+      }
+    } catch (_) { text = '读不到同步状态'; icon = 'ph-cloud-slash'; tone = 'warn'; }
+    nodes.syncFooterText.textContent = text;
+    nodes.syncFooterIcon.className = `ph ${icon}`;
+    nodes.syncFooter.dataset.tone = tone;
   }
 
   // ---------- 快速打开(⇧⌘O):只搜打开着的标签与最近文件,键盘一秒切换 ----------
@@ -3362,7 +3561,12 @@
   async function saveCopy(tab = activeTab()) {
     if (!tab) return;
     if (tab.mode === 'edit') captureEditorValue(tab);
-    const content = tab.mode === 'edit' && tab.editorDraft != null ? tab.editorDraft : tab.source;
+    let content = tab.source;
+    if (tab.mode === 'edit' && tab.dirty && tab.editorDraft != null) {
+      const writeback = patchForSave(tab, tab.editorDraft);
+      if (writeback.needsConfirm && !(await confirmWriteback(writeback))) return;
+      content = writeback.text;
+    }
     let filePath = '';
     try { filePath = await pickCopyPath(tab, '另存为副本', `${copyStem(tab)} 副本`); }
     catch (error) { toast(`另存失败:${error.message || error}`, 'error'); return; }
@@ -3460,6 +3664,7 @@
   async function runAction(action) {
     const tab = activeTab(); if (!tab || !action) return;
     if (action === 'resolve-conflict') return resolveConflict(tab);
+    if (action === 'busy') return undefined;
     if (action === 'submit') return submitReview(tab, { skipConfirm: true });
     if (action === 'approve') return approveAndFinalize(tab);
     if (action === 'finalize') return finalizeReviewTab(tab);
@@ -3518,11 +3723,14 @@
     nodes.outlineMode.addEventListener('click', () => setLeftMode('outline'));
     nodes.filesMode.addEventListener('click', () => setLeftMode('files'));
     nodes.collapseLeft.addEventListener('click', () => toggleLeft(true));
-    nodes.expandLeft.addEventListener('click', () => toggleLeft(false));
-    nodes.toggleLeftTop.addEventListener('click', () => toggleLeft());
-    nodes.collapseRight.addEventListener('click', () => toggleRight(true));
-    nodes.expandRight.addEventListener('click', () => toggleRight(false));
+    nodes.toggleLeftTop.addEventListener('click', () => toggleLeft(false));
     nodes.toggleRightTop.addEventListener('click', () => toggleRight());
+    nodes.notesCurrentTab.addEventListener('click', () => showNotesPane('current'));
+    nodes.notesHistoryTab.addEventListener('click', () => showNotesPane('history'));
+    nodes.docTitleButton.addEventListener('click', (event) => { event.stopPropagation(); toggleDocInfo(); });
+    nodes.compareToggleButton.addEventListener('click', () => toggleCompare());
+    nodes.syncFooter.addEventListener('click', () => { void openSettings(); });
+    document.addEventListener('click', (event) => { if (!nodes.docInfoPopover.hidden && !event.target.closest('#docInfoPopover, #docTitleButton')) toggleDocInfo(false); });
     nodes.readingMode.addEventListener('click', () => { void enterReadMode(); });
     nodes.editingMode.addEventListener('click', enterEditMode);
     nodes.primaryAction.addEventListener('click', handlePrimaryAction);
@@ -3570,17 +3778,13 @@
       event.preventDefault();
       setReaderZoom(state.readerZoom * Math.exp(-event.deltaY * 0.01));
     }, { passive: false });
-    nodes.historySection.addEventListener('toggle', () => {
-      if (state.renderingHistory) return;
-      const tab = activeTab();
-      if (tab) { tab.historyOpen = nodes.historySection.open; renderNotes(tab); }
-    });
     window.addEventListener('focus', () => { void reconcileOpenReviews(); });
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) void reconcileOpenReviews();
     });
     window.addEventListener('pageshow', () => { void reconcileOpenReviews(); });
     window.addEventListener('resize', () => {
+      applyNarrowLayout();
       keepAnnotationDialogInView();
       scheduleMarkerPositions();
     });
@@ -3719,6 +3923,10 @@
 
   async function init() {
     installEvents();
+    applyNarrowLayout();
+    void renderSyncFooter();
+    setInterval(() => { void renderSyncFooter(); }, 60_000);
+    window.addEventListener('focus', () => { void renderSyncFooter(); });
     renderLayoutState();
     applyReaderZoom();
     await refreshRecents();

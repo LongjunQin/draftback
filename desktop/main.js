@@ -86,13 +86,15 @@ function startSyncHelper() {
   const executable = syncHelperExecutable();
   if (!executable) return;
   try {
-    syncHelper = spawn(executable, [], {
+    const child = spawn(executable, [], {
       env: { ...process.env, DRAFTBACK_DATA_DIR: ownedDataDirectory(), DRAFTBACK_PARENT_PID: String(process.pid) },
       stdio: 'ignore',
       detached: false,
     });
-    syncHelper.on('exit', () => { syncHelper = null; });
-    syncHelper.on('error', () => { syncHelper = null; });
+    syncHelper = child;
+    // 只清自己:快速「关 → 开」时,旧进程迟到的退出事件不能把新进程的句柄清掉
+    child.on('exit', () => { if (syncHelper === child) syncHelper = null; });
+    child.on('error', () => { if (syncHelper === child) syncHelper = null; });
   } catch {
     syncHelper = null;
   }
@@ -331,44 +333,43 @@ function cliScriptPath() {
     ? path.join(process.resourcesPath, 'draftback-server', 'mdreview.js')
     : path.join(__dirname, '..', 'mdreview.js');
 }
-function cliLauncher() {
-  // 用 App 自带的运行时跑 mdreview.js(ELECTRON_RUN_AS_NODE),用户电脑上不必另装 Node
-  return [
-    '#!/bin/bash',
-    '# 回稿(Draftback)审阅命令:由回稿「设置 › 命令行工具」安装,指向 App 自带的 mdreview.js',
-    `ELECTRON_RUN_AS_NODE=1 exec ${JSON.stringify(process.execPath)} ${JSON.stringify(cliScriptPath())} "$@"`,
-    '',
-  ].join('\n');
-}
+const CliInstall = require('./cli-install');
+function cliLauncher() { return CliInstall.launcherScript(process.execPath, cliScriptPath()); }
 function cliStatus() {
   let text = '';
   try { text = fs.readFileSync(CLI_PATH, 'utf8'); } catch { return { installed: false, path: CLI_PATH, pointsTo: null }; }
-  const target = cliScriptPath();
-  const pointsTo = text.includes(target) ? 'this-app' : /mdreview\.js/.test(text) ? 'elsewhere' : 'unknown';
-  const match = /"([^"]*mdreview\.js)"/.exec(text);
-  return { installed: true, path: CLI_PATH, pointsTo, target: match ? match[1] : null };
+  return { installed: true, path: CLI_PATH, ...CliInstall.describeInstalled(text, cliScriptPath()) };
 }
 async function installCli() {
   const script = cliLauncher();
-  const tmp = path.join(app.getPath('temp'), `draftback-mdreview-${process.pid}`);
-  fs.writeFileSync(tmp, script, { mode: 0o755 });
+  const dir = path.dirname(CLI_PATH);
+  // 先在同一目录写临时文件再改名替换:改名换掉的是目录项本身,旧的 mdreview 若是指向别处的符号链接,
+  // 不会顺着链接把别人的文件改写掉
+  const staged = path.join(dir, `.mdreview-draftback-${process.pid}-${Date.now()}`);
   try {
-    fs.mkdirSync(path.dirname(CLI_PATH), { recursive: true });
-    fs.copyFileSync(tmp, CLI_PATH);
-    fs.chmodSync(CLI_PATH, 0o755);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(staged, script, { mode: 0o755, flag: 'wx' });
+    fs.chmodSync(staged, 0o755);
+    fs.renameSync(staged, CLI_PATH);
     return { ok: true, ...cliStatus() };
   } catch (error) {
+    try { fs.unlinkSync(staged); } catch {}
     if (!error || (error.code !== 'EACCES' && error.code !== 'EPERM')) return { ok: false, message: String(error && error.message || error) };
-    // /usr/local/bin 要管理员权限:请系统弹出授权框
-    const command = `mkdir -p /usr/local/bin && cp ${JSON.stringify(tmp)} ${CLI_PATH} && chmod 755 ${CLI_PATH}`;
-    const result = await new Promise((resolve) => {
-      const child = spawn('/usr/bin/osascript', ['-e', `do shell script ${JSON.stringify(command)} with administrator privileges`], { stdio: 'ignore' });
+  }
+  // /usr/local/bin 要管理员权限:内容先写到只有本程序控制名字的临时位置,再请系统弹出授权框完成同样的「写临时文件 → 改名」
+  const tmpDir = fs.mkdtempSync(path.join('/tmp', 'draftback-cli-'));
+  const tmp = path.join(tmpDir, 'mdreview');
+  fs.writeFileSync(tmp, script, { mode: 0o755 });
+  const script_ = CliInstall.privilegedInstallCommand({ tmpFile: tmp, dir, staged: path.join(dir, `.mdreview-draftback-${process.pid}`), target: CLI_PATH });
+  try {
+    const ok = await new Promise((resolve) => {
+      const child = spawn('/usr/bin/osascript', ['-e', script_], { stdio: 'ignore' });
       child.on('exit', (code) => resolve(code === 0));
       child.on('error', () => resolve(false));
     });
-    return result ? { ok: true, ...cliStatus() } : { ok: false, message: '没有拿到管理员授权,命令没有装上。' };
+    return ok ? { ok: true, ...cliStatus() } : { ok: false, message: '没有拿到管理员授权,命令没有装上。' };
   } finally {
-    try { fs.unlinkSync(tmp); } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   }
 }
 

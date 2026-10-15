@@ -339,7 +339,12 @@ async function forkConflictRound(ref, targetPath) {
     throw new store.ReviewStoreError('VERSION_UNAVAILABLE', '这一轮的原稿留底不可用,没法另存。', { httpStatus: 409 });
   }
   const { decodeText } = require('./lib/text-encoding');
-  const content = decodeText(original.buffer).content;
+  const decoded = decodeText(original.buffer);
+  if (decoded.encoding === 'unknown') {
+    throw new store.ReviewStoreError('ENCODING_UNKNOWN', '锁定时的原稿编码认不出来,另存会把文字变成乱码。请改用「以磁盘上的版本重新开始」。', { httpStatus: 409 });
+  }
+  // UTF-8 原样;GBK / UTF-16 转成 UTF-8 文字(批注锚点本来就按解码后的文字算,带过去仍对得上)
+  const content = decoded.content;
   const copy = await plainDocuments.saveDocumentCopy(targetPath, { content, sourcePath: review.absPath });
   const copyPath = copy.document.absPath;
   const notes = store.readAnnotations(review.absPath).annotations
@@ -792,16 +797,20 @@ async function handleAppApi(req, res, pathname, q) {
     const name = body && names[body.name];
     if (!name) return sendJson(res, 400, { error: 'bad_request', message: '没有这份说明。' });
     const source = path.join(STATIC_DIR, 'help', name);
-    const dir = path.join(store.getDataDir(), 'help');
-    fs.mkdirSync(dir, { recursive: true });
+    const dataDir = fs.realpathSync(store.getDataDir());
+    const dir = path.join(dataDir, 'help');
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // help 必须是数据目录里的真实目录,目标不能是符号链接:不往数据目录之外写
+    if (fs.lstatSync(dir).isSymbolicLink() || fs.realpathSync(dir) !== dir) return sendJson(res, 409, { error: 'help_dir', message: '说明目录被改成了链接,已停止写入。' });
     const target = path.join(dir, name);
+    if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) return sendJson(res, 409, { error: 'help_file', message: '说明文件被改成了链接,已停止写入。' });
     const fresh = fs.readFileSync(source);
-    // 随版本更新说明;用户在这份上的批注(旁注)不受影响
+    // 随版本更新说明;用户在这份上的批注(旁注)不受影响;正在审阅时不动它
     if (!fs.existsSync(target) || !fs.readFileSync(target).equals(fresh)) {
       const active = await store.getReviewByPath(target, { activeOnly: true }).catch(() => null);
-      if (!active) fs.writeFileSync(target, fresh);
+      if (!active) await store.atomicWriteFile(target, fresh, { mode: 0o644, encoding: undefined });
     }
-    return sendJson(res, 200, { ok: true, path: fs.realpathSync(target) });
+    return sendJson(res, 200, { ok: true, path: fs.realpathSync.native(target).normalize('NFC') });
   }
   // 图片落盘:编辑器里粘贴、拖入、上传的图片存到文档旁的 images/,返回相对路径
   if (pathname === '/api/app/document/image') {
@@ -923,6 +932,12 @@ async function handleAppApi(req, res, pathname, q) {
     const body = await readBody(req);
     const result = await documents.writeSource(ref, body);
     return sendJson(res, 200, { ok: true, ...result });
+  }
+  if (pathname === '/api/app/review/seen') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const review = await documents.requireReview(ref);
+    await store.markReviewSeen(review.id);
+    return sendJson(res, 200, { ok: true });
   }
   if (pathname === '/api/app/review/restart-from-disk') {
     if (!allowMethods(req, res, ['POST'])) return;

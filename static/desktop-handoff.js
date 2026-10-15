@@ -13,6 +13,14 @@
 
   const STALE_LISTENING_MS = 10 * 60 * 1000; // 有程序在听却迟迟没领取,提示重新复制指令
   const HIDDEN = Object.freeze({ hidden: true, label: '', action: '' });
+  // AI 在改时主按钮的位置不空着:一个不能点的「改稿中…」(UI 方案 3.3),位置不跳
+  const BUSY = Object.freeze({ hidden: false, disabled: true, label: '改稿中…', action: 'busy', title: 'AI 改完稿子会自己回来', icon: 'ph-sparkle' });
+  function dateText(value) {
+    const t = Date.parse(value || '');
+    if (!Number.isFinite(t)) return '';
+    const d = new Date(t);
+    return `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
+  }
 
   function button(label, action, extra = {}) {
     return { hidden: false, disabled: false, label, action, title: '', ...extra };
@@ -39,8 +47,8 @@
         detail: '原文已锁定。划词批注,批完点「交给 AI」(⌘↩);一条都没有就「通过 · 定稿」。',
         icon: 'ph-lock-key',
         primary: count > 0
-          ? button('交给 AI', 'submit', { title: `交出本轮 ${count} 条批注(⌘↩)` })
-          : button('通过 · 定稿', 'approve', { title: '没有批注:记为通过并定稿,告诉 AI 这篇结束了' }),
+          ? button(`交给 AI · ${count}`, 'submit', { title: `交出本轮 ${count} 条批注(⌘↩)`, icon: 'ph-sparkle' })
+          : button('通过 · 定稿', 'approve', { title: '没有批注:记为通过并定稿,告诉 AI 这篇结束了', icon: 'ph-check-circle' }),
         secondary: HIDDEN,
       };
     } else if (review.status === 'ready_to_apply') {
@@ -49,15 +57,15 @@
       const submittedAt = Date.parse(review.submittedAt || 0);
       const stale = Number.isFinite(submittedAt) && now - submittedAt > STALE_LISTENING_MS;
       if (agentState === 'claimed') {
-        view = { status: 'claimed', text: 'AI 正在修改…', detail: `${review.claimedBy || agent} 已领取这一轮,改完会自动刷新;期间不能批注。`, icon: 'ph-robot', primary: HIDDEN, secondary: HIDDEN };
+        view = { status: 'claimed', text: 'AI 正在修改…', detail: `${review.claimedBy || agent} 已领取这一轮,改完会自动刷新;期间不能批注。`, icon: 'ph-robot', primary: BUSY, secondary: HIDDEN };
       } else if (agentState === 'listening') {
         view = {
           status: 'listening',
           text: `已交出 · ${agent} 在线,等待领取`,
           detail: stale ? 'AI 在线但还没开始,可以重新复制改稿指令贴给它。' : 'AI 收到后会领取并开始修改;超过 10 分钟没动静可以重新复制指令。',
           icon: 'ph-broadcast',
-          primary: stale ? button('重新复制指令', 'copy-instruction', { title: 'AI 在线但还没开始,把改稿指令再贴给它' }) : HIDDEN,
-          secondary: button('我自己改', 'manual-edit', { title: '不等 AI,自己逐条处理批注' }),
+          primary: stale ? button('重新复制指令', 'copy-instruction', { title: 'AI 在线但还没开始,把改稿指令再贴给它', icon: 'ph-copy' }) : HIDDEN,
+          secondary: button('我自己改', 'manual-edit', { title: '不等 AI,自己逐条处理批注', icon: 'ph-pencil-simple-line' }),
         };
       } else {
         view = {
@@ -65,34 +73,35 @@
           text: '已交出 · 还没有 AI 接入',
           detail: '没有程序在等这篇稿子。点「复制改稿指令」,贴给任何智能体(Claude Code、Codex…)就能接上。',
           icon: 'ph-paper-plane-tilt',
-          primary: button('复制改稿指令', 'copy-instruction', { title: '把文件路径和要执行的命令复制到剪贴板' }),
-          secondary: button('我自己改', 'manual-edit', { title: '不交给 AI,自己逐条处理批注' }),
+          primary: button('复制改稿指令', 'copy-instruction', { title: '把文件路径和要执行的命令复制到剪贴板', icon: 'ph-copy' }),
+          secondary: button('我自己改', 'manual-edit', { title: '不交给 AI,自己逐条处理批注', icon: 'ph-pencil-simple-line' }),
         };
       }
     } else if (review.status === 'applying') {
       if (review.applyMode === 'manual') {
         view = review.round === 'manual-edit'
-          ? { status: 'manual', text: '我自己改 · 改完点「提交修改」', detail: '这轮没有批注,你直接改;提交后本轮结束。期间智能体不会碰这篇文档。', icon: 'ph-pencil-simple-line', primary: button('提交修改', 'finish-manual'), secondary: HIDDEN }
-          : { status: 'manual', text: '我自己改 · 逐条处理批注', detail: '所有未处理批注清零后才能提交。', icon: 'ph-pencil-simple-line', primary: button('提交修改', 'finish-manual'), secondary: HIDDEN };
+          ? { status: 'manual', text: '我自己改 · 改完点「提交修改」', detail: '这轮没有批注,你直接改;提交后本轮结束。期间智能体不会碰这篇文档。', icon: 'ph-pencil-simple-line', primary: button('提交修改', 'finish-manual', { icon: 'ph-check' }), secondary: HIDDEN }
+          : { status: 'manual', text: '我自己改 · 逐条处理批注', detail: '所有未处理批注清零后才能提交。', icon: 'ph-pencil-simple-line', primary: button('提交修改', 'finish-manual', { icon: 'ph-check' }), secondary: HIDDEN };
       } else {
-        view = { status: 'applying', text: 'AI 正在修改…', detail: `${review.applyActor || 'AI'} 正在按批注改稿,文档暂时只读,改完会自动刷新。`, icon: 'ph-robot', primary: HIDDEN, secondary: HIDDEN };
+        view = { status: 'applying', text: 'AI 正在修改…', detail: `${review.applyActor || 'AI'} 正在按批注改稿,文档暂时只读,改完会自动刷新。`, icon: 'ph-robot', primary: BUSY, secondary: HIDDEN };
       }
     } else if (review.status === 'complete') {
       if (review.outcome === 'finalized') {
-        view = { status: 'finalized', text: '已定稿', detail: '这篇已结束。再划词批注会开始新一轮。', icon: 'ph-check-circle', primary: HIDDEN, secondary: HIDDEN };
+        const date = dateText(review.finalizedAt || review.completedAt);
+        view = { status: 'finalized', text: date ? `已定稿 · ${date}` : '已定稿', detail: '这篇已结束。再划词批注会开始新一轮。', icon: 'ph-check-circle', primary: HIDDEN, secondary: HIDDEN };
       } else if (review.outcome === 'restored') {
         const round = review.restoredFrom && review.restoredFrom.round;
-        view = { status: 'restored', text: `已恢复到第 ${round || '?'} 轮改稿前`, detail: '正文已换回那一轮改稿前的样子;恢复前的稿子留在历史里,可以再恢复回来。再划词批注会开始新一轮。', icon: 'ph-clock-counter-clockwise', primary: button('通过 · 定稿', 'finalize'), secondary: HIDDEN };
+        view = { status: 'restored', text: `已恢复到第 ${round || '?'} 轮改稿前`, detail: '正文已换回那一轮改稿前的样子;恢复前的稿子留在历史里,可以再恢复回来。再划词批注会开始新一轮。', icon: 'ph-clock-counter-clockwise', primary: button('通过 · 定稿', 'finalize', { icon: 'ph-check-circle' }), secondary: HIDDEN };
       } else if (review.outcome === 'approved') {
-        view = { status: 'approved', text: '已通过 · 没有批注', detail: '点「通过 · 定稿」告诉 AI 这篇结束;再划词批注会开始新一轮。', icon: 'ph-check-circle', primary: button('通过 · 定稿', 'finalize'), secondary: HIDDEN };
+        view = { status: 'approved', text: '已通过 · 没有批注', detail: '点「通过 · 定稿」告诉 AI 这篇结束;再划词批注会开始新一轮。', icon: 'ph-check-circle', primary: button('通过 · 定稿', 'finalize', { icon: 'ph-check-circle' }), secondary: HIDDEN };
       } else {
-        view = { status: 'complete', text: '稿子回来了 · 已是最新版', detail: '看一遍改得对不对:再划词批注就开始下一轮;没问题就「通过 · 定稿」。', icon: 'ph-arrow-u-down-left', primary: button('通过 · 定稿', 'finalize', { title: '这版就是终稿,告诉 AI 这篇结束了' }), secondary: HIDDEN };
+        view = { status: 'complete', text: '稿子回来了 · 已是最新版', detail: '看一遍改得对不对:再划词批注就开始下一轮;没问题就「通过 · 定稿」。', icon: 'ph-arrow-u-down-left', primary: button('通过 · 定稿', 'finalize', { title: '这版就是终稿,告诉 AI 这篇结束了', icon: 'ph-check-circle' }), secondary: HIDDEN };
       }
     } else if (review.status === 'conflict') {
       view = {
         status: 'conflict', text: '文件在外面被改了', icon: 'ph-warning-circle',
         detail: '审阅期间有别的程序改了这个文件,已停止写入。点「处理…」:以磁盘上的版本重新开始,或另存你的版本。',
-        primary: button('处理…', 'resolve-conflict', { title: '以磁盘上的版本重新开始,或另存锁定时的版本' }), secondary: HIDDEN,
+        primary: button('处理…', 'resolve-conflict', { title: '以磁盘上的版本重新开始,或另存锁定时的版本', icon: 'ph-warning' }), secondary: HIDDEN,
       };
     } else if (review.status === 'cancelled') {
       view = { status: 'cancelled', text: '本轮已作废', detail: '本轮已人工结束。再划词批注会开始新一轮。', icon: 'ph-x-circle', primary: HIDDEN, secondary: HIDDEN };

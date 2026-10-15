@@ -12,84 +12,65 @@
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=9">
-  <link rel="stylesheet" href="/static/desktop.css?v=19">
+  <link rel="stylesheet" href="/static/desktop.css?v=20">
 </head>
 <body>
   <div id="appShell" class="app-shell">
-    <header class="titlebar drag-region">
-      <div class="brand drag-region" aria-label="回稿">
-        <span class="brand-mark"><img src="/static/brand/icon-256.png" alt="" aria-hidden="true"></span>
-        <span class="brand-name">回稿</span>
-      </div>
-      <div id="tabList" class="tab-list" role="tablist" aria-label="打开的 Markdown 文档"></div>
-      <button id="openTabButton" class="icon-button" type="button" title="打开 Markdown" aria-label="打开 Markdown">
-        <i class="ph ph-plus" aria-hidden="true"></i>
-      </button>
-      <div class="title-actions">
-        <button id="toggleLeftTop" class="icon-button" type="button" title="显示或收起左栏" aria-label="显示或收起左栏">
+    <!-- 左栏通顶:红绿灯在它上面;「稿件 / 大纲」 -->
+    <aside id="leftSidebar" class="left-sidebar" aria-label="稿件与大纲">
+      <div class="sidebar-top drag-region">
+        <button id="collapseLeft" class="icon-button compact" type="button" title="收起稿件栏(⌃⌘S)" aria-label="收起稿件栏">
           <i class="ph ph-sidebar-simple" aria-hidden="true"></i>
         </button>
-        <button id="toggleRightTop" class="icon-button" type="button" title="显示或收起批注" aria-label="显示或收起批注">
-          <i class="ph ph-notepad" aria-hidden="true"></i>
-        </button>
       </div>
-    </header>
-
-    <aside id="leftSidebar" class="left-sidebar" aria-label="文档导航">
       <div class="side-switch-row">
-        <button id="collapseLeft" class="icon-button compact" type="button" title="收起左栏" aria-label="收起左栏">
-          <i class="ph ph-caret-double-left" aria-hidden="true"></i>
-        </button>
         <div class="segmented" role="tablist" aria-label="左栏内容">
+          <button id="filesModeButton" type="button" role="tab" aria-selected="false">稿件</button>
           <button id="outlineModeButton" class="active" type="button" role="tab" aria-selected="true">大纲</button>
-          <button id="filesModeButton" type="button" role="tab" aria-selected="false">文件</button>
         </div>
       </div>
       <nav id="outlinePanel" class="outline-panel" aria-label="文章大纲"></nav>
       <section id="filesPanel" class="files-panel" hidden>
-        <button id="openFileButton" class="open-file-button" type="button">
-          <i class="ph ph-folder-open" aria-hidden="true"></i>
-          <span>打开 Markdown 文档</span>
-          <kbd>⌘O</kbd>
-        </button>
-        <button id="newFileButton" class="open-file-button" type="button">
-          <i class="ph ph-file-plus" aria-hidden="true"></i>
-          <span>新建 Markdown 文档</span>
-          <kbd>⌘N</kbd>
-        </button>
-        <div class="section-label">最近文件</div>
-        <div id="recentList" class="recent-list"></div>
+        <div id="recentList" class="recent-list draft-groups"></div>
+        <div class="files-actions">
+          <button id="openFileButton" class="text-button" type="button"><i class="ph ph-folder-open" aria-hidden="true"></i>打开…<kbd>⌘O</kbd></button>
+          <button id="newFileButton" class="text-button" type="button"><i class="ph ph-file-plus" aria-hidden="true"></i>新建…<kbd>⌘N</kbd></button>
+        </div>
       </section>
-      <button id="expandLeft" class="collapsed-rail-button" type="button" title="展开左栏" aria-label="展开左栏">
-        <i class="ph ph-caret-double-right" aria-hidden="true"></i>
+      <button id="syncFooter" class="sync-footer" type="button" title="点开同步设置">
+        <i id="syncFooterIcon" class="ph ph-cloud" aria-hidden="true"></i><span id="syncFooterText">iCloud</span>
       </button>
     </aside>
 
-    <section id="workspace" class="workspace">
-      <div id="documentToolbar" class="document-toolbar" hidden>
-        <div class="toolbar-group" role="group" aria-label="阅读或编辑">
-          <button id="readingModeButton" class="mode-button active" type="button">
-            <i class="ph ph-book-open-text" aria-hidden="true"></i>阅读与批注
+    <!-- 一条工具栏:左边文档名,正中状态区,右边六样 -->
+    <header id="documentToolbar" class="toolbar drag-region">
+      <div class="toolbar-left">
+        <button id="toggleLeftTop" class="icon-button compact sidebar-reveal" type="button" title="显示稿件栏(⌃⌘S)" aria-label="显示稿件栏">
+          <i class="ph ph-sidebar-simple" aria-hidden="true"></i>
+        </button>
+        <div class="doc-title-wrap">
+          <button id="docTitleButton" class="doc-title" type="button" aria-haspopup="dialog" aria-expanded="false" hidden>
+            <i class="ph ph-file-text" aria-hidden="true"></i><span id="docTitleText">文档</span><i class="ph ph-caret-down menu-caret" aria-hidden="true"></i>
           </button>
-          <button id="editingModeButton" class="mode-button" type="button">
-            <i class="ph ph-pencil-simple-line" aria-hidden="true"></i>编辑
-          </button>
+          <div id="docInfoPopover" class="popover-menu doc-info" role="dialog" aria-label="文档信息" hidden></div>
         </div>
-        <span class="toolbar-spacer"></span>
+      </div>
+      <div class="toolbar-center">
         <div class="review-state-wrap">
-          <button id="reviewStatePill" class="review-state" data-status="reviewing" type="button"
+          <button id="reviewStatePill" class="review-state" data-status="plain" type="button" hidden
             role="status" aria-live="polite" aria-atomic="true" aria-haspopup="dialog" aria-expanded="false" title="点开看轮次时间线">
-            <i id="reviewStateIcon" class="ph ph-lock-key" aria-hidden="true"></i>
-            <span id="reviewStateText">批注中 · 0 条</span>
+            <i id="reviewStateIcon" class="ph ph-book-open" aria-hidden="true"></i>
+            <span id="reviewStateText">普通阅读</span>
           </button>
           <div id="timelinePopover" class="popover-menu timeline-popover" role="dialog" aria-label="轮次时间线" hidden></div>
         </div>
-        <span class="toolbar-spacer"></span>
-        <button id="findButton" class="icon-button compact" type="button" title="查找(⌘F)" aria-label="查找"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></button>
-        <div id="dropOverlay" class="drop-overlay" hidden><div class="drop-card"><i class="ph ph-file-arrow-down" aria-hidden="true"></i>松开即打开 Markdown</div></div>
-        <div class="export-menu-wrap">
-          <button id="exportMenuButton" class="mode-button" type="button" aria-haspopup="menu" aria-expanded="false" title="导出或打印当前文档">
-            <i class="ph ph-export" aria-hidden="true"></i>导出<i class="ph ph-caret-down menu-caret" aria-hidden="true"></i>
+      </div>
+      <div class="toolbar-right">
+        <button id="compareToggleButton" class="icon-button compact" type="button" title="对比视图(⇧⌘D)" aria-label="对比视图" hidden><i class="ph ph-git-diff" aria-hidden="true"></i></button>
+        <button id="findButton" class="icon-button compact overflowable" type="button" title="查找(⌘F)" aria-label="查找"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></button>
+        <div class="export-menu-wrap overflowable">
+          <button id="exportMenuButton" class="icon-button compact" type="button" aria-haspopup="menu" aria-expanded="false" title="导出或打印" aria-label="导出或打印">
+            <i class="ph ph-export" aria-hidden="true"></i>
           </button>
           <div id="exportMenu" class="popover-menu" role="menu" aria-label="导出" hidden>
             <button type="button" role="menuitem" data-command="export-pdf"><span>导出为 PDF…</span><kbd>⇧⌘E</kbd></button>
@@ -99,9 +80,41 @@
             <button type="button" role="menuitem" data-command="print"><span>打印…</span><kbd>⌘P</kbd></button>
           </div>
         </div>
+        <div class="export-menu-wrap overflow-more">
+          <button id="toolbarMoreButton" class="icon-button compact" type="button" aria-haspopup="menu" aria-expanded="false" title="更多" aria-label="更多">
+            <i class="ph ph-dots-three" aria-hidden="true"></i>
+          </button>
+          <div id="toolbarMoreMenu" class="popover-menu" role="menu" aria-label="更多" hidden>
+            <button type="button" role="menuitem" data-command="find"><span>查找…</span><kbd>⌘F</kbd></button>
+            <div class="popover-sep" role="separator"></div>
+            <button type="button" role="menuitem" data-command="export-pdf"><span>导出为 PDF…</span><kbd>⇧⌘E</kbd></button>
+            <button type="button" role="menuitem" data-command="export-html"><span>导出为 HTML…</span></button>
+            <button type="button" role="menuitem" data-command="export-docx"><span>导出为 Word…</span></button>
+            <button type="button" role="menuitem" data-command="print"><span>打印…</span><kbd>⌘P</kbd></button>
+          </div>
+        </div>
         <button id="secondaryAction" class="secondary-button action-button" type="button" hidden></button>
+        <div class="mode-switch segmented" role="group" aria-label="阅读或编辑">
+          <button id="readingModeButton" class="active" type="button" title="阅读与批注(⌘/ 切换)">阅读</button>
+          <button id="editingModeButton" type="button" title="编辑(⌘/ 切换)">编辑</button>
+        </div>
+        <button id="toggleRightTop" class="icon-button compact" type="button" title="显示或收起批注栏(⌥⌘I)" aria-label="显示或收起批注栏">
+          <i class="ph ph-sidebar-simple flip" aria-hidden="true"></i>
+        </button>
         <button id="primaryAction" class="primary-button action-button" type="button" hidden></button>
       </div>
+    </header>
+
+    <!-- 两篇以上才出现的标签栏 -->
+    <div id="tabStrip" class="tab-strip">
+      <div id="tabList" class="tab-list" role="tablist" aria-label="打开的 Markdown 文档"></div>
+      <button id="openTabButton" class="icon-button compact" type="button" title="打开 Markdown(⌘O)" aria-label="打开 Markdown">
+        <i class="ph ph-plus" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <section id="workspace" class="workspace">
+      <div id="dropOverlay" class="drop-overlay" hidden><div class="drop-card"><i class="ph ph-file-arrow-down" aria-hidden="true"></i>松开即打开 Markdown</div></div>
       <!-- 查找条:从工具栏下方滑出;编辑模式多一行替换 -->
       <div id="findBar" class="find-bar" role="search" hidden>
         <div class="find-row">
@@ -123,13 +136,13 @@
         <div id="welcome" class="welcome">
           <div class="welcome-mark"><img src="/static/brand/icon-256.png" alt="" aria-hidden="true"></div>
           <h1>打开一篇 Markdown</h1>
-          <p>打开即读、可直接编辑。划词写下第一条批注,原文就锁定并开始第 1 轮审阅;批完点「交给 AI」。</p>
+          <p>直接读、直接改;选中文字写批注,交给 AI,稿子会自己回来。</p>
           <div class="welcome-actions">
             <button id="welcomeOpenButton" class="primary-button large" type="button">
-              <i class="ph ph-folder-open" aria-hidden="true"></i>打开 Markdown
+              <i class="ph ph-folder-open" aria-hidden="true"></i>打开…
             </button>
             <button id="welcomeNewButton" class="secondary-button large" type="button">
-              <i class="ph ph-file-plus" aria-hidden="true"></i>新建 Markdown
+              <i class="ph ph-file-plus" aria-hidden="true"></i>新建…
             </button>
           </div>
           <div id="welcomeRecent" class="welcome-recent"></div>
@@ -163,16 +176,12 @@
 
       <section id="editorPane" class="editor-pane" hidden aria-label="Markdown 编辑器">
         <div class="editor-toolbar">
-          <div>
-            <strong>编辑文档</strong>
-            <span id="editorSaveState" class="save-state">所有更改均已保存</span>
-          </div>
+          <span id="editorSaveState" class="save-state">所有更改均已保存</span>
           <div class="editor-actions">
-            <button id="saveButton" class="secondary-button" type="button">
+            <button id="saveButton" class="secondary-button compact-button" type="button" title="写回文件(⌘S)">
               <i class="ph ph-floppy-disk" aria-hidden="true"></i>保存
-              <kbd>⌘S</kbd>
             </button>
-            <button id="finishManualButton" class="primary-button" type="button" hidden>提交修改</button>
+            <button id="finishManualButton" class="primary-button compact-button" type="button" hidden>提交修改</button>
           </div>
         </div>
         <div class="editor-scroll">
@@ -181,40 +190,40 @@
       </section>
     </section>
 
-    <aside id="rightSidebar" class="right-sidebar" aria-label="批注列表">
+    <aside id="rightSidebar" class="right-sidebar" aria-label="批注">
       <div class="notes-header">
-        <div>
+        <div class="notes-title">
           <strong>批注</strong>
           <span id="notesTotal" class="notes-total">0</span>
         </div>
-        <button id="collapseRight" class="icon-button compact" type="button" title="收起批注栏" aria-label="收起批注栏">
-          <i class="ph ph-caret-double-right" aria-hidden="true"></i>
-        </button>
+        <div class="segmented notes-tabs" role="tablist" aria-label="本轮或历史">
+          <button id="notesCurrentTab" class="active" type="button" role="tab" aria-selected="true">本轮</button>
+          <button id="notesHistoryTab" type="button" role="tab" aria-selected="false">历史</button>
+        </div>
       </div>
       <div id="notesContent" class="notes-content">
-        <section id="returnCard" class="return-card" aria-label="回稿卡" hidden></section>
-        <button id="docNoteButton" class="doc-note-button" type="button" hidden>
-          <i class="ph ph-note-pencil" aria-hidden="true"></i>写总体意见
-          <span class="hint">针对全篇 · 不锚定文字</span>
-        </button>
-        <section>
+        <div id="currentPane" class="notes-pane">
+          <section id="returnCard" class="return-card" aria-label="回稿卡" hidden></section>
+          <button id="docNoteButton" class="doc-note-button" type="button" hidden>
+            <i class="ph ph-note-pencil" aria-hidden="true"></i>写总体意见
+            <span class="hint">针对全篇</span>
+          </button>
+          <section id="openNotesSection">
+            <div class="notes-section-heading">
+              <span>未交 · <span id="openNotesCount">0</span></span>
+              <span class="notes-section-hint">交出前都能改、能删</span>
+            </div>
+            <div id="openNotesList" class="notes-list"></div>
+          </section>
+        </div>
+        <section id="historySection" class="notes-pane history-section" hidden>
           <div class="notes-section-heading">
-            <span><span class="status-dot open"></span>本轮未处理</span>
-            <span id="openNotesCount">0</span>
+            <span>历史 · <span id="historyNotesCount">0</span></span>
           </div>
-          <div id="openNotesList" class="notes-list"></div>
-        </section>
-        <details id="historySection" class="history-section">
-          <summary>
-            <span>历史</span>
-            <span id="historyNotesCount">0</span>
-          </summary>
           <div id="historyNotesList" class="notes-list history-list"></div>
-        </details>
+        </section>
       </div>
-      <button id="expandRight" class="collapsed-rail-button" type="button" title="展开批注栏" aria-label="展开批注栏">
-        <i class="ph ph-caret-double-left" aria-hidden="true"></i>
-      </button>
+      <footer id="notesFooter" class="notes-footer">⌥⌘M 批注 · ⌘↩ 交给 AI · ⌥⌘↓ 下一条批注</footer>
     </aside>
   </div>
 
@@ -341,11 +350,12 @@
   <script src="/static/vendor/draftback-editor.js?v=9"></script>
   <script src="/static/markdown-patch.js?v=2"></script>
   <script src="/static/desktop-anchor.js?v=5"></script>
-  <script src="/static/desktop-handoff.js?v=2"></script>
+  <script src="/static/desktop-handoff.js?v=3"></script>
   <script src="/static/desktop-actions.js?v=1"></script>
+  <script src="/static/desktop-drafts.js?v=1"></script>
   <script src="/static/desktop-diff.js?v=1"></script>
   <script src="/static/desktop-history.js?v=1"></script>
   <script src="/static/desktop-compare.js?v=1"></script>
-  <script src="/static/desktop.js?v=30"></script>
+  <script src="/static/desktop.js?v=31"></script>
 </body>
 </html>

@@ -99,7 +99,7 @@ async function main() {
     const cdp = chrome.cdp;
     await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: FAKE_BRIDGE });
     await cdp.send('Page.navigate', { url: `http://127.0.0.1:${server.port}/desktop` });
-    await waitUntil('页面就绪', () => cdp.evaluate(`document.readyState === 'complete' && typeof window.__db.command === 'function' && document.querySelectorAll('#welcomeRecent .recent-item').length >= 4`));
+    await waitUntil('页面就绪', () => cdp.evaluate(`document.readyState === 'complete' && typeof window.__db.command === 'function' && document.querySelectorAll('#recentList .recent-item').length >= 4`));
 
     // 1. 任务列表:阅读时是只读勾选框,文字里没有 [ ]
     await openRecent(cdp, '任务稿.md');
@@ -111,7 +111,9 @@ async function main() {
       itemClasses: Array.from(document.querySelectorAll('#documentContent li')).map((li) => li.className),
     })`);
     assert.equal(taskDom.checked, 1);
-    assert.doesNotMatch(taskDom.text, /\[ \]|\[x\]/, '勾选框代替了 [ ] 文字');
+    // 「[ ] 」原文仍在正文文字里(看不见):旧批注的文字坐标不变(Codex 审查第 11 条)
+    assert.match(taskDom.text, /\[ \] 没做的事/);
+    assert.equal(await cdp.evaluate(`document.querySelector('#documentContent .task-marker').getBoundingClientRect().width <= 1`), true, '[ ] 文字看不见');
     assert.match(taskDom.listClass, /contains-task-list/);
     assert.deepEqual(taskDom.itemClasses, ['task-list-item', 'task-list-item', ''], '普通列表项不受影响');
     const state1 = await cdp.evaluate(`window.__db.menuState`);
@@ -162,6 +164,10 @@ async function main() {
     await waitUntil('替换行出现', () => cdp.evaluate(`!document.querySelector('#findBar').hidden && !document.querySelector('#replaceRow').hidden`));
     await cdp.evaluate(`(() => { const i = document.querySelector('#findInput'); i.value = '苹果'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     await waitUntil('找到两处', () => cdp.evaluate(`document.querySelector('#findCount').textContent === '1 / 2' && document.querySelectorAll('#codeEditor .db-find-match').length === 2`));
+    // 逐个替换:换上的文字里又含查找词时,下一处要从换完的位置往后找(Codex 审查第 7 条)
+    await cdp.evaluate(`document.querySelector('#replaceInput').value = '苹果树'; document.querySelector('#replaceOne').click(); document.querySelector('#replaceOne').click();`);
+    await waitUntil('逐个替换两次', () => cdp.evaluate(`document.querySelector('#codeEditor .ProseMirror').textContent.includes('第一段写着苹果树和苹果树。')`));
+    await cdp.evaluate(`(() => { const i = document.querySelector('#findInput'); i.value = '苹果树'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     await cdp.evaluate(`document.querySelector('#replaceInput').value = '香蕉'; document.querySelector('#replaceAll').click();`);
     await waitUntil('替换提示', () => toastHas(cdp, '已替换 2 处'));
     await key(cdp, 'Escape', 'Escape', 27);

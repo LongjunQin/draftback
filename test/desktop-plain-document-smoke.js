@@ -159,7 +159,7 @@ async function main() {
       const pill = document.querySelector('#reviewStatePill');
       return document.querySelector('#annotationDialog').hidden && document.querySelectorAll('#tabList .tab').length === 1 &&
         pill.dataset.status === 'reviewing' && document.querySelector('#reviewStateText').textContent === '批注中 · 1 条' &&
-        document.querySelector('#primaryAction').textContent === '交给 AI' && !document.querySelector('#primaryAction').hidden &&
+        /^交给 AI · \\d+$/.test(document.querySelector('#primaryAction').textContent) && !document.querySelector('#primaryAction').hidden &&
         document.querySelectorAll('#openNotesList .note-comment').length === 1 && document.querySelector('#plain-para');
     })()`));
     const review = await store.getReviewByPath(source, { dataDir, activeOnly: true });
@@ -174,8 +174,10 @@ async function main() {
     // 4. 最近文件列表。
     await chrome.cdp.evaluate(`document.querySelector('#filesModeButton').click()`);
     await waitUntil('最近文件显示审阅状态', () => chrome.cdp.evaluate(`(() => {
-      const item = document.querySelector('#recentList .recent-item');
-      return item && item.textContent.includes('普通文档.md') && item.textContent.includes('批注中');
+      // 第二批起左栏「稿件」按轮到谁分组:这一篇在「轮到你」,行内写轮次与未交条数
+      const group = document.querySelector('#recentList .draft-group[data-group="yours"]');
+      const item = group && group.querySelector('.recent-item');
+      return item && item.textContent.includes('普通文档.md') && item.textContent.includes('第 1 轮') && item.textContent.includes('1 条未交');
     })()`));
 
     const fatal = chrome.cdp.exceptions.filter((item) => !/favicon/i.test(item));

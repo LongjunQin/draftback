@@ -96,7 +96,7 @@ test('另存为副本:新文件新身份、不带旁注;不能存回原文件、
   const reviewed = path.join(f.docDir, '审阅中.md');
   fs.writeFileSync(reviewed, '# 审阅中\n');
   await store.openReview(reviewed, f.options);
-  await assert.rejects(documents.saveDocumentCopy(reviewed, { content: 'x' }, f.options), (error) => error.code === 'REVIEW_ACTIVE');
+  await assert.rejects(documents.saveDocumentCopy(reviewed, { content: 'x' }, f.options), (error) => error.code === 'COPY_TARGET_HAS_HISTORY');
   assert.equal(fs.readFileSync(reviewed, 'utf8'), '# 审阅中\n', '正在审阅的文件没被盖掉');
   await documents.saveDocumentCopy(copyPath, { content: '# 再盖一次\n' }, f.options);
   assert.equal(fs.readFileSync(copyPath, 'utf8'), '# 再盖一次\n');
@@ -213,4 +213,54 @@ test('动作表:每个快捷键都能解析、互不重复;页面命令都有处
   const groups = Actions.shortcutList();
   assert.ok(groups.some((g) => g.menu === '稿件' && g.rows.some((r) => r.label === '批注所选文字' && r.keys === '⌥⌘M')));
   assert.ok(!groups.some((g) => g.rows.some((r) => /开发版/.test(r.label))), '一览里没有开发版菜单项');
+});
+
+test('Codex 审查修补:大小写别名不能绕过「不能存回原文件」与「不覆盖有历史的文件」;路径按磁盘上的写法归一', async (t) => {
+  const f = fixture(t);
+  const doc = path.join(f.docDir, 'Report.md');
+  fs.writeFileSync(doc, '# Report\n');
+  const alias = path.join(f.docDir, 'report.md');
+  if (!fs.existsSync(alias)) return; // 区分大小写的卷上没有别名问题
+  assert.equal(store.normalizeMdPath(alias), doc, '按磁盘上的真实写法归一');
+  await assert.rejects(documents.saveDocumentCopy(alias, { content: 'x', sourcePath: doc }, f.options), (error) => error.code === 'COPY_SAME_FILE');
+  const { review } = await store.openReview(doc, f.options);
+  assert.equal((await store.getReviewByPath(alias, { ...f.options, activeOnly: true })).id, review.id, '大小写不同也找得到同一个会话');
+  const other = path.join(f.docDir, 'Other.md');
+  fs.writeFileSync(other, '# Other\n');
+  await assert.rejects(documents.saveDocumentCopy(path.join(f.docDir, 'REPORT.md'), { content: 'x', sourcePath: other }, f.options), (error) => error.code === 'COPY_TARGET_HAS_HISTORY');
+  assert.equal(fs.readFileSync(doc, 'utf8'), '# Report\n');
+});
+
+test('Codex 审查修补:副本不覆盖有批注或审阅历史的文件;冲突另存遇到认不出的编码时拒绝且不作废原轮', async (t) => {
+  const f = fixture(t);
+  const withNotes = path.join(f.docDir, '有批注.md');
+  fs.writeFileSync(withNotes, '# 有批注\n');
+  fs.writeFileSync(`${withNotes}.annotations.json`, JSON.stringify({ version: 1, file: '有批注.md', annotations: [] }));
+  await assert.rejects(documents.saveDocumentCopy(withNotes, { content: 'x' }, f.options), (error) => error.code === 'COPY_TARGET_HAS_HISTORY');
+  const finished = path.join(f.docDir, '审过.md');
+  fs.writeFileSync(finished, '# 审过\n');
+  const { review } = await store.openReview(finished, f.options);
+  await store.unlockReview(finished, '结束', f.options);
+  fs.rmSync(`${finished}.annotations.json`, { force: true });
+  await assert.rejects(documents.saveDocumentCopy(finished, { content: 'x' }, f.options), (error) => error.code === 'COPY_TARGET_HAS_HISTORY', `会话 ${review.id} 结束了也算历史`);
+
+  const port = await startServer(t, f.dataDir);
+  const odd = path.join(f.docDir, '怪编码.md');
+  fs.writeFileSync(odd, Buffer.from([0x23, 0x20, 0x81, 0x0a]));
+  const opened = await store.openReview(odd, f.options);
+  fs.writeFileSync(odd, '# 外面改了\n');
+  await request(port, `/api/app/bundle?r=${opened.review.id}`);
+  const fork = await request(port, `/api/app/review/fork?r=${opened.review.id}`, { method: 'POST', body: { path: path.join(f.docDir, '怪编码 我的版本.md') } });
+  assert.equal(fork.status, 409);
+  assert.match(fork.json.message, /编码认不出来/);
+  assert.equal((await store.getReviewById(opened.review.id, f.options)).status, 'conflict', '拒绝时原轮不动');
+
+  // 说明目录被换成链接:不往外写
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-help-out-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.rmSync(path.join(f.dataDir, 'help'), { recursive: true, force: true });
+  fs.symlinkSync(outside, path.join(f.dataDir, 'help'));
+  const help = await request(port, '/api/app/help/open', { method: 'POST', body: { name: 'guide' } });
+  assert.equal(help.status, 409);
+  assert.deepEqual(fs.readdirSync(outside), []);
 });

@@ -13,7 +13,8 @@ test('状态表:稿子在谁手里只有这几种,主按钮随之变化', () => 
 
   const reviewing = Handoff.describe({ review: { status: 'reviewing' }, openCount: 3 });
   assert.equal(reviewing.text, '批注中 · 3 条');
-  assert.equal(reviewing.primary.label, '交给 AI');
+  assert.equal(reviewing.primary.label, '交给 AI · 3', '主按钮带未交条数(UI 方案 3.3)');
+  assert.equal(reviewing.primary.icon, 'ph-sparkle');
   assert.equal(reviewing.primary.action, 'submit');
   const empty = Handoff.describe({ review: { status: 'reviewing' }, openCount: 0 });
   assert.equal(empty.primary.label, '通过 · 定稿');
@@ -36,7 +37,9 @@ test('状态表:稿子在谁手里只有这几种,主按钮随之变化', () => 
   const claimed = Handoff.describe({ review: { status: 'ready_to_apply', agentState: 'claimed', claimedBy: 'Codex' } });
   assert.equal(claimed.status, 'claimed');
   assert.equal(claimed.text, 'AI 正在修改…');
-  assert.equal(claimed.primary.hidden, true);
+  assert.equal(claimed.primary.hidden, false, 'AI 在改时主按钮位置不空着');
+  assert.equal(claimed.primary.disabled, true);
+  assert.equal(claimed.primary.label, '改稿中…');
   assert.equal(claimed.secondary.hidden, true, '领取后不再提供「我自己改」');
 
   const applying = Handoff.describe({ review: { status: 'applying', applyMode: 'agent', applyActor: 'Claude Code' } });
@@ -50,6 +53,7 @@ test('状态表:稿子在谁手里只有这几种,主按钮随之变化', () => 
   assert.equal(back.primary.label, '通过 · 定稿');
   assert.equal(back.primary.action, 'finalize');
   assert.equal(Handoff.describe({ review: { status: 'complete', outcome: 'finalized' } }).text, '已定稿');
+  assert.equal(Handoff.describe({ review: { status: 'complete', outcome: 'finalized', finalizedAt: '2026-10-14T08:00:00Z' } }).text, '已定稿 · 10 月 14 日');
   assert.equal(Handoff.describe({ review: { status: 'complete', outcome: 'approved' } }).primary.action, 'finalize');
   assert.match(Handoff.describe({ review: { status: 'conflict' } }).text, /外面被改/);
   const conflict = Handoff.describe({ review: { status: 'conflict' } });
