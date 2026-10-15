@@ -35,6 +35,8 @@ final class SyncLoop {
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         let flag = accountChanged
         NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: nil) { _ in flag.set() }
+        // 每次写、删云端之前查换号(回执、发布、冲突重写、清理都走这里)
+        cloud.guardAccount = { if flag.peek() { throw SyncError.accountChanged } }
     }
 
     /// 核对当前账号;和上次记下的不同(换了账号):清掉变更令牌(那是旧账号区的),记下新账号
@@ -59,12 +61,18 @@ final class SyncLoop {
         guard Date().timeIntervalSince(lastCleanup) > 3600 else { return }
         lastCleanup = Date()
         do {
-            for item in try await server.cleanupList() {
+            let items = try await server.cleanupList()
+            guard !items.isEmpty else { return }
+            // 有要清的才扫一遍区里的记录名(只要名字),按前缀找出每篇的全部附件
+            let allNames = try await cloud.allRecordNames()
+            for item in items {
                 guard let docId = item["docId"] as? String, let reviewId = item["reviewId"] as? String else { continue }
                 // 附件:服务累计的(包括后来不再引用的)加上云端文档记录里现在的清单
                 var others = Set((item["attachments"] as? [String]) ?? [])
                 if accountChanged.peek() { return } // 换号了:这一轮清理停下(别在新账号里删、也别把原账号的标成已清)
                 others.formUnion(Self.attachmentNames(of: try await cloud.fetch([docId])[docId]))
+                let prefix = "att_\(docId)_"
+                others.formUnion(allNames.filter { $0.hasPrefix(prefix) })
                 for batchId in (item["batchIds"] as? [String]) ?? [] { others.formUnion([batchId, CloudSchema.receiptName(batchId: batchId)]) }
                 // 先删附件、批次、回执,最后删文档记录:中途失败时文档记录还在,下次还读得到附件清单,整套重来
                 if accountChanged.peek() { return }
@@ -188,7 +196,7 @@ final class SyncLoop {
     private static func attachmentNames(of record: CKRecord?) -> [String] {
         guard let json = record?["attachments"] as? String,
               let list = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] else { return [] }
-        return list.filter { ($0["included"] as? Bool) != false }.compactMap { $0["recordName"] as? String }
+        return list.compactMap { $0["recordName"] as? String } // 不按本次是否打包过滤:以前传上去、这次没打包的也要算
     }
 
     /// 发布先后(跨端规则 v2.3 第 12 节):初读与冲突重读都先比业务 revision——云端更新则本次作废,相同只确认不重写,本地更新才条件写入

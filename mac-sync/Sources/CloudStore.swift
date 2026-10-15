@@ -31,6 +31,8 @@ final class CloudStore {
     }
 
     func accountStatus() async throws -> CKAccountStatus { try await container.accountStatus() }
+    /// 每次写、删云端之前调一下:换号通知到了就抛错停下(跨端规则第 9 节;SyncLoop 设置)
+    var guardAccount: (() throws -> Void)?
     /// 当前 iCloud 账号在这个容器里的用户记录名(只拿来算指纹分账号,不外传原文)
     func userRecordName() async throws -> String { try await container.userRecordID().recordName }
 
@@ -71,6 +73,7 @@ final class CloudStore {
     /// Mac 是这些记录的唯一写入方,用 allKeys 覆盖,不和自己较劲版本标签
     func save(_ records: [CKRecord]) async throws {
         guard !records.isEmpty else { return }
+        try guardAccount?()
         let result: (saveResults: [CKRecord.ID: Result<CKRecord, Error>], deleteResults: [CKRecord.ID: Result<Void, Error>])
         do {
             result = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .allKeys, atomically: true)
@@ -86,6 +89,7 @@ final class CloudStore {
     /// 条件写入(跨端规则 v2.3 第 12 节「发布先后」):只有"读到之后没人改过"才写;被改过抛 .serverRecordChanged,由调用方重读比较 revision
     func saveIfUnchanged(_ records: [CKRecord]) async throws {
         guard !records.isEmpty else { return }
+        try guardAccount?()
         let result: (saveResults: [CKRecord.ID: Result<CKRecord, Error>], deleteResults: [CKRecord.ID: Result<Void, Error>])
         do {
             result = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .ifServerRecordUnchanged, atomically: true)
@@ -98,6 +102,7 @@ final class CloudStore {
     /// 排查用:按记录名删除(main.swift --delete-records)
     func delete(_ names: [String]) async throws {
         guard !names.isEmpty else { return }
+        try guardAccount?()
         _ = try await database.modifyRecords(saving: [], deleting: names.map(recordID), savePolicy: .allKeys, atomically: true)
     }
 
@@ -107,6 +112,7 @@ final class CloudStore {
         while start < names.count {
             let chunk = Array(names[start..<min(start + 300, names.count)])
             start += chunk.count
+            try guardAccount?()
             let result = try await database.modifyRecords(saving: [], deleting: chunk.map(recordID), savePolicy: .allKeys, atomically: false)
             for (_, outcome) in result.deleteResults {
                 if case .failure(let error) = outcome, (error as? CKError)?.code != .unknownItem { throw error }
@@ -130,6 +136,21 @@ final class CloudStore {
         var changed: [CKRecord] = []
         var deleted: [CKRecord.ID] = []
         var token: CKServerChangeToken?
+    }
+
+    /// 区里全部记录名(只取记录名,不下载正文与附件):云端清理按「att_<文档标识>_」前缀找出这篇的全部附件,
+    /// 包括升级前推过、后来不再引用、台账里没有的旧附件
+    func allRecordNames() async throws -> [String] {
+        var names: [String] = []
+        var cursor: CKServerChangeToken?
+        var moreComing = true
+        while moreComing {
+            let page = try await database.recordZoneChanges(inZoneWith: zoneID, since: cursor, desiredKeys: [], resultsLimit: nil)
+            for (id, result) in page.modificationResultsByID { if case .success = result { names.append(id.recordName) } }
+            cursor = page.changeToken
+            moreComing = page.moreComing
+        }
+        return names
     }
 
     func fetchChanges(since token: CKServerChangeToken?) async throws -> ZoneChanges {

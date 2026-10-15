@@ -274,6 +274,11 @@ test('复核修补:快照之后只是挪了位置(原位置空着):恢复后身�
   assert.equal(require('../lib/version-store').getDocument(review.docId, f.options).currentPath, doc, '身份回到快照时的位置(与恢复回来的会话一致)');
   const offered = (await documents.readDocument(moved, f.options)).relinkCandidate;
   assert.equal(offered && offered.docId, review.docId, '打开新位置问要不要接上历史');
+  // 新位置旁边还留着恢复前的批注文件:接上时先另存备份,不再报冲突
+  assert.ok(fs.existsSync(`${moved}.annotations.json`));
+  await documents.relinkDocument(doc, moved, { ...f.options, expectedDocId: offered.docId, expectedHash: offered.hash });
+  assert.ok(fs.readdirSync(f.docDir).some((name) => name.startsWith('只挪了-新位置.md.annotations.json.before-relink-')), '原来的批注另存了备份');
+  assert.equal((await documents.readDocument(moved, f.options)).docId, review.docId);
 });
 
 test('复核修补:快照时最新一轮分到了发布序号还没推上去,恢复后也要在云端水位之上重新发布', async (t) => {
