@@ -1986,13 +1986,22 @@
     } catch { return null; }
   }
 
+  // 选区落在正文里的那部分。拖到文末下方的空白处才松手、从页边空白开始拖时,选区的起点或终点在正文外面,
+  // 以前整段判为无效(批注按钮不出来);现在只取正文里的部分
+  function contentRange(selection) {
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (nodes.content.contains(range.startContainer) && nodes.content.contains(range.endContainer)) return range;
+    return intersectRangeWithBlock(range, nodes.content);
+  }
+
   function captureSelectionAnchor() {
     const tab = activeTab();
     const selection = window.getSelection();
     if (!statusCanAnnotate(tab) || !selection || selection.isCollapsed || !selection.rangeCount) return null;
     if (nodes.content.dataset.tabId !== tab.id) return null;
-    const range = selection.getRangeAt(0);
-    if (!nodes.content.contains(range.startContainer) || !nodes.content.contains(range.endContainer)) return null;
+    const range = contentRange(selection);
+    if (!range) return null;
     const leaves = mappedLeafBlocks();
     const selected = [];
     leaves.forEach((block, index) => {
@@ -2011,7 +2020,7 @@
         { blockIndex: last.index, offset: end },
         {
           headingPath: headingPathFor(first.block),
-          figureRef: figureRefOf(first.block, selection.toString()),
+          figureRef: figureRefOf(first.block, range.toString()),
           reviewSessionId: tab.id,
         },
       );
@@ -2021,13 +2030,19 @@
     }
   }
 
+  // 批注按钮放在选区里最后一段看得见的文字旁边,并且不出阅读区(不压到工具栏和批注栏);
+  // 整段选区都滚出视野时返回 false(按钮先藏起来,滚回来再出现)
   function positionAnnotateButton(range) {
-    const rects = range.getClientRects();
-    const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
-    if (!rect || (!rect.width && !rect.height)) return;
-    const left = Math.min(window.innerWidth - 92, Math.max(12, rect.right + 10));
-    const top = Math.min(window.innerHeight - 52, Math.max(68, rect.bottom + 8));
+    const view = nodes.readerScroll.getBoundingClientRect();
+    const rects = Array.from(range.getClientRects()).filter((rect) => (rect.width || rect.height)
+      && rect.bottom > view.top && rect.top < view.bottom && rect.right > view.left && rect.left < view.right);
+    if (!rects.length) return false;
+    const rect = rects[rects.length - 1];
+    const width = nodes.annotate.offsetWidth || 84, height = nodes.annotate.offsetHeight || 36;
+    const left = Math.max(view.left + 12, Math.min(view.right - width - 12, rect.right + 10));
+    const top = Math.max(view.top + 8, Math.min(view.bottom - height - 12, rect.bottom + 8));
     nodes.annotate.style.left = `${left}px`; nodes.annotate.style.top = `${top}px`;
+    return true;
   }
 
   function handleSelectionChange() {
@@ -2036,14 +2051,26 @@
       state.selectionFrame = null;
       if (!nodes.annotationDialog.hidden) return;
       const anchor = captureSelectionAnchor();
-      const selection = window.getSelection();
-      if (!anchor || !selection || !selection.rangeCount) {
+      const range = anchor ? contentRange(window.getSelection()) : null;
+      if (!anchor || !range) {
+        // 选区没了或无效:旧选区也不再算数(否则滚动后按钮会带着旧选区回来,⌥⌘M 也会批到旧选区上)
+        state.cachedAnchor = null;
         nodes.annotate.hidden = true;
         return;
       }
       state.cachedAnchor = anchor;
-      positionAnnotateButton(selection.getRangeAt(0));
-      nodes.annotate.hidden = false;
+      nodes.annotate.hidden = !positionAnnotateButton(range);
+    });
+  }
+
+  // 正文滚动(包括拖选时自动往下滚)后按钮跟着选区走;以前一滚就藏起来,拖选长段落时松手后按钮常常不出来
+  function scheduleAnnotateReposition() {
+    if (state.annotateFrame || !nodes.annotationDialog.hidden) return;
+    state.annotateFrame = requestAnimationFrame(() => {
+      state.annotateFrame = null;
+      if (!nodes.annotationDialog.hidden) return;
+      const range = state.cachedAnchor && statusCanAnnotate(activeTab()) ? contentRange(window.getSelection()) : null;
+      nodes.annotate.hidden = !range || !positionAnnotateButton(range);
     });
   }
 
@@ -3811,7 +3838,7 @@
     });
     nodes.annotate.addEventListener('click', (event) => { if (!nodes.annotationDialog.hidden) return; event.preventDefault(); const anchor = state.cachedAnchor; if (anchor) openAnnotationDialog({ anchor }); });
     nodes.readerScroll.addEventListener('scroll', () => {
-      nodes.annotate.hidden = true;
+      scheduleAnnotateReposition();
       const tab = activeTab();
       if (tab) tab.scrollTop = nodes.readerScroll.scrollTop;
       scheduleOutlineUpdate();
@@ -3837,6 +3864,7 @@
       applyNarrowLayout();
       keepAnnotationDialogInView();
       scheduleMarkerPositions();
+      scheduleAnnotateReposition();
     });
     if (typeof ResizeObserver === 'function') {
       state.layoutObserver = new ResizeObserver(() => scheduleMarkerPositions());
