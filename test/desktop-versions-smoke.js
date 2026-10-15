@@ -3,7 +3,7 @@
 
 // 规则⑤第三段的真实浏览器冒烟:回稿卡(数据来自版本事件)、独立只读对比视图(含删除、上一处 / 下一处、Esc 关闭回到完成稿)、
 // 历史按轮折叠、轮次时间线、恢复到第 N 轮改稿前与「恢复到恢复前的稿子」、稿子回来时默认显示干净稿(2026-10-15 用户定),
-// 点回稿卡「显示改动」才打开对比视图。
+// 点工具栏「显示改动」才打开对比视图;有逐条结果的回稿卡默认收起(2026-10-15 用户定)。
 //
 // 用法: node test/desktop-versions-smoke.js
 
@@ -69,8 +69,15 @@ async function main() {
     await cdp.evaluate(`Array.from(document.querySelectorAll('#welcomeRecent .recent-item')).find((item) => item.textContent.includes('版本冒烟')).click()`);
     await waitUntil('正文渲染', () => cdp.evaluate(`document.querySelector('#documentContent').textContent.includes('新加的第四段')`));
 
-    // 1. 回稿卡:标题、计数、摘要、逐条结果、改动处数(对比计算)
+    // 1. 回稿卡:默认收起,一行里写计数与改动处数;工具栏有「显示改动」。展开后是标题、计数、摘要、逐条结果、改动处数(对比计算)
     await waitUntil('回稿卡', () => cdp.evaluate(`!document.querySelector('#returnCard').hidden && document.querySelector('#returnCard h3')`));
+    await waitUntil('默认收起,一行里有计数与改动处数', () => cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed')
+      && !document.querySelector('#returnCard .result-list') && document.querySelector('#returnCard .return-collapsed-line').textContent === '采纳 1 · 未采纳 1 · 改了 4 处'`));
+    assert.equal(await cdp.evaluate(`document.querySelector('#returnCard').querySelectorAll('button').length`), 1, '收起时卡上只有「展开」');
+    const toolbarToggle = `document.querySelector('#compareToggleButton')`;
+    assert.equal(await cdp.evaluate(`!${toolbarToggle}.hidden && ${toolbarToggle}.textContent === '显示改动'`), true, '工具栏有「显示改动」');
+    await cdp.evaluate(`document.querySelector('#returnCard .return-collapse').click()`);
+    await waitUntil('展开', () => cdp.evaluate(`!document.querySelector('#returnCard').classList.contains('collapsed') && Boolean(document.querySelector('#returnCard .result-list'))`));
     const card = await cdp.evaluate(`(() => ({
       title: document.querySelector('#returnCard h3').textContent,
       badges: Array.from(document.querySelectorAll('#returnCard .return-badge')).map((b) => b.textContent),
@@ -92,7 +99,8 @@ async function main() {
 
     // 2. 对比视图:四个改动块(改一段、删一段、改数字、加一段,相邻的合在一组渲染);有删除线;上一处 / 下一处;Esc 关闭回到完成稿且阅读位置保留
     await cdp.evaluate(`document.querySelector('#readerScroll').scrollTop = 40`);
-    await cdp.evaluate(`Array.from(document.querySelectorAll('#returnCard button')).find((b) => b.textContent.includes('显示改动')).click()`);
+    assert.equal(await cdp.evaluate(`Array.from(document.querySelectorAll('#returnCard button')).some((b) => b.textContent.includes('改动'))`), false, '卡上不再有「显示改动」');
+    await cdp.evaluate(`${toolbarToggle}.click()`);
     await waitUntil('对比视图打开', () => cdp.evaluate(`!document.querySelector('#compareView').hidden && document.querySelectorAll('#compareContent .diff-change').length > 0`));
     const compare = await cdp.evaluate(`(() => ({
       title: document.querySelector('#compareTitle').textContent,
@@ -181,8 +189,10 @@ async function main() {
     assert.equal(restoredCard.title, '已恢复到第 1 轮改稿前');
     assert.ok(restoredCard.buttons.includes('恢复到恢复前的稿子'), restoredCard.buttons.join());
     assert.deepEqual(restoredCard.kinds, ['restored', 'review']);
-    // 恢复事件的对比:恢复前 → 恢复后
-    await cdp.evaluate(`Array.from(document.querySelectorAll('#returnCard button')).find((b) => b.textContent.includes('对比恢复前后')).click()`);
+    assert.equal(await cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed')`), false, '没有逐条结果的恢复卡照常展开');
+    // 恢复事件的对比:恢复前 → 恢复后(工具栏按钮写「对比恢复前后」)
+    await waitUntil('工具栏「对比恢复前后」', () => cdp.evaluate(`document.querySelector('#compareToggleButton').textContent === '对比恢复前后'`));
+    await cdp.evaluate(`document.querySelector('#compareToggleButton').click()`);
     await waitUntil('恢复对比', () => cdp.evaluate(`!document.querySelector('#compareView').hidden && document.querySelector('#compareTitle').textContent.includes('恢复') && document.querySelectorAll('#compareContent .diff-change').length === 4`));
     await key(cdp, 'Escape', 'Escape', 27);
     await waitUntil('关闭', () => cdp.evaluate(`document.querySelector('#compareView').hidden`));
@@ -205,19 +215,24 @@ async function main() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewSessionId: second.id, reason: 'agent-complete' }),
     });
     assert.equal(notify.ok, true);
-    await waitUntil('回稿卡出现', () => cdp.evaluate(`Boolean(document.querySelector('#returnCard h3')) && document.querySelector('#returnCard h3').textContent === '第 1 轮回稿' && Boolean(document.querySelector('#returnCard .return-actions .primary-button'))`), 20_000);
+    await waitUntil('回稿卡出现', () => cdp.evaluate(`Boolean(document.querySelector('#returnCard h3')) && document.querySelector('#returnCard h3').textContent === '第 1 轮回稿' && !document.querySelector('#compareToggleButton').hidden`), 20_000);
     await sleep(800);
     assert.equal(await cdp.evaluate(`document.querySelector('#compareView').hidden`), true, '稿子回来不自动打开对比视图');
     assert.equal(await cdp.evaluate(`document.querySelector('#documentContent').textContent.includes('第二段要被删掉')`), false, '正文是改完的干净稿');
-    // 回稿卡能收起(用户提):收起只剩一行,重画后还是收着;展开回来
+    // 回稿卡默认收起(用户定):展开后重画还是展开着(按这一轮记住),收起后重画还是收着
+    assert.equal(await cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed')`), true, '新回来的一轮默认收起');
     await cdp.evaluate(`document.querySelector('#returnCard .return-collapse').click()`);
-    await waitUntil('回稿卡收起', () => cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed') && !document.querySelector('#returnCard .result-list') && !document.querySelector('#returnCard [data-compare-style="card"]') && document.querySelector('#returnCard .return-collapse').textContent.includes('展开')`));
+    await waitUntil('回稿卡展开', () => cdp.evaluate(`!document.querySelector('#returnCard').classList.contains('collapsed') && Boolean(document.querySelector('#returnCard .result-list'))`));
+    await cdp.evaluate(`window.dispatchEvent(new Event('focus'))`);
+    await sleep(600);
+    assert.equal(await cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed')`), false, '重画后还是展开着');
+    await cdp.evaluate(`document.querySelector('#returnCard .return-collapse').click()`);
+    await waitUntil('回稿卡收起', () => cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed') && !document.querySelector('#returnCard .result-list') && document.querySelector('#returnCard .return-collapse').textContent.includes('展开')`));
     await cdp.evaluate(`window.dispatchEvent(new Event('focus'))`);
     await sleep(600);
     assert.equal(await cdp.evaluate(`document.querySelector('#returnCard').classList.contains('collapsed')`), true, '重画后还是收着');
-    await cdp.evaluate(`document.querySelector('#returnCard .return-collapse').click()`);
-    await waitUntil('回稿卡展开', () => cdp.evaluate(`!document.querySelector('#returnCard').classList.contains('collapsed') && Boolean(document.querySelector('#returnCard [data-compare-style="card"]'))`));
-    const cardButton = `document.querySelector('#returnCard [data-compare-style="card"]')`;
+    // 卡收着,工具栏的「显示改动」照样能用
+    const cardButton = `document.querySelector('#compareToggleButton')`;
     assert.equal(await cdp.evaluate(`${cardButton}.textContent`), '显示改动');
     await cdp.evaluate(`${cardButton}.click()`);
     await waitUntil('点「显示改动」打开对比视图', () => cdp.evaluate(`!document.querySelector('#compareView').hidden && document.querySelectorAll('#compareContent .diff-change').length === 4`), 20_000);
@@ -233,7 +248,7 @@ async function main() {
     // 页面没有 <link rel=icon>,Chrome 自动请求 /favicon.ico 得到 404,这条资源错误不算脚本问题
     const errors = cdp.exceptions.concat(cdp.consoleMessages.filter((m) => m.type === 'error').map((m) => m.text)).filter((text) => !/favicon|ERR_|net::|Failed to load resource.*404/.test(text));
     assert.deepEqual(errors, [], `页面不应有脚本异常或 console.error: ${errors.join(' | ')}`);
-    console.log('PASS: 回稿卡(事件数据、计数、逐条结果、改动处数)、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、「显示改动 / 隐藏改动」开关、回稿卡收起 / 展开。');
+    console.log('PASS: 回稿卡(默认收起、一行计数与改动处数、展开后事件数据与逐条结果)、工具栏「显示改动 / 隐藏改动」开关、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、展开 / 收起按轮记住。');
   } finally {
     if (chrome) await stopChild(chrome.child);
     if (server) await stopChild(server.child);
