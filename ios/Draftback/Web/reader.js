@@ -8,7 +8,7 @@
  *                 setFontScale(x)、toggleChanges()、scrollToTop();load 还可带 returnCard 与 previousMarkdown(回稿卡与「显示改动」)
  *   页面 → 原生:webkit.messageHandlers.draftback.postMessage({ type, ... })
  *                 type = ready | rendered { outline } | selection { anchor, quote } | selectionState { active } |
- *                        changesState { showing } | changesCount { count } | returnCard { action } | locateFailed | error { message }
+ *                        changesState { showing } | changesCount { count } | returnCard { action } | locateFailed | tap | error { message }
  */
 (() => {
   'use strict';
@@ -472,6 +472,18 @@
     const range = selection.getRangeAt(0);
     return content.contains(range.commonAncestorContainer) && Boolean(selection.toString().trim());
   }
+  // 点正文(不是链接、按钮,也没在选字):告诉原生,往下读时收起的上下栏放出来。
+  // 监听挂在正文与对比视图上,不挂 document:iOS 上点普通文字时,只有自己或祖先(body 以下)挂了监听才会派发 click
+  const onTap = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target && target.closest('a, button, input, summary')) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return;
+    post({ type: 'tap' });
+  };
+  content.addEventListener('click', onTap);
+  changesEl.addEventListener('click', onTap);
+
   document.addEventListener('selectionchange', () => {
     const active = selectionInContent();
     clearTimeout(selectionTimer);

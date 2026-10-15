@@ -25,6 +25,8 @@ struct ReaderView: View {
     @State private var showingChanges = false
     @State private var showResults = false
     @State private var confirmFinalize: ReaderStatus.Primary?
+    /// 往下读时收起上下栏(网页滚动报上来);选着字、正在确认定稿时照样露出底栏
+    @State private var scrollHidden = false
     /// 弹确认框时那一轮的身份与指纹(确认前 Mac 推来新一轮就作废)
     @State private var finalizeTarget: (reviewId: String, hash: String)?
     @State private var confirmNewVersion = false
@@ -72,16 +74,30 @@ struct ReaderView: View {
         return base * [1.0, 1.15, 1.3][min(max(fontStep, 0), 2)]
     }
 
+    /// 上下栏收起(2026-10-15 用户提:上下栏占的版面太多,正文被压缩)。往下读时收起,往回翻、点正文、到顶或到底时放出来。
+    /// 选字时只放出底栏(「批注这段」):顶栏一出来正文会往下挪,选区就跑了
+    private var topHidden: Bool { scrollHidden && confirmFinalize == nil }
+    private var bottomHidden: Bool { scrollHidden && !hasSelection && confirmFinalize == nil }
+
     var body: some View {
         let status = self.status
         VStack(spacing: 0) {
-            if store.isOffline { offlineLine }
-            if let notice = document.notice { noticeBanner(notice) } else if let banner = status.banner { bannerView(banner) }
+            if !topHidden {
+                if store.isOffline { offlineLine }
+                if let notice = document.notice { noticeBanner(notice) } else if let banner = status.banner { bannerView(banner) }
+            }
             ReaderWebView(document: document, reloadToken: $reloadToken, contentVersion: document.contentVersion,
                           fontScale: fontScale, annotationEnabled: status.canAnnotate && !showingChanges, cardKey: document.cardKey,
                           onEvent: { handle($0, status: status) }, onReady: { bridge = $0 })
-            bottomBar(status)
+            if !bottomHidden {
+                bottomBar(status).transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .toolbar(topHidden ? .hidden : .visible, for: .navigationBar)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: topHidden)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: bottomHidden)
+        // 定稿确认期间 Mac 推来了新的一轮:这次确认作废(确认按钮本身也会核对轮次)
+        .onChange(of: document.sync?.reviewId) { _, _ in confirmFinalize = nil }
         .onChange(of: document.notice) { _, notice in
             guard notice != nil else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { if document.notice == notice { document.notice = nil } }
@@ -146,18 +162,6 @@ struct ReaderView: View {
                 return true
             }
         }
-        .confirmationDialog(confirmFinalize == .approve ? "通过并定稿?" : "定稿?", isPresented: Binding(get: { confirmFinalize != nil }, set: { if !$0 { confirmFinalize = nil } }),
-                            titleVisibility: .visible) {
-            Button(confirmFinalize == .approve ? "通过 · 定稿" : "定稿") {
-                if let target = finalizeTarget { store.requestFinalize(for: document, expected: target) }
-                confirmFinalize = nil
-            }
-            Button("取消", role: .cancel) { confirmFinalize = nil }
-        } message: {
-            Text(confirmFinalize == .approve
-                 ? "全文没有任何批注:记为通过并定稿,AI 会收到「审阅结束」。想让 AI 再改,先写一条批注再交出。"
-                 : "这版就是终稿,AI 会收到「审阅结束」。以后再批注,会开始新的一轮。")
-        }
         .confirmationDialog("换成新版?", isPresented: $confirmNewVersion, titleVisibility: .visible) {
             Button("换成新版") { loadNewVersion() }
             Button("取消", role: .cancel) {}
@@ -175,24 +179,33 @@ struct ReaderView: View {
         .overlay { if exportingPDF { ProgressView("正在生成 PDF…").padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         .sensoryFeedback(.success, trigger: handOffCount)
         #if DEBUG
-        // 仅调试版:模拟器自动化验证用(--export-batch 导出、--resubmit-batch 重发、--show-notes 打开批注列表、--demo-select 选中一段、--demo-annotate 再点「批注这段」、--demo-changes 点「显示改动」)
-        .onAppear {
-            let args = CommandLine.arguments
-            if args.contains("--export-batch") { store.submitBatch(for: document) }
-            if args.contains("--resubmit-batch") { store.resubmitBatch(for: document) }
-            if args.contains("--show-notes") { showNotes = true }
-            if args.contains("--demo-select") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { bridge?.debugSelectParagraph(2) } }
-            if args.contains("--demo-annotate") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { bridge?.requestAnnotation() } }
-            if args.contains("--demo-changes") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { bridge?.toggleChanges() } }
-            if let index = args.firstIndex(of: "--demo-locate"), index + 1 < args.count {
-                let quote = args[index + 1]
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { bridge?.locateQuote(quote) }
-            }
-            if args.contains("--demo-outline") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { if let last = document.outline.last { bridge?.scrollToHeading(last.id) } } }
-            if args.contains("--demo-results") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showResults = document.sync?.results != nil } }
-        }
+        // 仅调试版:模拟器自动化验证用(--export-batch 导出、--resubmit-batch 重发、--show-notes 打开批注列表、--demo-select 选中一段、--demo-annotate 再点「批注这段」、--demo-changes 点「显示改动」、
+        // --demo-bars-hidden 收起上下栏、--demo-confirm-finalize 点「定稿」进入底栏确认)
+        .onAppear { runDebugArguments() }
         #endif
     }
+
+    #if DEBUG
+    private func runDebugArguments() {
+        let args = CommandLine.arguments
+        if args.contains("--export-batch") { store.submitBatch(for: document) }
+        if args.contains("--resubmit-batch") { store.resubmitBatch(for: document) }
+        if args.contains("--show-notes") { showNotes = true }
+        if args.contains("--demo-select") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { bridge?.debugSelectParagraph(2) } }
+        if args.contains("--demo-annotate") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { bridge?.requestAnnotation() } }
+        if args.contains("--demo-changes") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { bridge?.toggleChanges() } }
+        if let index = args.firstIndex(of: "--demo-locate"), index + 1 < args.count {
+            let quote = args[index + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { bridge?.locateQuote(quote) }
+        }
+        if args.contains("--demo-outline") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { if let last = document.outline.last { bridge?.scrollToHeading(last.id) } } }
+        if args.contains("--demo-results") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showResults = document.sync?.results != nil } }
+        if args.contains("--demo-bars-hidden") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { scrollHidden = true } }
+        if args.contains("--demo-confirm-finalize") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if let primary = status.primary, primary == .finalize || primary == .approve { perform(primary) } }
+        }
+    }
+    #endif
 
     // MARK: 顶部:离线线、横幅
 
@@ -307,22 +320,51 @@ struct ReaderView: View {
 
     private func bottomBar(_ status: ReaderStatus) -> some View {
         HStack(spacing: 10) {
-            if hasSelection && status.canAnnotate && !showingChanges {
+            if let pending = confirmFinalize {
+                finalizeConfirm(pending)
+            } else if hasSelection && status.canAnnotate && !showingChanges {
                 Button { bridge?.requestAnnotation() } label: {
                     Label("批注这段", systemImage: "text.bubble")
                         .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .frame(maxWidth: .infinity, minHeight: 42)
                 }
                 .buttonStyle(AnnotateButtonStyle())
                 .transition(.opacity)
+                if let primary = status.primary { primaryButton(primary) }
             } else {
                 statusSlot(status)
+                if let primary = status.primary { primaryButton(primary) }
             }
-            if let primary = status.primary { primaryButton(primary) }
         }
-        .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 6)
+        .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 4)
         .background(.bar)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hasSelection)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: confirmFinalize)
+    }
+
+    /// 定稿要再点一次确认(它会告诉 AI「审阅结束」)。确认就在底栏原地做,不从顶上弹框(2026-10-15 用户提:点定稿从上面跳出个框,逻辑怪)
+    @ViewBuilder
+    private func finalizeConfirm(_ pending: ReaderStatus.Primary) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(pending == .approve ? "通过并定稿?" : "确认定稿?").font(.subheadline.weight(.semibold)).lineLimit(1)
+            Text(pending == .approve ? "没有批注,AI 会收到「审阅结束」" : "AI 会收到「审阅结束」").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        Button("取消") { confirmFinalize = nil }
+            .font(.subheadline.weight(.semibold))
+            .frame(minHeight: 42)
+            .padding(.horizontal, 6)
+        Button {
+            if let target = finalizeTarget { store.requestFinalize(for: document, expected: target) }
+            confirmFinalize = nil
+        } label: {
+            Text(pending == .approve ? "通过 · 定稿" : "定稿").font(.subheadline.weight(.semibold)).lineLimit(1)
+                .frame(minWidth: 96, minHeight: 42)
+                .padding(.horizontal, 12)
+        }
+        .buttonStyle(PrimaryButtonStyle(enabled: true))
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func statusSlot(_ status: ReaderStatus) -> some View {
@@ -336,7 +378,7 @@ struct ReaderView: View {
                     Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -348,7 +390,7 @@ struct ReaderView: View {
         let (label, enabled) = primaryLabel(primary)
         return Button { perform(primary) } label: {
             Text(label).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                .frame(minWidth: 120, minHeight: 46)
+                .frame(minWidth: 112, minHeight: 42)
                 .padding(.horizontal, 14)
         }
         .buttonStyle(PrimaryButtonStyle(enabled: enabled))
@@ -409,6 +451,7 @@ struct ReaderView: View {
             guard !showingChanges else { message = "对比是只读的。先点「隐藏改动」回到正文再批注。"; return }
             composer = Composer(anchor: anchor, quote: quote, scope: nil, editingNoteId: nil, initialComment: "")
         case .noSelection: message = "没有识别到有效的文字选区,请重新选择。"
+        case .chrome(let hidden): scrollHidden = hidden
         case .error(let text): message = text
         }
     }

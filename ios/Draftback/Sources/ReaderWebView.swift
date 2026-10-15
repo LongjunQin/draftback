@@ -31,6 +31,8 @@ enum ReaderEvent {
     case showResults
     /// 逐条结果点一条,正文里找不到那句(被改掉了)
     case locateFailed
+    /// 上下栏收起 / 放出来:往下读时收起,往回翻、点正文、到顶或到底时放出来(用户提:上下栏太占地方)
+    case chrome(hidden: Bool)
     case noSelection
     case error(String)
 }
@@ -66,6 +68,7 @@ struct ReaderWebView: UIViewRepresentable {
             webView?.evaluateJavaScript("window.DraftbackReader && window.DraftbackReader.captureSelection()") { _, _ in }
         }
         context.coordinator.bridge = ReaderBridge(webView: webView)
+        context.coordinator.observeScroll(webView.scrollView)
         context.coordinator.bridge?.fontScale = fontScale
         context.coordinator.lastFontScale = fontScale
         context.coordinator.lastCardKey = cardKey
@@ -116,6 +119,42 @@ struct ReaderWebView: UIViewRepresentable {
 
         init(onEvent: @escaping (ReaderEvent) -> Void) { self.onEvent = onEvent }
 
+        // 往下读时收起上下栏,往回翻、到顶或到底时放出来。只看手指拖动与惯性滚动(大纲跳转、定位这类程序滚动不算);
+        // 同一方向攒够 24 点才切换,切换后 0.35 秒内不再切(上下栏收放会改网页高度,别来回抖)
+        private var scrollObservation: NSKeyValueObservation?
+        private var lastOffsetY: CGFloat = 0
+        private var travel: CGFloat = 0
+        private var chromeHidden = false
+        private var lastToggle = Date.distantPast
+
+        func observeScroll(_ scrollView: UIScrollView) {
+            scrollObservation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
+                MainActor.assumeIsolated { self?.scrolled(scrollView) }
+            }
+        }
+
+        private func scrolled(_ scrollView: UIScrollView) {
+            let y = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+            let delta = y - lastOffsetY
+            lastOffsetY = y
+            let maxY = scrollView.contentSize.height + scrollView.adjustedContentInset.top + scrollView.adjustedContentInset.bottom - scrollView.bounds.height
+            // 到顶(含点状态栏回到顶部、正文重载)或到底:放出来
+            if y < 40 || (maxY > 0 && y > maxY - 40) { travel = 0; setChrome(hidden: false); return }
+            guard scrollView.isDragging || scrollView.isDecelerating, delta != 0 else { return }
+            if (delta > 0) != (travel > 0) { travel = 0 }
+            travel += delta
+            if travel > 24 { setChrome(hidden: true) } else if travel < -24 { setChrome(hidden: false) }
+        }
+
+        func setChrome(hidden: Bool, force: Bool = false) {
+            guard hidden != chromeHidden else { return }
+            guard force || Date().timeIntervalSince(lastToggle) > 0.35 else { return }
+            chromeHidden = hidden
+            lastToggle = Date()
+            travel = 0
+            onEvent(.chrome(hidden: hidden))
+        }
+
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
             switch type {
@@ -136,6 +175,8 @@ struct ReaderWebView: UIViewRepresentable {
                 if (body["action"] as? String) == "results" { onEvent(.showResults) }
             case "locateFailed":
                 onEvent(.locateFailed)
+            case "tap":
+                setChrome(hidden: false, force: true)
             case "selection":
                 if let anchor = body["anchor"] as? [String: Any] {
                     onEvent(.selection(anchor: anchor, quote: body["quote"] as? String ?? ""))

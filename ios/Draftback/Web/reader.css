@@ -87,3 +87,6 @@ del.diff-del { border-radius: 2px; background: color-mix(in srgb, var(--red) 15%
 ins.diff-ins { border-radius: 2px; background: color-mix(in srgb, var(--green) 22%, transparent); color: var(--text-strong); text-decoration: none; }
 .diff-empty { color: var(--muted); }
 ::highlight(draftback-locate) { background: rgba(34, 148, 83, .35); }
+
+/* 点正文会放出收起的上下栏(正文与对比视图挂了点击监听):不要点按时的灰色闪烁 */
+#content, #changes { -webkit-tap-highlight-color: transparent; }
