@@ -220,6 +220,7 @@ node test/desktop-security-smoke.js            # 安全收口:夹带脚本不执
 node test/desktop-plain-document-smoke.js      # 普通阅读/编辑/开始审阅,块级回写保真
 node test/desktop-reader-tools-smoke.js        # 查找、深色、打印样式、拖放;加 --shots <目录> 可截图
 node test/desktop-selection-smoke.js          # 划词后批注按钮:终点在正文外、拖到文末下方、滚动跟随
+node test/desktop-rename-smoke.js             # 双击文件名改名、信息卡重新命名、Esc 取消、同名提示、这一轮没走完不改
 node test/desktop-performance-probe.js --runs 3 # 渲染层性能探针
 npm --prefix desktop test
 node --check server.js

@@ -1151,6 +1151,13 @@ button.review-state:hover { filter: brightness(.97); }
 .doc-title i { flex: none; color: var(--muted); }
 .doc-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc-title:hover { background: var(--hover); }
+/* 双击文件名就地改名 */
+.doc-title-input {
+  height: 28px; max-width: 100%; padding: 0 8px; border: 1px solid var(--accent-line-2); border-radius: 6px;
+  background: var(--paper); color: var(--text-strong); font: inherit; font-size: 13px; font-weight: 600;
+  outline: none; box-shadow: 0 0 0 3px var(--accent-soft); -webkit-app-region: no-drag;
+}
+.doc-title-input:disabled { opacity: .6; }
 .doc-info.popover-menu { position: absolute; top: calc(100% + 6px); left: 0; right: auto; z-index: 70; width: 300px; padding: 12px 14px; }
 .doc-info-name { margin-bottom: 8px; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .doc-info-table { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 12px; }

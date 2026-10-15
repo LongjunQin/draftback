@@ -264,7 +264,6 @@
       versionsKey: '',
       versionsRetryAt: 0,
       openRounds: new Set(), // 历史里展开着的轮
-      autoCompare: null,     // 稿子刚回来:等版本记录到了自动打开对比视图(一次)
     };
     const draft = readDraft(tab.id, tab.sourceHash);
     if (draft && draft.content !== tab.source) {
@@ -759,12 +758,7 @@
     applyBundleToTab(tab, normalized, { forceSource: options.forceSource === true });
     await refreshRecents();
     if (isVerifiedAgentCompletion(tab.review, options, priorStatus, priorMode)) {
-      // 稿子回来是一个时刻:正在看这篇就默认打开对比视图一次(等版本记录到了再开,见 maybeAutoCompare);
-      // 只在从非完成态转入时触发,同一次完成再刷新不重开——用户关掉了就是关掉了
-      const key = completionKey(tab.review);
-      if (tab.id === state.activeId && tab.mode === 'read' && priorStatus !== 'complete' && key && !autoComparedKeys().has(key)) {
-        autoComparedKeys().add(key); tab.autoCompare = key; renderNotes(tab);
-      }
+      // 稿子回来:默认显示改完的干净稿;想看改了哪里,点回稿卡「显示改动」或工具栏的对比开关(2026-10-15 用户定)
       await announceAgentCompletion(tab.review);
     }
   }
@@ -994,6 +988,7 @@
     if (command === 'find-replace') { openFind({ replace: true }); return; }
     if (command === 'quick-open') { openQuickOpen(); return; }
     if (command === 'save-copy') { void saveCopy(); return; }
+    if (command === 'rename') { toggleDocInfo(false); startRename(); return; }
     if (command === 'reveal') { revealActive(); return; }
     if (command === 'settings') { void openSettings(); return; }
     if (command === 'toggle-mode') { void toggleMode(); return; }
@@ -2322,7 +2317,6 @@
       grouped.rounds.forEach((round) => nodes.historyNotesList.appendChild(roundGroup(tab, round)));
       if (grouped.legacy) nodes.historyNotesList.appendChild(legacyGroup(tab, grouped.legacy));
     }
-    maybeAutoCompare(tab, card);
     renderCompareToggle(tab);
   }
 
@@ -2553,16 +2547,6 @@
     const target = currentCompareTarget(tab);
     if (!target) { toast('这一轮没有可对比的改动。更早轮次的改动在右栏「历史」里点「显示改动」看。'); return; }
     void openCompareFor(tab, target);
-  }
-
-  function autoComparedKeys() { if (!state.autoCompared) state.autoCompared = new Set(); return state.autoCompared; }
-
-  function maybeAutoCompare(tab, card) {
-    if (!tab.autoCompare || !tab.versions || activeTab() !== tab || tab.mode !== 'read') return;
-    if (tab.autoCompare !== completionKey(tab.review)) { tab.autoCompare = null; return; }
-    if (!card.show || !card.canCompare || !card.version) return;
-    tab.autoCompare = null;
-    if (!Compare.isOpen()) void openCompareFor(tab, { versionId: card.version.versionId, round: card.version.round, kind: card.version.kind });
   }
 
   async function restoreToRound(tab, round, options = {}) {
@@ -3316,7 +3300,9 @@
 
   // ---------- 工具栏左边:文档名,点开看字数等(UI 方案 3.2) ----------
   function renderDocTitle(tab) {
-    nodes.docTitleButton.hidden = !tab;
+    // 改名中切到了别的标签:收起输入框(不提交)
+    if (state.renaming && state.renaming.tab !== tab) endRename(state.renaming, { focus: false });
+    nodes.docTitleButton.hidden = !tab || Boolean(state.renaming);
     if (!tab || (state.docInfoTabId && state.docInfoTabId !== tab.id)) toggleDocInfo(false);
     if (!tab) return;
     nodes.docTitleText.textContent = tab.review.title || tab.review.file || '文档';
@@ -3353,12 +3339,14 @@
     rows.forEach(([label, value]) => { const dt = document.createElement('dt'); dt.textContent = label; const dd = document.createElement('dd'); dd.textContent = value; table.append(dt, dd); });
     root.appendChild(table);
     const actions = document.createElement('div'); actions.className = 'doc-info-actions';
+    const rename = document.createElement('button'); rename.type = 'button'; rename.className = 'secondary-button compact-button'; rename.textContent = '重新命名…';
+    rename.addEventListener('click', () => { if (activeTab() !== tab) return; toggleDocInfo(false); startRename(tab); });
     const reveal = document.createElement('button'); reveal.type = 'button'; reveal.className = 'secondary-button compact-button'; reveal.textContent = '在访达中显示';
     reveal.addEventListener('click', () => { if (activeTab() !== tab) return; toggleDocInfo(false); revealActive(); });
     const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'secondary-button compact-button'; copy.textContent = '另存为副本…';
     copy.addEventListener('click', () => { if (activeTab() !== tab) return; toggleDocInfo(false); void saveCopy(tab); });
-    setTimeout(() => reveal.focus(), 20);
-    actions.append(reveal, copy);
+    setTimeout(() => rename.focus(), 20);
+    actions.append(rename, reveal, copy);
     root.appendChild(actions);
   }
 
@@ -3624,6 +3612,105 @@
     });
   }
 
+  // ---------- 改名(双击文件名、信息卡「重新命名…」、菜单 文件 → 重新命名…) ----------
+  // 同一文件夹里换名字;批注、审阅历史跟着走(服务端 documents.renameDocument)。这一轮没走完、有没保存的编辑时先不改
+  function renameBlockedReason(tab) {
+    if (!tab) return '没有打开的文档。';
+    if (tab.dirty) return '先保存(⌘S)再改名。';
+    if (!isPlain(tab) && ACTIVE_REVIEW.has(tab.review.status)) return '这一轮还没走完,走完再改名。';
+    return '';
+  }
+  function fileStem(name) { return String(name || '').replace(/\.(md|markdown)$/i, ''); }
+  function textWidthOf(text, element) {
+    const canvas = state.measureCanvas || (state.measureCanvas = document.createElement('canvas'));
+    const context = canvas.getContext('2d');
+    const style = getComputedStyle(element);
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    return context.measureText(text).width;
+  }
+  function startRename(tab = activeTab()) {
+    if (state.renaming) { state.renaming.input.focus(); return; }
+    const blocked = renameBlockedReason(tab);
+    if (blocked) { toast(blocked); return; }
+    const original = tab.review.file || tab.review.title || '';
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'doc-title-input'; input.value = fileStem(original);
+    input.spellcheck = false; input.autocomplete = 'off';
+    input.setAttribute('aria-label', '新的文件名(回车确认,Esc 取消)');
+    input.title = '回车确认,Esc 取消;扩展名 .md 不用写';
+    const session = { tab, input, original, done: false, busy: false };
+    state.renaming = session;
+    nodes.docTitleButton.hidden = true;
+    nodes.docTitleButton.parentElement.insertBefore(input, nodes.docTitleButton);
+    const fit = () => { input.style.width = `${Math.round(Math.min(460, Math.max(140, textWidthOf(input.value || ' ', input) + 30)))}px`; };
+    fit();
+    input.addEventListener('input', fit);
+    input.addEventListener('keydown', (event) => {
+      if (event.isComposing || event.keyCode === 229) return; // 中文输入法选字时的回车 / Esc 留给输入法
+      if (event.key === 'Enter') { event.preventDefault(); void commitRename(session); }
+      else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); endRename(session); }
+    });
+    input.addEventListener('blur', () => { if (!session.done && !session.busy) void commitRename(session); });
+    input.focus();
+    input.select();
+  }
+  function endRename(session, options = {}) {
+    if (session.done) return;
+    session.done = true;
+    session.input.remove();
+    if (state.renaming === session) state.renaming = null;
+    renderDocTitle(activeTab());
+    if (options.focus !== false && !nodes.docTitleButton.hidden) nodes.docTitleButton.focus({ preventScroll: true });
+  }
+  async function commitRename(session) {
+    if (session.done || session.busy) return;
+    const name = session.input.value.trim();
+    const tab = session.tab;
+    if (!name || name === fileStem(session.original) || !state.tabs.includes(tab)) { endRename(session); return; }
+    const blocked = renameBlockedReason(tab);
+    if (blocked) { toast(blocked); endRename(session); return; }
+    session.busy = true;
+    session.input.disabled = true;
+    try {
+      const payload = await requestJson('/api/app/document/rename', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: tab.review.sourceFile, name }),
+      });
+      endRename(session, { focus: false });
+      if (payload.renamed) {
+        await applyRename(tab, payload);
+        toast(`已改名为《${payload.document.file}》。${payload.reviews ? '批注和历史跟着走。' : ''}`);
+      }
+    } catch (error) {
+      session.busy = false;
+      session.input.disabled = false;
+      toast(friendlyError(error, '改名'), 'error');
+      // 名字不合适(已有同名、带了「/」……):留在输入框里改;其他错误收起
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500 && !session.done) { session.input.focus(); session.input.select(); }
+      else endRename(session);
+    }
+  }
+  async function applyRename(tab, payload) {
+    if (isPlain(tab)) {
+      // 普通文档的标签按路径编号:换成新路径的标签,阅读 / 编辑状态、滚动位置、编辑登记照旧
+      const next = makeTab(normalizeDocument(payload));
+      next.mode = tab.mode;
+      next.scrollTop = tab.scrollTop;
+      next.editingRegistered = tab.editingRegistered;
+      const index = state.tabs.indexOf(tab);
+      if (index >= 0) state.tabs.splice(index, 1, next);
+      if (state.activeId === tab.id) state.activeId = next.id;
+      try { localStorage.removeItem(draftKey(tab.id)); } catch (_) {}
+      persistTabs();
+      renderApp();
+    } else {
+      await refreshTab(tab, { silent: true });
+      persistTabs();
+      renderApp();
+    }
+    await refreshRecents();
+  }
+
   // ---------- 另存为副本(⇧⌘S):新文件、新文档身份,不带原稿的批注与历史 ----------
   async function pickCopyPath(tab, title, suggestion) {
     const directory = posixDir(tab.review.sourceFile || '');
@@ -3804,7 +3891,21 @@
     nodes.toggleRightTop.addEventListener('click', () => toggleRight());
     nodes.notesCurrentTab.addEventListener('click', () => showNotesPane('current'));
     nodes.notesHistoryTab.addEventListener('click', () => showNotesPane('history'));
-    nodes.docTitleButton.addEventListener('click', (event) => { event.stopPropagation(); toggleDocInfo(); });
+    // 单击文件名开信息卡;双击就地改名。鼠标单击先等一下看是不是双击,免得信息卡先闪一下;
+    // 键盘与脚本触发(detail 为 0)立刻开
+    nodes.docTitleButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (event.detail === 0) { toggleDocInfo(); return; }
+      if (event.detail > 1) return;
+      clearTimeout(state.docTitleClickTimer);
+      state.docTitleClickTimer = setTimeout(() => { state.docTitleClickTimer = 0; toggleDocInfo(); }, 250);
+    });
+    nodes.docTitleButton.addEventListener('dblclick', (event) => {
+      event.preventDefault(); event.stopPropagation();
+      clearTimeout(state.docTitleClickTimer); state.docTitleClickTimer = 0;
+      toggleDocInfo(false);
+      startRename();
+    });
     nodes.compareToggleButton.addEventListener('click', () => toggleCompare());
     nodes.syncFooter.addEventListener('click', () => { void openSettings(); });
     document.addEventListener('click', (event) => { if (!nodes.docInfoPopover.hidden && !event.target.closest('#docInfoPopover, #docTitleButton')) toggleDocInfo(false); });

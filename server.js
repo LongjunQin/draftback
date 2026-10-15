@@ -830,6 +830,15 @@ async function handleAppApi(req, res, pathname, q) {
     }
     return sendJson(res, 200, await plainDocuments.saveDocumentCopy(body.path, body));
   }
+  // 改名:同一文件夹里换名字,批注、审阅历史、文档身份跟着走;这一轮没走完时拒绝
+  if (pathname === '/api/app/document/rename') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim() || typeof body.name !== 'string') {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供文档路径 path 与新名字 name。' });
+    }
+    return sendJson(res, 200, await plainDocuments.renameDocument(body.path, body.name));
+  }
   if (pathname === '/api/app/document/create') {
     if (!allowMethods(req, res, ['POST'])) return;
     const body = await readBody(req);

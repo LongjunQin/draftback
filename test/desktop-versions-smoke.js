@@ -2,7 +2,8 @@
 'use strict';
 
 // 规则⑤第三段的真实浏览器冒烟:回稿卡(数据来自版本事件)、独立只读对比视图(含删除、上一处 / 下一处、Esc 关闭回到完成稿)、
-// 历史按轮折叠、轮次时间线、恢复到第 N 轮改稿前与「恢复到恢复前的稿子」、稿子回来时自动打开对比视图。
+// 历史按轮折叠、轮次时间线、恢复到第 N 轮改稿前与「恢复到恢复前的稿子」、稿子回来时默认显示干净稿(2026-10-15 用户定),
+// 点回稿卡「显示改动」才打开对比视图。
 //
 // 用法: node test/desktop-versions-smoke.js
 
@@ -11,7 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const store = require('../lib/review-store');
-const { waitUntil, stopChild, startServer, startChrome } = require('./helpers/browser-smoke');
+const { sleep, waitUntil, stopChild, startServer, startChrome } = require('./helpers/browser-smoke');
 
 const ORIGINAL = ['# 版本冒烟', '', '第一段讲苹果。', '', '第二段要被删掉。', '', '第三段有 12 个数字。', ''].join('\n');
 const FINAL = ['# 版本冒烟', '', '第一段讲苹果和香蕉。', '', '第三段有 13 个数字。', '', '新加的第四段。', ''].join('\n');
@@ -193,7 +194,7 @@ async function main() {
     assert.equal(fs.readFileSync(doc, 'utf8'), FINAL, '反悔后文件回到第 1 轮完成稿');
     await waitUntil('历史三轮', () => cdp.evaluate(`document.querySelectorAll('#historyNotesList .round-group').length === 3`));
 
-    // 5. 稿子回来时自动打开对比视图:第二篇在页面里打开着,后台完成一轮并通知
+    // 5. 稿子回来时默认显示改完的干净稿:第二篇在页面里打开着,后台完成一轮并通知;想看改了哪里点「显示改动」
     await cdp.evaluate(`Array.from(document.querySelectorAll('#tabList .tab, #recentList .recent-item')).length`);
     await cdp.evaluate(`document.querySelector('#filesModeButton').click()`);
     await waitUntil('最近列表', () => cdp.evaluate(`Array.from(document.querySelectorAll('#recentList .recent-item')).some((i) => i.textContent.includes('自动打开'))`));
@@ -204,14 +205,19 @@ async function main() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewSessionId: second.id, reason: 'agent-complete' }),
     });
     assert.equal(notify.ok, true);
-    await waitUntil('自动打开对比视图', () => cdp.evaluate(`!document.querySelector('#compareView').hidden && document.querySelectorAll('#compareContent .diff-change').length === 4 && document.querySelector('#returnCard h3') && document.querySelector('#returnCard h3').textContent === '第 1 轮回稿'`), 20_000);
+    await waitUntil('回稿卡出现', () => cdp.evaluate(`Boolean(document.querySelector('#returnCard h3')) && document.querySelector('#returnCard h3').textContent === '第 1 轮回稿' && Boolean(document.querySelector('#returnCard .return-actions .primary-button'))`), 20_000);
+    await sleep(800);
+    assert.equal(await cdp.evaluate(`document.querySelector('#compareView').hidden`), true, '稿子回来不自动打开对比视图');
+    assert.equal(await cdp.evaluate(`document.querySelector('#documentContent').textContent.includes('第二段要被删掉')`), false, '正文是改完的干净稿');
+    await cdp.evaluate(`document.querySelector('#returnCard .return-actions .primary-button').click()`);
+    await waitUntil('点「显示改动」打开对比视图', () => cdp.evaluate(`!document.querySelector('#compareView').hidden && document.querySelectorAll('#compareContent .diff-change').length === 4`), 20_000);
     await key(cdp, 'Escape', 'Escape', 27);
     await waitUntil('关闭', () => cdp.evaluate(`document.querySelector('#compareView').hidden`));
 
     // 页面没有 <link rel=icon>,Chrome 自动请求 /favicon.ico 得到 404,这条资源错误不算脚本问题
     const errors = cdp.exceptions.concat(cdp.consoleMessages.filter((m) => m.type === 'error').map((m) => m.text)).filter((text) => !/favicon|ERR_|net::|Failed to load resource.*404/.test(text));
     assert.deepEqual(errors, [], `页面不应有脚本异常或 console.error: ${errors.join(' | ')}`);
-    console.log('PASS: 回稿卡(事件数据、计数、逐条结果、改动处数)、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来自动打开对比。');
+    console.log('PASS: 回稿卡(事件数据、计数、逐条结果、改动处数)、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、点「显示改动」看对比。');
   } finally {
     if (chrome) await stopChild(chrome.child);
     if (server) await stopChild(server.child);

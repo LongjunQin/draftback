@@ -55,6 +55,7 @@
         { id: 'close-tab', label: '关闭标签页', accelerator: 'CmdOrCtrl+W', command: 'close-tab', when: 'hasDoc' },
         { id: 'save', label: '保存', accelerator: 'CmdOrCtrl+S', command: 'save', when: 'editing' },
         { id: 'save-copy', label: '另存为副本…', accelerator: 'Shift+CmdOrCtrl+S', command: 'save-copy', when: 'hasDoc' },
+        { id: 'rename', label: '重新命名…', command: 'rename', when: 'hasDoc' },
         { id: 'reveal', label: '在访达中显示', command: 'reveal', when: 'hasDoc' },
         SEP,
         {

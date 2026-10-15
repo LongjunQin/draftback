@@ -66,6 +66,9 @@ final class OpenedDocument: ObservableObject, Identifiable {
         self.contentVersion += 1
     }
 
+    /// Mac 上改了名:标题跟着变(正文与批注身份不动)
+    func retitle(_ title: String) { if !title.isEmpty && title != name { name = title } }
+
     /// 当前版本上还没导出的批注:可改可删,"完成本轮"时打包。
     var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash, reviewId: roundId) } }
     /// 当前版本上已提交(导出 / 上传)的批注:锁定,等 Mac 接收。
@@ -510,6 +513,7 @@ final class DocumentStore: ObservableObject {
             // 手头有旧轮未提交的批注就先留「新版」入口,旧批注保留原身份
             if document.openNotes.isEmpty {
                 document.sync = latest
+                document.retitle(latest.title)
                 document.contentReviewId = latest.reviewId
                 document.notice = "已进入第 \(latest.round) 轮"
             } else {
@@ -519,6 +523,7 @@ final class DocumentStore: ObservableObject {
             // 状态变了而正文没变(或只推了状态、新正文不可用):就地更新元数据;正文身份 contentReviewId 不改挂,
             // 指纹对不上时 annotationAllowed 自然为 false(v2.3 第 5 节)
             document.sync = latest
+            document.retitle(latest.title)
         }
     }
 
