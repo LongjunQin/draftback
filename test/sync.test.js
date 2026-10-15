@@ -120,6 +120,46 @@ test('待推送队列:open 后待推,推完清空;提交、改稿、完成各自
   assert.match(final.content, /正文\(改\)/);
 });
 
+test('已交出三档(没人接入 / AI 在线 / 已领取)一变就再推;其他状态的签名不带三档', async (t) => {
+  const f = fixture(t);
+  const presence = require('../lib/agent-presence');
+  const doc = path.join(f.docDir, '三档.md');
+  fs.writeFileSync(doc, '# 三档\n\n正文。\n');
+  const { review } = await store.openReview(doc, f.options);
+  const reviewing = await store.getReviewById(review.id, f.options);
+  assert.equal(sync.pushSignature(reviewing, f.options).split('|').length, 6, '批注中不带三档,签名与旧版一致(升级后不重推)');
+  await sync.markPushed(review.id, {}, f.options);
+
+  sidecar(doc, [{ id: 'n1', comment: '改', status: 'open' }]);
+  await store.submitReview(review.id, f.options);
+  let outbox = await sync.listOutbox(f.options);
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0].agentState, 'none');
+  await sync.markPushed(review.id, { signature: outbox[0].signature }, f.options);
+  assert.equal((await sync.listOutbox(f.options)).length, 0);
+
+  await presence.register(review.id, { agent: 'Claude' }, f.options);
+  outbox = await sync.listOutbox(f.options);
+  assert.equal(outbox.length, 1, 'AI 开始监听要再推');
+  assert.equal(outbox[0].agentState, 'listening');
+  const payload = await sync.readPushPayload(review.id, f.options);
+  assert.equal(payload.agentState, 'listening', '推送载荷带三档');
+  await sync.markPushed(review.id, { signature: payload.signature }, f.options);
+  assert.equal((await sync.listOutbox(f.options)).length, 0, '续期不改三档,不重推');
+  await presence.register(review.id, { agent: 'Claude' }, f.options);
+  assert.equal((await sync.listOutbox(f.options)).length, 0);
+
+  await presence.unregister(review.id, f.options);
+  outbox = await sync.listOutbox(f.options);
+  assert.equal(outbox[0].agentState, 'none', '监听没了要再推,手机不再显示在线');
+  await sync.markPushed(review.id, { signature: outbox[0].signature }, f.options);
+
+  await store.claimReview(doc, { agent: 'Claude', expectedReviewId: review.id, ...f.options });
+  outbox = await sync.listOutbox(f.options);
+  assert.equal(outbox[0].agentState, 'claimed', '领取要再推');
+  assert.equal(outbox[0].phoneState, 'waiting-agent');
+});
+
 test('正文与会话指纹不一致时不推送;推送失败与批次/回执状态逐级记录', async (t) => {
   const f = fixture(t);
   const doc = path.join(f.docDir, '外改.md');

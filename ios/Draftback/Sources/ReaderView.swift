@@ -1,10 +1,16 @@
 import SwiftUI
 import UIKit
 
-/// 阅读与批注界面:顶部状态、正文(WebView)、底部批注计数;大纲、批注列表、写批注、分享均为 sheet。
+/// 读稿页(UI 方案第 4.2–4.4 节):导航栏标题下一行是状态;正文上方按情况出现横幅;
+/// 底栏左槽是状态两行,选中文字时变成琥珀描边的「批注这段」;右槽是主按钮「交给 AI · k」。
+/// 状态全部由 ReaderStatus 按真实事件算出(跨端规则第 7 节),这里只负责画和转发动作。
 struct ReaderView: View {
     @EnvironmentObject private var store: DocumentStore
     @ObservedObject var document: OpenedDocument
+    /// 字号:0 默认 / 1 大 / 2 特大,在系统动态字体之上再加一档
+    @AppStorage("draftback.reader.fontStep") private var fontStep = 0
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var bridge: ReaderBridge?
     @State private var reloadToken = 0
@@ -14,6 +20,10 @@ struct ReaderView: View {
     @State private var shareItem: URL?
     @State private var exportingPDF = false
     @State private var message: String?
+    @State private var hasSelection = false
+    @State private var confirmNewVersion = false
+    @State private var handOffCount = 0
+    @State private var clock = Date()
 
     struct Composer: Identifiable {
         let id = UUID()
@@ -24,64 +34,68 @@ struct ReaderView: View {
         var initialComment: String
     }
 
+    private var status: ReaderStatus {
+        let submitted = document.submittedNotes
+        let latest = document.sync.flatMap { sync in store.synced.first { $0.docId == sync.docId } }
+        let formatter = ISO8601DateFormatter()
+        return ReaderStatus.make(.init(
+            sync: document.sync,
+            annotationAllowed: document.annotationAllowed,
+            newerVersionAvailable: document.newerVersionAvailable,
+            latestRound: latest?.round,
+            open: document.openNotes.count, submitted: submitted.count,
+            received: document.receivedNotes.count, rejected: document.rejectedNotes.count,
+            pendingUploads: store.pendingUploads,
+            oldestSubmittedAt: submitted.compactMap { $0.raw["submittedAt"] as? String }.compactMap(formatter.date(from:)).min(),
+            now: clock))
+    }
+
+    private var fontScale: Double {
+        _ = dynamicTypeSize // 跟随系统动态字体:尺寸一变就重算
+        let base = UIFontMetrics(forTextStyle: .body).scaledValue(for: 17) / 17
+        return base * [1.0, 1.15, 1.3][min(max(fontStep, 0), 2)]
+    }
+
     var body: some View {
+        let status = self.status
         VStack(spacing: 0) {
-            progressBanner
-            ReaderWebView(document: document, reloadToken: $reloadToken, contentVersion: document.contentVersion, onEvent: handle, onReady: { bridge = $0 })
-                .ignoresSafeArea(edges: .bottom)
-            statusBar
+            if store.isOffline { offlineLine }
+            if let notice = document.notice { noticeBanner(notice) } else if let banner = status.banner { bannerView(banner) }
+            ReaderWebView(document: document, reloadToken: $reloadToken, contentVersion: document.contentVersion,
+                          fontScale: fontScale, annotationEnabled: status.canAnnotate, onEvent: { handle($0, status: status) }, onReady: { bridge = $0 })
+            bottomBar(status)
         }
         .onChange(of: document.notice) { _, notice in
             guard notice != nil else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { if document.notice == notice { document.notice = nil } }
         }
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { clock = $0 }
         .navigationTitle(document.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(document.name).font(.headline).lineLimit(1)
+                    Text(status.subtitle).font(.caption.weight(.semibold)).foregroundStyle(status.subtitleTone.text).lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { showOutline = true } label: { Image(systemName: "list.bullet.indent") }
                     .disabled(document.outline.isEmpty)
+                    .accessibilityLabel("大纲")
                 Button { showNotes = true } label: {
-                    Label("批注", systemImage: "text.bubble")
-                        .labelStyle(.iconOnly)
-                        .overlay(alignment: .topTrailing) { badge }
+                    Image(systemName: "text.bubble").overlay(alignment: .topTrailing) { badge }
                 }
-                Menu {
-                    Button { composer = Composer(anchor: nil, quote: "", scope: "document", editingNoteId: nil, initialComment: "") } label: {
-                        Label("写总体意见", systemImage: "text.badge.plus")
-                    }
-                    Button { exportPDF() } label: { Label("导出 PDF", systemImage: "doc.richtext") }
-                    if let sync = document.sync {
-                        Button { store.submitBatch(for: document) } label: { Label("完成本轮:把批注交给 Mac", systemImage: "paperplane") }
-                            .disabled(document.openNotes.isEmpty || !document.annotationAllowed)
-                        if !document.submittedNotes.isEmpty {
-                            Button { store.resubmitBatch(for: document) } label: { Label("重新发送已提交的批次", systemImage: "arrow.clockwise") }
-                        }
-                        if !sync.summary.isEmpty {
-                            Button { message = sync.summary } label: { Label("查看改稿摘要", systemImage: "text.quote") }
-                        }
-                    } else {
-                        Button { store.submitBatch(for: document) } label: { Label("完成本轮:导出批注批次", systemImage: "paperplane") }
-                            .disabled(document.openNotes.isEmpty)
-                        if !document.submittedNotes.isEmpty {
-                            Button { store.resubmitBatch(for: document) } label: { Label("重新导出已提交的批次", systemImage: "arrow.clockwise") }
-                        }
-                    }
-                } label: { Image(systemName: "ellipsis.circle") }
-            }
-            if document.newerVersionAvailable, let sync = document.sync {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        if let latest = store.synced.first(where: { $0.docId == sync.docId }) { store.loadLatestVersion(latest, into: document) }
-                    } label: { Label("新版", systemImage: "arrow.down.doc") }
-                    .tint(.orange)
-                }
+                .accessibilityLabel(document.roundNotesCount > 0 ? "批注,本轮 \(document.roundNotesCount) 条" : "批注")
+                moreMenu(status)
             }
         }
         .sheet(isPresented: $showOutline) { OutlineSheet(items: document.outline) { id in bridge?.scrollToHeading(id); showOutline = false } }
         .sheet(isPresented: $showNotes) {
-            NotesSheet(document: document, onFocus: { id in bridge?.focus(noteId: id); showNotes = false },
-                       onEdit: { note in composer = Composer(anchor: nil, quote: note.quote, scope: nil, editingNoteId: note.id, initialComment: note.comment) },
+            NotesSheet(document: document, canAnnotate: status.canAnnotate,
+                       onFocus: { id in bridge?.focus(noteId: id); showNotes = false },
+                       onEdit: { note in composer = Composer(anchor: nil, quote: note.quote, scope: note.isDocumentScope ? "document" : nil, editingNoteId: note.id, initialComment: note.comment) },
                        onDelete: { note in store.remove(noteId: note.id, from: document); reloadToken += 1 })
         }
         .sheet(item: $composer) { item in
@@ -95,127 +109,228 @@ struct ReaderView: View {
                 bridge?.clearSelection()
             }
         }
+        .confirmationDialog("换成新版?", isPresented: $confirmNewVersion, titleVisibility: .visible) {
+            Button("换成新版") { loadNewVersion() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("手头 \(document.openNotes.count) 条没交的批注会留在旧版上,不会再交出。")
+        }
         .onChange(of: store.pendingShare) { _, url in
             if let url { shareItem = url; store.pendingShare = nil }
         }
         .sheet(item: $shareItem) { url in ShareSheet(items: [url]) }
-        .alert("提示", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
+        .alert(message != nil ? "提示" : "出错了", isPresented: Binding(get: { message != nil || store.lastError != nil },
+                                                                        set: { if !$0 { message = nil; store.lastError = nil } })) {
             Button("好", role: .cancel) {}
-        } message: { Text(message ?? "") }
+        } message: { Text(message ?? store.lastError ?? "") }
         .overlay { if exportingPDF { ProgressView("正在生成 PDF…").padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
+        .sensoryFeedback(.success, trigger: handOffCount)
         #if DEBUG
-        // 仅调试版:模拟器自动化验证用(--export-batch 导出、--resubmit-batch 重发、--show-notes 打开批注列表)
+        // 仅调试版:模拟器自动化验证用(--export-batch 导出、--resubmit-batch 重发、--show-notes 打开批注列表、--demo-select 选中一段、--demo-annotate 再点「批注这段」)
         .onAppear {
             let args = CommandLine.arguments
             if args.contains("--export-batch") { store.submitBatch(for: document) }
             if args.contains("--resubmit-batch") { store.resubmitBatch(for: document) }
             if args.contains("--show-notes") { showNotes = true }
+            if args.contains("--demo-select") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { bridge?.debugSelectParagraph(2) } }
+            if args.contains("--demo-annotate") { DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { bridge?.requestAnnotation() } }
         }
         #endif
     }
 
-    /// 顶部横幅:Mac 那头正在干什么(等待智能体 / 修改中),以及新版刚换进来的一次性提示
-    @ViewBuilder private var progressBanner: some View {
-        if let notice = document.notice {
-            Button {
-                if let summary = document.sync?.summary, !summary.isEmpty { message = summary }
-                document.notice = nil
-            } label: {
-                HStack(spacing: 8) { Image(systemName: "checkmark.circle.fill"); Text(notice); Spacer() }
-                    .font(.footnote).padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(Color.green.opacity(0.15))
+    // MARK: 顶部:离线线、横幅
+
+    private var offlineLine: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "wifi.slash")
+            Text("离线 · 批注会先存在手机里")
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity).padding(.vertical, 5)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func bannerView(_ banner: ReaderStatus.Banner) -> some View {
+        HStack(spacing: 8) {
+            if banner.spinning && !reduceMotion {
+                ProgressView().controlSize(.small).tint(banner.tone.color)
+            } else {
+                Image(systemName: icon(for: banner.tone))
             }
-            .buttonStyle(.plain)
-        } else if let sync = document.sync, let text = progressText(sync) {
-            HStack(spacing: 8) {
-                if sync.phoneState == "applying" || sync.phoneState == "manual-editing" { ProgressView().controlSize(.small) } else { Image(systemName: "clock") }
-                Text(text); Spacer()
+            Text(banner.text).lineLimit(2)
+            Spacer(minLength: 4)
+            if banner.action == .loadNewVersion {
+                Button("换成新版") { requestNewVersion() }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.bordered).controlSize(.small).tint(banner.tone.color)
             }
-            .font(.footnote).padding(.horizontal, 14).padding(.vertical, 8)
-            .background(Color.orange.opacity(0.15))
+        }
+        .font(.footnote)
+        .foregroundStyle(banner.tone.text)
+        .padding(.horizontal, 14).frame(minHeight: 40)
+        .background(banner.tone.soft)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// 新版刚换进来的一次性提示(第 2 步换成常驻的回稿卡)
+    private func noticeBanner(_ notice: String) -> some View {
+        Button {
+            if let summary = document.sync?.summary, !summary.isEmpty { message = summary }
+            document.notice = nil
+        } label: {
+            HStack(spacing: 8) { Image(systemName: "checkmark.circle.fill"); Text(notice).lineLimit(2); Spacer() }
+                .font(.footnote).foregroundStyle(Tone.back.text)
+                .padding(.horizontal, 14).frame(minHeight: 40)
+                .background(Tone.back.soft)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func icon(for tone: Tone) -> String {
+        switch tone {
+        case .waiting: return "clock"
+        case .ai: return "sparkles"
+        case .conflict: return "exclamationmark.triangle.fill"
+        case .back, .done: return "checkmark.circle"
+        case .turn: return "arrow.down.doc"
+        case .idle: return "info.circle"
         }
     }
 
-    private func progressText(_ sync: SyncedDocument) -> String? {
-        switch sync.phoneState {
-        case "waiting-agent": return "批注已交给 Mac,等待智能体开始改稿"
-        case "applying": return "Mac 正在修改,改完会自动换成新版"
-        case "manual-editing": return "Mac 上正在手工修改,改完会自动换成新版"
-        case "conflict": return "Mac 上原文被改过,等待 Mac 处理"
-        default: return nil
-        }
-    }
+    // MARK: 导航栏:批注徽标与「…」
 
     private var badge: some View {
         Group {
-            if !document.openNotes.isEmpty {
-                Text("\(document.openNotes.count)")
+            let count = document.roundNotesCount
+            if count > 0 {
+                Text("\(count)")
                     .font(.caption2.bold()).foregroundStyle(.white)
                     .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Capsule().fill(.orange))
+                    .background(Capsule().fill(Palette.amber))
                     .offset(x: 10, y: -8)
             }
         }
     }
 
-    /// 底部:左边状态链,右边「完成本轮」——每篇必走、唯一会把东西发出去的动作,不藏进「…」菜单(2026-10-14 用户决定)
-    private var statusBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: document.openNotes.isEmpty && !document.submittedNotes.isEmpty ? "paperplane" : "lock.open")
-            Text(statusText).lineLimit(2)
-            Spacer()
-            finishButton
+    private func moreMenu(_ status: ReaderStatus) -> some View {
+        Menu {
+            if status.canAnnotate {
+                Button { composer = Composer(anchor: nil, quote: "", scope: "document", editingNoteId: nil, initialComment: "") } label: {
+                    Label("写总体意见", systemImage: "text.badge.plus")
+                }
+            }
+            if let summary = document.sync?.summary, !summary.isEmpty {
+                Button { message = summary } label: { Label("改稿摘要", systemImage: "text.quote") }
+            }
+            if !document.submittedNotes.isEmpty {
+                Button { store.resubmitBatch(for: document) } label: {
+                    Label(document.sync == nil ? "重新导出" : "重新发送", systemImage: "arrow.clockwise")
+                }
+            }
+            Button { exportPDF() } label: { Label("导出 PDF", systemImage: "doc.richtext") }
+            Picker(selection: $fontStep) {
+                Text("默认").tag(0)
+                Text("大").tag(1)
+                Text("特大").tag(2)
+            } label: { Label("字号", systemImage: "textformat.size") }
+            .pickerStyle(.menu)
+        } label: { Image(systemName: "ellipsis.circle") }
+        .accessibilityLabel("更多")
+    }
+
+    // MARK: 底栏:左槽状态 / 批注这段,右槽主按钮
+
+    private func bottomBar(_ status: ReaderStatus) -> some View {
+        HStack(spacing: 10) {
+            if hasSelection && status.canAnnotate {
+                Button { bridge?.requestAnnotation() } label: {
+                    Label("批注这段", systemImage: "text.bubble")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                }
+                .buttonStyle(AnnotateButtonStyle())
+                .transition(.opacity)
+            } else {
+                statusSlot(status)
+            }
+            if let primary = status.primary { primaryButton(primary) }
         }
-        .font(.footnote)
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 6)
         .background(.bar)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hasSelection)
     }
 
-    @ViewBuilder private var finishButton: some View {
-        let open = document.openNotes.count
-        let synced = document.sync != nil
-        let canFinish = open > 0 && document.annotationAllowed
-        if open == 0 && document.submittedNotes.isEmpty && document.annotationAllowed {
-            Text("选中文字 → 菜单「批注」").foregroundStyle(.secondary)
-        } else {
-            Button { store.submitBatch(for: document) } label: {
-                Label(open > 0 ? "完成本轮(\(open) 条)" : (synced ? "完成本轮" : "导出批注"), systemImage: "paperplane.fill")
-                    .font(.footnote.weight(.semibold))
+    private func statusSlot(_ status: ReaderStatus) -> some View {
+        Button { if status.statusTap == .openNotes { showNotes = true } } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(status.statusLine).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                if let detail = status.statusDetail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(!canFinish)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .allowsHitTesting(status.statusTap != nil)
+        .accessibilityHint(status.statusTap == .openNotes ? "打开批注列表" : "")
+    }
+
+    private func primaryButton(_ primary: ReaderStatus.Primary) -> some View {
+        let (label, enabled) = primaryLabel(primary)
+        return Button { perform(primary) } label: {
+            Text(label).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                .frame(minWidth: 120, minHeight: 46)
+                .padding(.horizontal, 14)
+        }
+        .buttonStyle(PrimaryButtonStyle(enabled: enabled))
+        .disabled(!enabled)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func primaryLabel(_ primary: ReaderStatus.Primary) -> (String, Bool) {
+        switch primary {
+        case .handOff(let count): return ("交给 AI · \(count)", true)
+        case .handOffDisabled: return ("交给 AI", false)
+        case .handedOff: return ("已交出", false)
+        case .busy: return ("改稿中…", false)
+        case .resend: return ("重新发送", true)
+        case .exportBatch(let count): return ("导出批注 · \(count)", true)
+        case .reexport: return ("重新导出", true)
         }
     }
 
-    /// 跨端规则第 7 节的手机状态链。Mac 推来的文档:本地已保存 → 等待同步 → Mac 已接收 → 等待智能体 → 修改中 → 新版可复核;
-    /// 手机独立打开的文件(文件传递)只有"本地已保存"和"已导出,等待 Mac 接收"两档。
-    private var statusText: String {
-        let open = document.openNotes.count, sent = document.submittedNotes.count
-        if let sync = document.sync {
-            if document.newerVersionAvailable { return "Mac 已推来新版 · 点左上角「新版」" }
-            let received = document.receivedNotes.count, rejected = document.rejectedNotes.count
-            if sent > 0 {
-                if store.pendingUploads > 0 { return "等待同步 \(sent) 条(联网后自动上传)" }
-                let waitedLong = document.submittedNotes.compactMap { $0.raw["submittedAt"] as? String }.compactMap(ISO8601DateFormatter().date(from:)).min()
-                    .map { Date().timeIntervalSince($0) > 180 } ?? false
-                return waitedLong ? "已提交 \(sent) 条 · 等待 Mac 在线" : "已提交 \(sent) 条 · 等待 Mac 接收"
-            }
-            if received > 0 && open == 0 { return "Mac 已接收 \(received) 条 · \(sync.stateLabel)" }
-            if rejected > 0 && open == 0 { return "\(rejected) 条未被采用 · \(sync.stateLabel)" }
-            if sync.canAnnotate && !document.annotationAllowed { return "正文还不是这一轮的,等同步完成后再批注" }
-            return sync.canAnnotate ? "\(sync.stateLabel) · 本地已保存 \(open) 条" : sync.stateLabel
+    private func perform(_ primary: ReaderStatus.Primary) {
+        switch primary {
+        case .handOff, .exportBatch:
+            store.submitBatch(for: document)
+            handOffCount += 1
+        case .resend, .reexport:
+            store.resubmitBatch(for: document)
+        case .handOffDisabled, .handedOff, .busy:
+            break
         }
-        if sent > 0 && open == 0 { return "已导出 \(sent) 条 · 等待 Mac 接收" }
-        if sent > 0 { return "本地已保存 \(open) 条 · 已导出 \(sent) 条" }
-        return "手机批注 · 本地已保存 \(open) 条"
     }
 
-    private func handle(_ event: ReaderEvent) {
+    // MARK: 动作
+
+    private func requestNewVersion() {
+        if document.openNotes.isEmpty { loadNewVersion() } else { confirmNewVersion = true }
+    }
+
+    private func loadNewVersion() {
+        guard let sync = document.sync, let latest = store.synced.first(where: { $0.docId == sync.docId }) else { return }
+        store.loadLatestVersion(latest, into: document)
+    }
+
+    private func handle(_ event: ReaderEvent, status: ReaderStatus) {
         switch event {
         case .ready: break
         case .rendered(let outline): document.outline = outline
+        case .selectionState(let active): hasSelection = active
         case .selection(let anchor, let quote):
+            guard status.canAnnotate else { message = status.blockedReason ?? "现在不能批注。"; return }
             composer = Composer(anchor: anchor, quote: quote, scope: nil, editingNoteId: nil, initialComment: "")
         case .noSelection: message = "没有识别到有效的文字选区,请重新选择。"
         case .error(let text): message = text
@@ -234,6 +349,28 @@ struct ReaderView: View {
                 }
             }
         }
+    }
+}
+
+/// 右槽主按钮:青绿实底;不能点时灰底
+struct PrimaryButtonStyle: ButtonStyle {
+    let enabled: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(enabled ? Color.white : Color.secondary)
+            .background(RoundedRectangle(cornerRadius: 12).fill(enabled ? Tone.turn.color : Color(uiColor: .tertiarySystemFill)))
+            .opacity(configuration.isPressed ? 0.8 : 1)
+    }
+}
+
+/// 「批注这段」:琥珀描边(琥珀只给批注)
+struct AnnotateButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Palette.amberText)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Palette.amberSoft))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.amber, lineWidth: 1.5))
+            .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }
 
@@ -257,8 +394,10 @@ struct OutlineSheet: View {
     }
 }
 
+/// 批注列表:未交(可改可删)/ 已交出 · 等待 Mac 收到 / Mac 已收到 / 被 Mac 拒收(附原因)/ 旧版本上的批注(只读)
 struct NotesSheet: View {
     @ObservedObject var document: OpenedDocument
+    let canAnnotate: Bool
     let onFocus: (String) -> Void
     let onEdit: (Note) -> Void
     let onDelete: (Note) -> Void
@@ -266,9 +405,9 @@ struct NotesSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("本轮未提交 \(document.openNotes.count)") {
+                Section {
                     if document.openNotes.isEmpty {
-                        Text("还没有批注。选中正文文字,在弹出的菜单里点「批注」。").foregroundStyle(.secondary)
+                        Text(canAnnotate ? "还没有批注。选中正文文字就能批注。" : "没有未交的批注。").foregroundStyle(.secondary)
                     }
                     ForEach(document.openNotes) { note in
                         NoteRow(note: note)
@@ -279,6 +418,12 @@ struct NotesSheet: View {
                                 Button { onEdit(note) } label: { Label("修改", systemImage: "pencil") }.tint(.accentColor)
                             }
                     }
+                } header: {
+                    Text("未交 \(document.openNotes.count)")
+                } footer: {
+                    if !canAnnotate && !document.openNotes.isEmpty {
+                        Text("这一轮已经交出或结束,这些没交的批注不会进这一轮。")
+                    }
                 }
                 if !document.submittedNotes.isEmpty {
                     Section {
@@ -288,13 +433,13 @@ struct NotesSheet: View {
                                 .onTapGesture { if !note.isDocumentScope { onFocus(note.id) } }
                         }
                     } header: {
-                        Text("\(document.sync == nil ? "已导出" : "已提交"),等待 Mac 接收 \(document.submittedNotes.count)")
+                        Text(document.sync == nil ? "已导出 · 等待 Mac 导入 \(document.submittedNotes.count)" : "已交出 · 等待 Mac 收到 \(document.submittedNotes.count)")
                     } footer: {
-                        Text("已提交的批注锁定,不能再改;要补充就写新批注,下一批再交。")
+                        Text("交出的批注锁定,不能再改。")
                     }
                 }
                 if !document.receivedNotes.isEmpty {
-                    Section("Mac 已接收 \(document.receivedNotes.count)") {
+                    Section("Mac 已收到 \(document.receivedNotes.count)") {
                         ForEach(document.receivedNotes) { note in
                             NoteRow(note: note)
                                 .contentShape(Rectangle())
@@ -307,13 +452,13 @@ struct NotesSheet: View {
                         ForEach(document.rejectedNotes) { note in
                             VStack(alignment: .leading, spacing: 4) {
                                 NoteRow(note: note)
-                                Text(note.rejectedReason ?? "未被采用").font(.caption).foregroundStyle(.red)
+                                Text(note.rejectedReason ?? "Mac 没有收下").font(.caption).foregroundStyle(Tone.conflict.text)
                             }
                         }
                     } header: {
-                        Text("未被采用 \(document.rejectedNotes.count)")
+                        Text("被 Mac 拒收 \(document.rejectedNotes.count)")
                     } footer: {
-                        Text("Mac 没有采用这批批注(原因见每条下方);它们仍保留在手机上,需要时在新一轮重新写。")
+                        Text("这些批注留在手机上,不会丢。原因见每条下方。")
                     }
                 }
                 let older = document.olderVersionNotes
@@ -322,14 +467,13 @@ struct NotesSheet: View {
                         ForEach(older) { note in
                             VStack(alignment: .leading, spacing: 4) {
                                 NoteRow(note: note)
-                                Text(note.isSubmitted ? "已导出" : (note.isOpen ? "未提交" : note.status))
-                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(olderLabel(note)).font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     } header: {
                         Text("旧版本上的批注 \(older.count)")
                     } footer: {
-                        Text("文档已换成新版本,这些批注写在旧版本上,只读保留,不会再导出。")
+                        Text("正文已换成新版。这些批注写在旧版上,只读保留,不会再交出。")
                     }
                 }
             }
@@ -338,6 +482,14 @@ struct NotesSheet: View {
         }
         .presentationDetents([.medium, .large])
     }
+
+    private func olderLabel(_ note: Note) -> String {
+        if note.isOpen { return "没交" }
+        if note.isSubmitted { return document.sync == nil ? "已导出" : "已交出" }
+        if note.isReceived { return "Mac 已收到" }
+        if note.isRejected { return "被 Mac 拒收" }
+        return note.status
+    }
 }
 
 struct NoteRow: View {
@@ -345,7 +497,7 @@ struct NoteRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if note.isDocumentScope {
-                Text("总体意见").font(.caption.bold()).foregroundStyle(.orange)
+                Text("总体意见").font(.caption.bold()).foregroundStyle(Palette.amberText)
             } else if !note.quote.isEmpty {
                 Text(note.quote).font(.caption).foregroundStyle(.secondary).lineLimit(3)
             }
@@ -371,7 +523,7 @@ struct ComposerSheet: View {
                 } else if !quote.isEmpty {
                     Text(quote).font(.footnote).foregroundStyle(.secondary).lineLimit(4)
                         .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                        .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: 8))
                 }
                 TextEditor(text: $text)
                     .focused($focused)
@@ -381,7 +533,7 @@ struct ComposerSheet: View {
                 Spacer()
             }
             .padding()
-            .navigationTitle(initial.isEmpty ? "写批注" : "修改批注")
+            .navigationTitle(isDocumentScope ? (initial.isEmpty ? "写总体意见" : "修改总体意见") : (initial.isEmpty ? "写批注" : "修改批注"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }

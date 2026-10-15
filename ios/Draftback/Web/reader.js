@@ -1,12 +1,13 @@
 /*
- * MDTurn iOS 阅读内核(WKWebView 内)。与桌面端共用同一套渲染库与锚点模块(desktop-anchor.js),
+ * 回稿(Draftback)iOS 阅读内核(WKWebView 内)。与桌面端共用同一套渲染库与锚点模块(desktop-anchor.js),
  * 批注锚点格式与 Mac 的 sidecar 完全一致,这样手机上的批注批次可以原样回到 Mac。
  *
  * 与原生侧的约定:
- *   原生 → 页面:window.DraftbackReader.load({ markdown, annotations, assets })、setAnnotations(list)、
- *                 captureSelection()(由编辑菜单的「批注」触发)、scrollToLine(n)、focusNote(id)、clearSelection()
+ *   原生 → 页面:window.DraftbackReader.load({ markdown, annotations, assets, fontScale })、setAnnotations(list)、
+ *                 captureSelection()(编辑菜单的「批注」与底栏「批注这段」触发)、scrollToLine(n)、focusNote(id)、clearSelection()、
+ *                 setFontScale(x)
  *   页面 → 原生:webkit.messageHandlers.draftback.postMessage({ type, ... })
- *                 type = ready | rendered { outline } | selection { anchor, quote } | noteTap { id } | error { message }
+ *                 type = ready | rendered { outline } | selection { anchor, quote } | selectionState { active } | error { message }
  */
 (() => {
   'use strict';
@@ -252,8 +253,34 @@
     } catch (error) { post({ type: 'error', message: `锚点失败:${error.message}` }); return null; }
   }
 
+  // 选区有没有:有就立刻报(底栏换成「批注这段」),没了等 0.2 秒再报(拖动选区时不闪)
+  let selectionActive = false, selectionTimer = null;
+  function selectionInContent() {
+    const selection = window.getSelection();
+    if (!state.rendered || !selection || selection.isCollapsed || !selection.rangeCount) return false;
+    const range = selection.getRangeAt(0);
+    return content.contains(range.commonAncestorContainer) && Boolean(selection.toString().trim());
+  }
+  document.addEventListener('selectionchange', () => {
+    const active = selectionInContent();
+    clearTimeout(selectionTimer);
+    if (active) {
+      if (!selectionActive) { selectionActive = true; post({ type: 'selectionState', active: true }); }
+      return;
+    }
+    selectionTimer = setTimeout(() => {
+      if (selectionActive && !selectionInContent()) { selectionActive = false; post({ type: 'selectionState', active: false }); }
+    }, 200);
+  });
+
+  function setFontScale(value) {
+    const scale = Number(value);
+    if (Number.isFinite(scale) && scale > 0.5 && scale < 4) document.documentElement.style.setProperty('--font-scale', String(scale));
+  }
+
   window.DraftbackReader = Object.freeze({
     load(payload) {
+      setFontScale(payload.fontScale);
       state.annotations = Array.isArray(payload.annotations) ? payload.annotations : [];
       state.assets = payload.assets && typeof payload.assets === 'object' ? payload.assets : {};
       return render(String(payload.markdown || ''));
@@ -267,6 +294,7 @@
       target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     },
     focusNote(id) { renderMarkers(id); },
+    setFontScale,
     outline,
   });
   post({ type: 'ready' });

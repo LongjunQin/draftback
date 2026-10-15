@@ -22,6 +22,9 @@ targets:
   Draftback:
     type: application
     platform: iOS
+    # 单元测试(纯逻辑:首页分组、读稿页状态、时间说法):xcodebuild test -scheme Draftback
+    scheme:
+      testTargets: [DraftbackTests]
     sources:
       - path: Draftback/Sources
       - path: Draftback/Resources
@@ -87,3 +90,14 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension: [md, markdown]
               public.mime-type: [text/markdown]
+  DraftbackTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: DraftbackTests
+    dependencies:
+      - target: Draftback
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: app.draftback.ios.tests

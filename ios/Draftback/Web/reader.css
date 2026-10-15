@@ -25,7 +25,7 @@
 html, body { margin: 0; background: var(--paper); color: var(--text); font-family: var(--font); -webkit-text-size-adjust: 100%; }
 body { padding: 12px 18px calc(40px + env(safe-area-inset-bottom)); }
 .empty { padding: 40px 0; color: var(--muted); text-align: center; }
-.markdown-body { font-size: 17px; line-height: 1.8; word-break: break-word; -webkit-user-select: text; user-select: text; }
+.markdown-body { font-size: calc(17px * var(--font-scale, 1)); line-height: 1.8; word-break: break-word; -webkit-user-select: text; user-select: text; }
 .markdown-body :is(h1, h2, h3, h4, h5, h6) { color: var(--text-strong); line-height: 1.3; margin: 1.4em 0 .6em; scroll-margin-top: 12px; }
 .markdown-body h1 { font-size: 1.7em; } .markdown-body h2 { font-size: 1.4em; } .markdown-body h3 { font-size: 1.2em; }
 .markdown-body p { margin: .8em 0; }
@@ -33,9 +33,9 @@ body { padding: 12px 18px calc(40px + env(safe-area-inset-bottom)); }
 .markdown-body a { color: #0d8077; }
 @media (prefers-color-scheme: dark) { .markdown-body a { color: #3fc1b2; } }
 .markdown-body blockquote { margin: 1em 0; padding: .3em 1em; border-left: 3px solid var(--quote-line); background: var(--quote-bg); color: var(--text); }
-.markdown-body pre { overflow: auto; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); font-size: 13px; line-height: 1.5; -webkit-overflow-scrolling: touch; }
+.markdown-body pre { overflow: auto; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); font-size: calc(13px * var(--font-scale, 1)); line-height: 1.5; -webkit-overflow-scrolling: touch; }
 .markdown-body code:not(.hljs) { padding: .1em .3em; border-radius: 4px; background: var(--code-bg); font-size: .9em; }
-.markdown-body table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; font-size: 15px; }
+.markdown-body table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; font-size: calc(15px * var(--font-scale, 1)); }
 .markdown-body th, .markdown-body td { padding: 6px 10px; border: 1px solid var(--line); vertical-align: top; }
 .markdown-body th { background: var(--code-bg); }
 .markdown-body :is(th, td).md-cell-short { white-space: nowrap; }

@@ -12,28 +12,53 @@
 		67650598B8A4373D8BF47C11 /* ReaderWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14028DF2C51B36CF454E4857 /* ReaderWebView.swift */; };
 		7E5EFDAD728338900699FD6C /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51078FBC3325435F69CA9D1 /* ReaderView.swift */; };
 		8CFC410588C064625E4326C3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F446537B4B5A71C27123DAA9 /* Assets.xcassets */; };
+		9FAE0012E28E5ACE329A3EC2 /* DraftStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1653D0D12F95959A262A9E0 /* DraftStatusTests.swift */; };
 		A0CB37D3D812A98D3AF44CBC /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F4F8FFD1D7C84B73AD9799C /* Models.swift */; };
 		ABE9BB9DB4CE4498599EE5C6 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 9A31A63719F7088DCFDD2445 /* Web */; };
+		B699346254351236D9583313 /* DraftStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30BD985FE7AA8CF631E42AA6 /* DraftStatus.swift */; };
 		D3903341873726BF59AA5215 /* DocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0900CEEB9B41D09C980E32E0 /* DocumentStore.swift */; };
+		EB4BEA1805696A14ABE55F3A /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA548A8C961E5380825F8172 /* Theme.swift */; };
 		F72A727761B49E17BF3EEA7F /* DraftbackApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A58CA02DF04F023EE9611F /* DraftbackApp.swift */; };
 		FB6C38C1FD0B293F2A5FA4DC /* 示例文档.md in Resources */ = {isa = PBXBuildFile; fileRef = 1B9F3B29BFBA0247042C2F3D /* 示例文档.md */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D19D90596657005E147022C1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D162ED231A4818F4C1E1EC7C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C1299B128F0B7BE13DFC26DA;
+			remoteInfo = Draftback;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0900CEEB9B41D09C980E32E0 /* DocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentStore.swift; sourceTree = "<group>"; };
 		14028DF2C51B36CF454E4857 /* ReaderWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderWebView.swift; sourceTree = "<group>"; };
 		1B9F3B29BFBA0247042C2F3D /* 示例文档.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "示例文档.md"; sourceTree = "<group>"; };
 		2F4F8FFD1D7C84B73AD9799C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		30BD985FE7AA8CF631E42AA6 /* DraftStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftStatus.swift; sourceTree = "<group>"; };
 		3301AA22EB5225EAE4FB9A4E /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		94A58CA02DF04F023EE9611F /* DraftbackApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftbackApp.swift; sourceTree = "<group>"; };
 		9A31A63719F7088DCFDD2445 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Web; path = Draftback/Web; sourceTree = SOURCE_ROOT; };
+		B3FDAED26E55462061995874 /* DraftbackTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DraftbackTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B51078FBC3325435F69CA9D1 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
+		CA548A8C961E5380825F8172 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		D1653D0D12F95959A262A9E0 /* DraftStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftStatusTests.swift; sourceTree = "<group>"; };
 		D8EA0E05A1F2EB9CED625C5E /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
 		DAA1B3E5BBE4D74C0E953040 /* Draftback.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Draftback.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F446537B4B5A71C27123DAA9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		222856679D0744E5C5FE1B86 /* DraftbackTests */ = {
+			isa = PBXGroup;
+			children = (
+				D1653D0D12F95959A262A9E0 /* DraftStatusTests.swift */,
+			);
+			path = DraftbackTests;
+			sourceTree = "<group>";
+		};
 		26AFAE9DAE6F96D012B2A441 /* Draftback */ = {
 			isa = PBXGroup;
 			children = (
@@ -59,10 +84,12 @@
 				D8EA0E05A1F2EB9CED625C5E /* CloudSync.swift */,
 				0900CEEB9B41D09C980E32E0 /* DocumentStore.swift */,
 				94A58CA02DF04F023EE9611F /* DraftbackApp.swift */,
+				30BD985FE7AA8CF631E42AA6 /* DraftStatus.swift */,
 				3301AA22EB5225EAE4FB9A4E /* LibraryView.swift */,
 				2F4F8FFD1D7C84B73AD9799C /* Models.swift */,
 				B51078FBC3325435F69CA9D1 /* ReaderView.swift */,
 				14028DF2C51B36CF454E4857 /* ReaderWebView.swift */,
+				CA548A8C961E5380825F8172 /* Theme.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -71,6 +98,7 @@
 			isa = PBXGroup;
 			children = (
 				26AFAE9DAE6F96D012B2A441 /* Draftback */,
+				222856679D0744E5C5FE1B86 /* DraftbackTests */,
 				F8835541A8219429BAA4A80B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -79,6 +107,7 @@
 			isa = PBXGroup;
 			children = (
 				DAA1B3E5BBE4D74C0E953040 /* Draftback.app */,
+				B3FDAED26E55462061995874 /* DraftbackTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -86,6 +115,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		6E9903D89BAC7755FBE7C5DD /* DraftbackTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 41A07995ECC93550EE115137 /* Build configuration list for PBXNativeTarget "DraftbackTests" */;
+			buildPhases = (
+				B73B7FBF60EBC5FECE745500 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F00ABE225CA3FAA6A128D5E1 /* PBXTargetDependency */,
+			);
+			name = DraftbackTests;
+			packageProductDependencies = (
+			);
+			productName = DraftbackTests;
+			productReference = B3FDAED26E55462061995874 /* DraftbackTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		C1299B128F0B7BE13DFC26DA /* Draftback */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A33B3F7BCA5839B82DAB7A9A /* Build configuration list for PBXNativeTarget "Draftback" */;
@@ -114,6 +161,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					6E9903D89BAC7755FBE7C5DD = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
 					C1299B128F0B7BE13DFC26DA = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
@@ -135,6 +186,7 @@
 			projectRoot = "";
 			targets = (
 				C1299B128F0B7BE13DFC26DA /* Draftback */,
+				6E9903D89BAC7755FBE7C5DD /* DraftbackTests */,
 			);
 		};
 /* End PBXProject section */
@@ -181,15 +233,33 @@
 			files = (
 				19315C723A4E0BEC68E9E2DE /* CloudSync.swift in Sources */,
 				D3903341873726BF59AA5215 /* DocumentStore.swift in Sources */,
+				B699346254351236D9583313 /* DraftStatus.swift in Sources */,
 				F72A727761B49E17BF3EEA7F /* DraftbackApp.swift in Sources */,
 				15C41C9710DB883F5B2C847A /* LibraryView.swift in Sources */,
 				A0CB37D3D812A98D3AF44CBC /* Models.swift in Sources */,
 				7E5EFDAD728338900699FD6C /* ReaderView.swift in Sources */,
 				67650598B8A4373D8BF47C11 /* ReaderWebView.swift in Sources */,
+				EB4BEA1805696A14ABE55F3A /* Theme.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B73B7FBF60EBC5FECE745500 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9FAE0012E28E5ACE329A3EC2 /* DraftStatusTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F00ABE225CA3FAA6A128D5E1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C1299B128F0B7BE13DFC26DA /* Draftback */;
+			targetProxy = D19D90596657005E147022C1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		2FD7E3C8A986C29A037B3BB6 /* Debug */ = {
@@ -274,6 +344,23 @@
 			};
 			name = Release;
 		};
+		4CC4DA62D98AD6B998867D54 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.draftback.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Draftback.app/Draftback";
+			};
+			name = Debug;
+		};
 		7C3B59CFBDD42451E0A0DA79 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -291,6 +378,23 @@
 				PRODUCT_NAME = Draftback;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		8ABB4E9EDEC7CD282D0F6C59 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.draftback.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Draftback.app/Draftback";
 			};
 			name = Release;
 		};
@@ -366,6 +470,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		41A07995ECC93550EE115137 /* Build configuration list for PBXNativeTarget "DraftbackTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4CC4DA62D98AD6B998867D54 /* Debug */,
+				8ABB4E9EDEC7CD282D0F6C59 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		6A40DAAD5298B503B2F13F3B /* Build configuration list for PBXProject "Draftback" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

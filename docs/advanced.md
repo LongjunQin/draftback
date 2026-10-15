@@ -229,22 +229,27 @@ iOS 工程(`ios/`,XcodeGen):
 
 ```bash
 ios/scripts/sync-web.sh && (cd ios && xcodegen generate)
-cd ios && xcodebuild -project 回稿.xcodeproj -scheme 回稿 -destination 'platform=iOS Simulator,id=<模拟器UDID>' build
-xcrun simctl launch <UDID> org.mdturn.ios --open-sample   # 直接进入示例文档
+xcodebuild -project ios/Draftback.xcodeproj -scheme Draftback -configuration Debug \
+  -destination 'platform=iOS Simulator,id=<模拟器UDID>' -derivedDataPath ios/build/DerivedData-sim build
+xcodebuild test -project ios/Draftback.xcodeproj -scheme Draftback \
+  -destination 'platform=iOS Simulator,id=<模拟器UDID>' -derivedDataPath ios/build/DerivedData-sim   # 单元测试 DraftbackTests
+xcrun simctl launch <UDID> app.draftback.ios --open-sample   # 直接进入示例文档
+# 仅调试版,截图用:各状态演示稿件;可再加 --demo-open <文档标识>(如 demo-rules)、--demo-select、--demo-annotate、--demo-scroll-bottom
+xcrun simctl launch <UDID> app.draftback.ios --demo-drafts
 ```
 
 装到连着这台 Mac 的 iPhone(手机需已信任此电脑、开启开发者模式;Xcode 已登录 Apple ID):
 
 ```bash
-ios/scripts/install-device.sh            # 免费个人团队签名,包标识 org.mdturn.ios.dev,主屏名「回稿测试」
+ios/scripts/install-device.sh            # 团队 BG7Y59AT44 签名,包标识 app.draftback.ios.dev,主屏名「回稿 测试」
 ```
 
-免费签名 7 天有效,过期重跑即可;首次安装后要在手机「设置 → 通用 → VPN 与设备管理」里信任开发者证书。
-把文件放进手机应用文件夹(「文件」→ 我的 iPhone → 回稿测试):
+首次安装后要在手机「设置 → 通用 → VPN 与设备管理」里信任开发者证书。
+把文件放进手机应用文件夹(「文件」→ 我的 iPhone → 回稿 测试):
 
 ```bash
 xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContainer \
-  --domain-identifier org.mdturn.ios.dev --source <本机文件> --destination Documents/<文件名>
+  --domain-identifier app.draftback.ios.dev --source <本机文件> --destination Documents/<文件名>
 ```
 
 外观(0.6.1 起):菜单栏「显示 → 外观」可选跟随系统 / 浅色 / 深色,存在应用数据目录的 settings.json;大纲随 ⌘+ / ⌘- 一起缩放。

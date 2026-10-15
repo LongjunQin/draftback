@@ -3,11 +3,14 @@ import WebKit
 import UIKit
 
 /// 在系统文字选择菜单里加一项「批注」:选中正文文字 → 菜单 → 批注,走与 Mac 一致的锚点算法。
+/// 这一轮不能批注时(已交出、已定稿……)不加这一项。
 final class AnnotatingWebView: WKWebView {
     var onAnnotateRequested: (() -> Void)?
+    var annotationEnabled = true
 
     override func buildMenu(with builder: any UIMenuBuilder) {
         super.buildMenu(with: builder)
+        guard annotationEnabled else { return }
         let annotate = UIAction(title: "批注", image: UIImage(systemName: "text.bubble")) { [weak self] _ in
             self?.onAnnotateRequested?()
         }
@@ -20,6 +23,8 @@ enum ReaderEvent {
     case ready
     case rendered(outline: [OutlineItem])
     case selection(anchor: [String: Any], quote: String)
+    /// 正文里有没有选中文字(底栏左槽据此换成「批注这段」;选区消失 0.2 秒后才报 false)
+    case selectionState(Bool)
     case noSelection
     case error(String)
 }
@@ -29,6 +34,10 @@ struct ReaderWebView: UIViewRepresentable {
     @Binding var reloadToken: Int
     /// 正文整体替换的次数(Mac 推来新版):变了就重载整页正文
     let contentVersion: Int
+    /// 正文字号倍数(系统动态字体 × 用户选的一档)
+    let fontScale: Double
+    /// 这一轮能不能批注:决定系统菜单里有没有「批注」
+    let annotationEnabled: Bool
     let onEvent: (ReaderEvent) -> Void
     let onReady: (ReaderBridge) -> Void
 
@@ -40,6 +49,7 @@ struct ReaderWebView: UIViewRepresentable {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.preferences.isTextInteractionEnabled = true
         let webView = AnnotatingWebView(frame: .zero, configuration: configuration)
+        webView.annotationEnabled = annotationEnabled
         webView.isOpaque = false
         webView.backgroundColor = .systemBackground
         webView.scrollView.contentInsetAdjustmentBehavior = .always
@@ -48,16 +58,26 @@ struct ReaderWebView: UIViewRepresentable {
             webView?.evaluateJavaScript("window.DraftbackReader && window.DraftbackReader.captureSelection()") { _, _ in }
         }
         context.coordinator.bridge = ReaderBridge(webView: webView)
+        context.coordinator.bridge?.fontScale = fontScale
+        context.coordinator.lastFontScale = fontScale
         context.coordinator.pendingLoad = document
         if let webDirectory = Bundle.main.url(forResource: "Web", withExtension: nil) {
             let page = webDirectory.appendingPathComponent("reader.html")
             webView.loadFileURL(page, allowingReadAccessTo: webDirectory)
         }
-        onReady(context.coordinator.bridge!)
+        // 不在界面刷新过程中改 SwiftUI 状态:刷新完再把桥交出去,否则赋值可能被丢掉
+        if let bridge = context.coordinator.bridge { DispatchQueue.main.async { onReady(bridge) } }
         return webView
     }
 
     func updateUIView(_ webView: AnnotatingWebView, context: Context) {
+        context.coordinator.onEvent = onEvent
+        webView.annotationEnabled = annotationEnabled
+        if context.coordinator.lastFontScale != fontScale {
+            context.coordinator.lastFontScale = fontScale
+            context.coordinator.bridge?.fontScale = fontScale
+            context.coordinator.bridge?.setFontScale(fontScale)
+        }
         if context.coordinator.lastContentVersion != contentVersion {
             context.coordinator.lastContentVersion = contentVersion
             context.coordinator.lastReloadToken = reloadToken
@@ -75,11 +95,13 @@ struct ReaderWebView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        let onEvent: (ReaderEvent) -> Void
+        /// 每次 SwiftUI 刷新都换成最新的闭包(它带着当时的状态,如这会儿能不能批注)
+        var onEvent: (ReaderEvent) -> Void
         var bridge: ReaderBridge?
         var pendingLoad: OpenedDocument?
         var lastReloadToken = 0
         var lastContentVersion = 0
+        var lastFontScale = 1.0
 
         init(onEvent: @escaping (ReaderEvent) -> Void) { self.onEvent = onEvent }
 
@@ -95,6 +117,8 @@ struct ReaderWebView: UIViewRepresentable {
                     return OutlineItem(id: id, level: item["level"] as? Int ?? 1, text: text, line: item["line"] as? Int ?? 0)
                 }
                 onEvent(.rendered(outline: items))
+            case "selectionState":
+                onEvent(.selectionState(body["active"] as? Bool ?? false))
             case "selection":
                 if let anchor = body["anchor"] as? [String: Any] {
                     onEvent(.selection(anchor: anchor, quote: body["quote"] as? String ?? ""))
@@ -103,6 +127,10 @@ struct ReaderWebView: UIViewRepresentable {
                 }
             case "error":
                 onEvent(.error(body["message"] as? String ?? "未知错误"))
+            #if DEBUG
+            case "debug":
+                print("DraftbackReader debug:", body["text"] as? String ?? "")
+            #endif
             default:
                 break
             }
@@ -123,11 +151,13 @@ struct ReaderWebView: UIViewRepresentable {
 /// 原生 → 页面 的调用封装。
 final class ReaderBridge {
     private weak var webView: AnnotatingWebView?
+    var fontScale = 1.0
     init(webView: AnnotatingWebView) { self.webView = webView }
 
+    /// 只发命令、不要返回值(load 返回 Promise,直接交给 evaluateJavaScript 会报"返回类型不受支持")
     private func call(_ script: String) {
-        webView?.evaluateJavaScript(script) { _, error in
-            if let error { print("MDTurn reader script error: \(error.localizedDescription)") }
+        webView?.evaluateJavaScript("void (\(script))") { _, error in
+            if let error { print("Draftback reader script error: \(error.localizedDescription)") }
         }
     }
 
@@ -143,6 +173,7 @@ final class ReaderBridge {
             "markdown": document.markdown,
             "annotations": document.highlightPayload,
             "assets": document.assets,
+            "fontScale": fontScale,
         ]
         call("window.DraftbackReader.load(\(json(payload)))")
     }
@@ -151,6 +182,15 @@ final class ReaderBridge {
     func focus(noteId: String) { call("window.DraftbackReader.focusNote(\(json(noteId)))") }
     func scrollToHeading(_ id: String) { call("window.DraftbackReader.scrollToHeading(\(json(id)))") }
     func clearSelection() { call("window.DraftbackReader.clearSelection()") }
+    /// 底栏「批注这段」:和系统菜单的「批注」走同一条路
+    func requestAnnotation() { call("window.DraftbackReader.captureSelection()") }
+    func setFontScale(_ scale: Double) { call("window.DraftbackReader.setFontScale(\(scale))") }
+    #if DEBUG
+    /// 仅调试版:模拟器截图时选中第 n 段
+    func debugSelectParagraph(_ index: Int) {
+        call("(() => { const p = document.querySelectorAll('#content p')[\(index)]; if (!p) return 'no-p'; const r = document.createRange(); r.selectNodeContents(p); const s = getSelection(); s.removeAllRanges(); s.addRange(r); setTimeout(() => window.webkit.messageHandlers.draftback.postMessage({ type: 'debug', text: 'selected=' + getSelection().toString().length }), 300); return 'ok'; })()")
+    }
+    #endif
 
     func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
         guard let webView else { return }

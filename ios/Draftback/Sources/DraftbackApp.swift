@@ -15,16 +15,34 @@ struct DraftbackApp: App {
             LibraryView()
                 .environmentObject(store)
                 .onOpenURL { url in store.open(url: url, fromExternal: true) }
-                // 调试/截图用:--open-sample 直接进入示例文档;--open-local <文件名> 打开 App 文件夹里的文档
+                // 调试/截图用:--open-sample 直接进入示例文档;--open-local <文件名> 打开 App 文件夹里的文档;
+                // 仅调试版:--demo-drafts 填入各种状态的演示稿件,--demo-open <文档标识> 直接打开其中一篇
                 .onAppear {
                     let args = CommandLine.arguments
+                    #if DEBUG
+                    if args.contains("--demo-drafts") {
+                        store.seedDemo()
+                        if let index = args.firstIndex(of: "--demo-open"), index + 1 < args.count {
+                            let docId = args[index + 1]
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                if let doc = store.synced.first(where: { $0.docId == docId }) { store.openSynced(doc) }
+                            }
+                        }
+                    }
+                    #endif
                     if args.contains("--open-sample") { store.openSample() }
                     if let index = args.firstIndex(of: "--open-local"), index + 1 < args.count {
                         store.openLocal(named: args[index + 1])
                     }
                     store.refreshSync()
                 }
-                .onChange(of: scenePhase) { _, phase in if phase == .active { store.refreshSync() } }
+                .onChange(of: scenePhase) { _, phase in
+                    store.isActive = phase == .active
+                    if phase == .active {
+                        store.refreshSync()
+                        if let doc = store.current?.sync { store.markSeen(doc) } // 回到前台时正在看的稿子算看过
+                    }
+                }
                 // 静默推送不保证到达:前台时每 20 秒自己拉一次(没变化时只是一次极小的增量查询)
                 .onReceive(Timer.publish(every: 20, on: .main, in: .common).autoconnect()) { _ in if scenePhase == .active { store.refreshSync() } }
                 .onReceive(NotificationCenter.default.publisher(for: AppDelegate.cloudPushNotification)) { _ in store.refreshSync() }

@@ -33,24 +33,10 @@ struct SyncedDocument: Identifiable, Codable, Equatable {
     /// 发布序号(跨端规则 v2.3 第 12 节):比本地记录小的发布一律忽略;旧缓存没有这个字段
     var revision: Int? = nil
     var outcome: String? = nil
+    /// 已交出的三档(电脑版规划 v3 规则②):none 还没有 AI 接入 / listening AI 在线,等待领取 / claimed AI 正在修改;其他状态为空
+    var agentState: String? = nil
 
     var id: String { docId }
-
-    /// 跨端规则第 7 节的手机状态链(文档层面);批注层面的"等待同步 / Mac 已接收"由批注状态决定。
-    var stateLabel: String {
-        switch phoneState {
-        case "reviewing": return "可批注"
-        case "waiting-agent": return "等待智能体"
-        case "applying": return "修改中"
-        case "manual-editing": return "Mac 上正在手工修改"
-        case "completed": return "稿子回来了"
-        case "restored": return "已恢复到改稿前"
-        case "finalized": return "已定稿"
-        case "conflict": return "原文已变,等待 Mac 处理"
-        case "cancelled": return "已取消"
-        default: return status
-        }
-    }
     /// 状态上允许批注;正文字节是否真的是这一轮的,由 OpenedDocument.annotationAllowed 再核一次
     var canAnnotate: Bool { phoneState == "reviewing" }
 }
@@ -112,6 +98,24 @@ final class CloudSyncEngine: ObservableObject {
         pendingUploads = outboxFiles().count
     }
 
+    #if DEBUG
+    /// 仅调试版:模拟器截图用的演示稿件(--demo-drafts)。不连 iCloud,只写本机镜像目录。
+    private(set) var demoMode = false
+    func seedDemo(_ items: [(doc: SyncedDocument, markdown: String)]) {
+        demoMode = true
+        for item in items {
+            let dir = directory(for: item.doc.docId)
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? item.markdown.write(to: contentURL(for: item.doc.docId), atomically: true, encoding: .utf8)
+        }
+        documents = items.map(\.doc)
+        saveIndex()
+        accountStatus = .available
+        lastError = nil
+        lastPullAt = Date().addingTimeInterval(-40)
+    }
+    #endif
+
     // MARK: 目录
 
     func directory(for docId: String) -> URL { root.appendingPathComponent(docId, isDirectory: true) }
@@ -134,6 +138,9 @@ final class CloudSyncEngine: ObservableObject {
     // MARK: 刷新(启动、回到前台、收到静默推送时调用)
 
     func refresh() async {
+        #if DEBUG
+        if demoMode { return }
+        #endif
         if syncing { return }
         syncing = true
         defer { syncing = false }
@@ -251,7 +258,8 @@ final class CloudSyncEngine: ObservableObject {
             contentAvailable: available,
             updatedAt: Date(),
             revision: revision,
-            outcome: record["outcome"] as? String
+            outcome: record["outcome"] as? String,
+            agentState: (record["agentState"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         )
         documents.removeAll { $0.docId == docId }
         documents.insert(item, at: 0)
