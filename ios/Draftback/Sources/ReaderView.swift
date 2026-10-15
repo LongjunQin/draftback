@@ -86,14 +86,20 @@ struct ReaderView: View {
                 if store.isOffline { offlineLine }
                 if let notice = document.notice { noticeBanner(notice) } else if let banner = status.banner { bannerView(banner) }
             }
+            // 正文铺满到屏幕上下边缘(2026-10-15 用户提:上下栏收起后上下各有一条黑边、字显示不全)。
+            // 滚动视图按安全区自动留白:末行静止时在底部横条上面,滑动时文字可以一直到屏幕边缘
             ReaderWebView(document: document, reloadToken: $reloadToken, contentVersion: document.contentVersion,
                           fontScale: fontScale, annotationEnabled: status.canAnnotate && !showingChanges, cardKey: document.cardKey,
                           onEvent: { handle($0, status: status) }, onReady: { bridge = $0 })
+                // 顶栏在时从顶栏下面开始(不让回稿卡、首行钻到顶栏底下);顶栏收起时连状态栏那块一起铺满。底部一直铺到屏幕边缘
+                .ignoresSafeArea(.container, edges: topHidden ? [.top, .bottom] : [.bottom])
             if !bottomHidden {
                 bottomBar(status).transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .background(Palette.paper.ignoresSafeArea())
         .toolbar(topHidden ? .hidden : .visible, for: .navigationBar)
+        .statusBarHidden(topHidden) // 读的时候连状态栏一起收起(像「图书」),整屏都是纸面
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: topHidden)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: bottomHidden)
         // 定稿确认期间 Mac 推来了新的一轮:这次确认作废(确认按钮本身也会核对轮次)

@@ -61,7 +61,10 @@ struct ReaderWebView: UIViewRepresentable {
         let webView = AnnotatingWebView(frame: .zero, configuration: configuration)
         webView.annotationEnabled = annotationEnabled
         webView.isOpaque = false
-        webView.backgroundColor = .systemBackground
+        // 网页控件与滚动视图的底色也用纸面颜色(与 reader.css 的 --paper 一致):滚到顶、拉过头时露出的那块不是白 / 黑一条
+        let paper = UIColor { $0.userInterfaceStyle == .dark ? UIColor(rgb: 0x1F2126) : UIColor(rgb: 0xFFFDF8) }
+        webView.backgroundColor = paper
+        webView.scrollView.backgroundColor = paper
         webView.scrollView.contentInsetAdjustmentBehavior = .always
         webView.navigationDelegate = context.coordinator
         webView.onAnnotateRequested = { [weak webView] in
@@ -138,8 +141,15 @@ struct ReaderWebView: UIViewRepresentable {
             let delta = y - lastOffsetY
             lastOffsetY = y
             let maxY = scrollView.contentSize.height + scrollView.adjustedContentInset.top + scrollView.adjustedContentInset.bottom - scrollView.bounds.height
-            // 到顶(含点状态栏回到顶部、正文重载)或到底:放出来
-            if y < 40 || (maxY > 0 && y > maxY - 40) { travel = 0; setChrome(hidden: false); return }
+            // 正文不够长(比整屏多不出约三分之一屏):上下栏一直显示,不跟着滑动收起(2026-10-15 用户提:短文刚收起就触底又弹出来)。
+            // 按整屏高度算,不按当前可视高度:上下栏收放会改可视高度,按它算会来回跳
+            let screen = scrollView.window?.bounds.height ?? scrollView.bounds.height
+            if scrollView.contentSize.height - screen < max(screen * 0.35, 280) { travel = 0; setChrome(hidden: false, force: true); return }
+            // 到顶(含点状态栏回到顶部、正文重载):放出来
+            if y < 40 { travel = 0; setChrome(hidden: false); return }
+            // 到底不再一碰就放出来:往下拉过头(橡皮筋)才放出来,免得刚收起就弹回
+            if maxY > 0 && y > maxY + 24 && scrollView.isDragging { travel = 0; setChrome(hidden: false); return }
+            if maxY > 0 && y > maxY - 1 { return }
             guard scrollView.isDragging || scrollView.isDecelerating, delta != 0 else { return }
             if (delta > 0) != (travel > 0) { travel = 0 }
             travel += delta

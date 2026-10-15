@@ -52,6 +52,8 @@ enum Palette {
     static let amberText = dynamic(0xC56D00, 0xF2B45A)
     static let amberSoft = dynamic(0xFFF8E8, 0x332A16)
     static let unread = dynamic(0x2F6FDE, 0x6C9CFF)
+    /// 阅读页纸面底色(与 Web/reader.css 的 --paper 一致):状态栏、底部横条那两块也铺这个颜色,不留黑边
+    static let paper = dynamic(0xFFFDF8, 0x1F2126)
 
     static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(UIColor { trait in UIColor(rgb: trait.userInterfaceStyle == .dark ? dark : light) })
