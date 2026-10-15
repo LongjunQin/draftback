@@ -329,15 +329,17 @@ final class CloudSyncEngine: ObservableObject {
         if available, let asset = record["content"] as? CKAsset, let source = asset.fileURL {
             let existingData = try? Data(contentsOf: target)
             let existing = existingData.map { Hashing.sha256($0) }
-            if existing != contentHash {
-                // 换新版前把旧正文留一份:回稿卡「显示改动」在本机对比,不用 Mac 再推原稿
+            let identity = { self.recordContentIdentity(docId: docId, hash: contentHash, reviewId: record["reviewId"] as? String ?? "", round: Int(record["round"] as? Int64 ?? 1)) }
+            if existing == contentHash {
+                identity()
+            } else if let incoming = try? Data(contentsOf: source), Hashing.sha256(incoming) == contentHash {
+                // 先校验再替换:新正文字节对上了才换(原子写入);换之前把旧正文留一份,回稿卡「显示改动」在本机对比
                 if let existingData, let existing { keepPrevious(docId: docId, data: existingData, hash: existing) }
-                try? fileManager.removeItem(at: target)
-                try? fileManager.copyItem(at: source, to: target)
+                do { try incoming.write(to: target, options: .atomic); identity() } catch { available = false }
+            } else {
+                // 字节对不上:不动旧正文(按它自己的身份只读显示),这一版当正文不可用,等下次重推
+                available = false
             }
-            // 复制后校验字节:对不上就当正文不可用(旧缓存照旧按旧身份只读显示)
-            let copied = (try? Data(contentsOf: target)).map { Hashing.sha256($0) }
-            if copied != contentHash { available = false } else { recordContentIdentity(docId: docId, hash: contentHash, reviewId: record["reviewId"] as? String ?? "", round: Int(record["round"] as? Int64 ?? 1)) }
         } else {
             // 只推状态(作废 / 非 UTF-8 / 发布失败):本地旧正文仍在,但它不是这一轮的;只有指纹相同才算可用
             let existing = (try? Data(contentsOf: target)).map { Hashing.sha256($0) }
@@ -381,8 +383,9 @@ final class CloudSyncEngine: ObservableObject {
         try? fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         let sha = record["sha256"] as? String ?? ""
         if let data = try? Data(contentsOf: target), Hashing.sha256(data) == sha { return false }
-        try? fileManager.removeItem(at: target)
-        try? fileManager.copyItem(at: source, to: target)
+        // 先校验再落盘:字节与清单里的指纹对不上就不写(旧文件原样留着),等下次重推
+        guard let incoming = try? Data(contentsOf: source), sha.isEmpty || Hashing.sha256(incoming) == sha else { return false }
+        do { try incoming.write(to: target, options: .atomic) } catch { return false }
         return true
     }
 
@@ -458,11 +461,12 @@ final class CloudSyncEngine: ObservableObject {
         record["completedAt"] = object["completedAt"] as? String ?? ""
         record["device"] = object["device"] as? String ?? UIDevice.current.name
         if let intent = object["intent"] as? String { record["intent"] = intent }
-        if let annotations = object["annotations"], let json = try? JSONSerialization.data(withJSONObject: annotations) {
-            record["annotations"] = String(decoding: json, as: UTF8.self)
-        } else {
-            record["annotations"] = "[]"
+        // 批注列表缺失或不是数组:不上传,也不补成空列表(Mac 会把空列表当成零批注通过);留在队列里报错
+        guard let annotations = object["annotations"] as? [Any], let json = try? JSONSerialization.data(withJSONObject: annotations) else {
+            lastError = "有一批批注的列表读不出来,没有发出。请在批注列表里检查后重新交出。"
+            return false
         }
+        record["annotations"] = String(decoding: json, as: UTF8.self)
         do {
             _ = try await database.modifyRecords(saving: [record], deleting: [], savePolicy: .allKeys, atomically: true)
             return true

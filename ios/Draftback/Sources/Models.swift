@@ -108,11 +108,11 @@ struct AnnotationBatch: Codable {
         if let docId { object["docId"] = docId }
         if let reviewId { object["reviewId"] = reviewId }
         if identified, let intent { object["intent"] = intent }
-        if let data = annotationsJSON.data(using: .utf8), let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            object["annotations"] = array
-        } else {
-            object["annotations"] = []
+        // 批注列表读不出来就不打包:不能补成空列表——Mac 会把空列表当成「一条批注都没有」记为通过(跨端规则第 6.2 条)
+        guard let data = annotationsJSON.data(using: .utf8), let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw CocoaError(.coderReadCorrupt, userInfo: [NSLocalizedDescriptionKey: "批注列表读不出来,这批没有打包。"])
         }
+        object["annotations"] = array
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     }
 }
