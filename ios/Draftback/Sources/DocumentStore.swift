@@ -31,7 +31,20 @@ final class OpenedDocument: ObservableObject, Identifiable {
     /// 这一轮能不能批注:状态允许,且正文字节就是这一轮的
     var annotationAllowed: Bool {
         guard let sync else { return true }
-        return sync.canAnnotate && sync.contentHash == hash && contentReviewId == sync.reviewId
+        let ownRound = sync.contentHash == hash && contentReviewId == sync.reviewId
+        if sync.canAnnotate { return ownRound }
+        // v2.4 第 6.9 条:稿子回来后(终态),Mac 支持时手机上接着批,写的就是「为下一轮」的批注
+        return writesNextRound && sync.contentAvailable && ownRound
+    }
+    /// 终态且 Mac 支持意图:新写的批注都是「为下一轮写的」
+    var writesNextRound: Bool { sync.map { $0.isTerminal && $0.supportsIntents } ?? false }
+    /// 已交出、还在等 Mac 开下一轮的「为下一轮写的」批注:回执没到,或回执到了但新一轮的快照还没到
+    var nextRoundInFlight: [Note] {
+        guard let sync else { return [] }
+        return notes.filter { note in
+            note.isNextRound && note.baseVersion == hash && note.reviewId == contentReviewId
+                && (note.isSubmitted || (note.isReceived && note.acceptedReviewId != nil && note.acceptedReviewId != sync.reviewId))
+        }
     }
     /// 批注归属用的轮次身份(本地独立文件没有)
     var roundId: String? { sync == nil ? nil : contentReviewId }
@@ -100,7 +113,9 @@ final class OpenedDocument: ObservableObject, Identifiable {
     var cardKey: String { "\(sync?.reviewId ?? "")|\(sync?.phoneState ?? "")|\(previous?.info.hash ?? "")" }
 
     /// 当前版本上还没导出的批注:可改可删,"完成本轮"时打包。
-    var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash, reviewId: roundId) } }
+    var openNotes: [Note] { notes.filter { $0.isOpen && $0.belongs(toVersion: hash, reviewId: roundId) && (!isTerminalView || $0.isNextRound) } }
+    /// 正在看的是一轮的终态(稿子回来、定稿……):只有「为下一轮写的」算本轮可交的批注,上一轮遗留的没交批注当旧批注
+    private var isTerminalView: Bool { sync?.isTerminal ?? false }
     /// 当前版本上已提交(导出 / 上传)的批注:锁定,等 Mac 接收。
     var submittedNotes: [Note] { notes.filter { $0.isSubmitted && $0.belongs(toVersion: hash, reviewId: roundId) } }
     /// Mac 已接收的批注(回执到达)。
@@ -110,7 +125,9 @@ final class OpenedDocument: ObservableObject, Identifiable {
     /// 本轮的批注条数(导航栏批注图标上的琥珀徽标):未交 + 已交出 + Mac 已收到
     var roundNotesCount: Int { openNotes.count + submittedNotes.count + receivedNotes.count }
     /// 写在旧版本或旧轮次上的批注:只读保留,不高亮、不再打包(v2.3 第 6.8 条:不改挂到新轮,显式"复制到本轮"才成为新批注)。
-    var olderVersionNotes: [Note] { notes.filter { !$0.belongs(toVersion: hash, reviewId: roundId) } }
+    var olderVersionNotes: [Note] {
+        notes.filter { !$0.belongs(toVersion: hash, reviewId: roundId) || (isTerminalView && $0.isOpen && !$0.isNextRound) }
+    }
     /// 交给正文高亮的批注:只画当前轮的(旧版本锚点对不上新正文);已提交、已接收的照样画出来。
     var highlightPayload: [[String: Any]] {
         notes.filter { $0.belongs(toVersion: hash, reviewId: roundId) && ($0.isOpen || $0.isSubmitted || $0.isReceived) }.map { note in
@@ -174,6 +191,9 @@ final class DocumentStore: ObservableObject {
         }.store(in: &cancellables)
         cloud.$syncing.receive(on: RunLoop.main).sink { [weak self] value in self?.syncing = value }.store(in: &cancellables)
         loadSeen()
+        loadFinalizeRequests()
+        reapplyPendingReceipts()
+        recoverOutbound()
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let offline = path.status != .satisfied
             Task { @MainActor in if self?.isOffline != offline { self?.isOffline = offline } }
@@ -522,6 +542,8 @@ final class DocumentStore: ObservableObject {
             guard document.annotationAllowed else { lastError = "这一轮现在不能批注。"; return false }
             raw["docId"] = sync.docId
             raw["reviewId"] = sync.reviewId
+            // 稿子回来后写的:为下一轮写,创建时就标(v2.4 第 6.9 条),之后不改
+            if document.writesNextRound { raw["intent"] = "next-round" }
         }
         let added = Note(raw: raw)
         document.notes.insert(added, at: 0)
@@ -530,6 +552,22 @@ final class DocumentStore: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// 复制到本轮(跨端规则第 6.8 条、v2.4 第 6.9 条):新 ID、本轮身份、sourceNoteId 指回原条;原记录不改。
+    /// 引文在本轮正文里找不到时复制成总体意见,带上原引文
+    @discardableResult
+    func copyToRound(_ note: Note, anchor: [String: Any]?, in document: OpenedDocument) -> Bool {
+        let copy: Note
+        if let anchor, !note.isDocumentScope {
+            copy = Note.make(anchor: anchor, quote: note.quote, comment: note.comment, scope: nil)
+        } else {
+            let comment = note.isDocumentScope || note.quote.isEmpty ? note.comment : "「\(note.quote)」\(note.comment)"
+            copy = Note.make(anchor: nil, quote: "", comment: comment, scope: "document")
+        }
+        var raw = copy.raw
+        raw["sourceNoteId"] = note.id
+        return add(note: Note(raw: raw), to: document)
     }
 
     @discardableResult
@@ -558,26 +596,94 @@ final class DocumentStore: ObservableObject {
         guard !open.isEmpty else { lastError = "这一轮还没有批注。"; return }
         let batchId = UUID().uuidString.lowercased()
         let completedAt = ISO8601DateFormatter().string(from: Date())
-        guard let batch = makeBatch(open, id: batchId, completedAt: completedAt, document: document) else { return }
+        let intent: String? = (document.sync != nil && open.allSatisfy { $0.isNextRound }) ? "next-round" : nil
+        guard let batch = makeBatch(open, id: batchId, completedAt: completedAt, document: document, intent: intent) else { return }
+        // 出站事务(v2.4 第 6.9 条):先把批注标为已交出(记批次编号与时间)并落盘,再存批次快照、上传;
+        // 中途被杀,启动时按原批次编号补发(recoverOutbound)。落盘失败就不发
+        let ids = Set(open.map { $0.id })
+        let before = document.notes
+        for index in document.notes.indices where ids.contains(document.notes[index].id) {
+            document.notes[index].raw["status"] = "submitted"
+            document.notes[index].raw["submittedBatchId"] = batchId
+            document.notes[index].raw["submittedAt"] = completedAt
+        }
+        guard persistNotes(document) else { document.notes = before; return }
         if document.sync != nil {
-            // Mac 推来的文档:批次走 iCloud(失败进待上传队列,联网后自动重试),不走分享面板
-            // 上传失败自动进待上传队列,底栏显示「等待同步」;不弹错误
+            // Mac 推来的文档:批次走 iCloud(失败进待上传队列,联网后自动重试),不走分享面板;底栏显示「等待同步」,不弹错误
             Task { _ = await cloud.submit(batch: batch) }
         } else {
             do {
                 pendingShare = try transport.submit(batch: batch)
             } catch {
                 lastError = "打包批注失败:\(error.localizedDescription)"
-                return
             }
         }
-        let ids = Set(open.map { $0.id })
-        for index in document.notes.indices where ids.contains(document.notes[index].id) {
-            document.notes[index].raw["status"] = "submitted"
-            document.notes[index].raw["submittedBatchId"] = batchId
-            document.notes[index].raw["submittedAt"] = completedAt
+    }
+
+    // MARK: 定稿请求(v2.4 第 6.9 条:finalize 意图)
+
+    struct FinalizeRequest: Codable, Equatable {
+        var batchId: String
+        var docId: String
+        var reviewId: String
+        var baseVersion: String
+        var completedAt: String
+        var title: String
+        var rejectedReason: String? = nil
+    }
+    /// 文档标识 → 在途或被拒的定稿请求;回执接受后清掉
+    @Published private(set) var finalizeRequests: [String: FinalizeRequest] = [:]
+    private var finalizeFile: URL { dataDirectory.appendingPathComponent("finalize.json") }
+    private func loadFinalizeRequests() {
+        guard let data = try? Data(contentsOf: finalizeFile),
+              let items = try? JSONDecoder().decode([String: FinalizeRequest].self, from: data) else { return }
+        finalizeRequests = items
+    }
+    @discardableResult
+    private func saveFinalizeRequests() -> Bool {
+        guard let data = try? JSONEncoder().encode(finalizeRequests) else { return false }
+        do { try data.write(to: finalizeFile, options: .atomic); return true } catch { return false }
+    }
+    private func finalizeBatch(_ request: FinalizeRequest) -> AnnotationBatch {
+        AnnotationBatch(batchId: request.batchId, documentName: request.title, baseVersion: request.baseVersion, completedAt: request.completedAt,
+                        device: UIDevice.current.name, annotationsJSON: "[]", docId: request.docId, reviewId: request.reviewId, intent: "finalize")
+    }
+    /// 手机定稿:先记「定稿在途」并落盘,再存快照、上传
+    func requestFinalize(for document: OpenedDocument) {
+        guard let sync = document.sync, sync.supportsIntents else { lastError = "Mac 上的回稿需要更新,才能在手机上定稿。"; return }
+        let request = FinalizeRequest(batchId: UUID().uuidString.lowercased(), docId: sync.docId, reviewId: sync.reviewId, baseVersion: document.hash,
+                                      completedAt: ISO8601DateFormatter().string(from: Date()), title: document.name)
+        let before = finalizeRequests
+        finalizeRequests[sync.docId] = request
+        guard saveFinalizeRequests() else { finalizeRequests = before; lastError = "定稿请求没能存进手机,没有发出。请再试一次。"; return }
+        let batch = finalizeBatch(request)
+        Task { _ = await cloud.submit(batch: batch) }
+    }
+
+    /// 启动时补发:已交出但没有回执、也没有待上传快照的批注,按原批次编号重建再发;定稿在途同理
+    private func recoverOutbound() {
+        for doc in cloud.documents {
+            let notes = loadNotes(forKey: "synced:\(doc.docId)")
+            let groups = Dictionary(grouping: notes.filter { $0.isSubmitted && $0.submittedBatchId != nil }, by: { $0.submittedBatchId! })
+            for (batchId, members) in groups where cloud.receipt(for: batchId) == nil && !cloud.hasQueued(batchId: batchId) {
+                guard let first = members.first, let docId = first.docId, let reviewId = first.reviewId, let base = first.baseVersion else { continue }
+                let restored = members.map { note -> [String: Any] in
+                    var raw = note.raw
+                    raw["status"] = "open"
+                    raw.removeValue(forKey: "submittedBatchId"); raw.removeValue(forKey: "submittedAt")
+                    return raw
+                }
+                guard let data = try? JSONSerialization.data(withJSONObject: restored), let json = String(data: data, encoding: .utf8) else { continue }
+                let batch = AnnotationBatch(batchId: batchId, documentName: doc.title, baseVersion: base, completedAt: first.raw["submittedAt"] as? String ?? "",
+                                            device: UIDevice.current.name, annotationsJSON: json, docId: docId, reviewId: reviewId,
+                                            intent: members.allSatisfy { $0.isNextRound } ? "next-round" : nil)
+                Task { _ = await cloud.submit(batch: batch) }
+            }
         }
-        persistNotes(document)
+        for request in finalizeRequests.values where request.rejectedReason == nil && cloud.receipt(for: request.batchId) == nil && !cloud.hasQueued(batchId: request.batchId) {
+            let batch = finalizeBatch(request)
+            Task { _ = await cloud.submit(batch: batch) }
+        }
     }
 
     /// 重新导出最近一批(同一批次编号、同样内容),用于分享面板被取消或传输失败后重发。
@@ -594,7 +700,8 @@ final class DocumentStore: ObservableObject {
             raw.removeValue(forKey: "submittedAt")
             return Note(raw: raw)
         }
-        guard let batch = makeBatch(notes, id: last.0, completedAt: last.1, document: document) else { return }
+        let intent: String? = (document.sync != nil && notes.allSatisfy { $0.isNextRound }) ? "next-round" : nil
+        guard let batch = makeBatch(notes, id: last.0, completedAt: last.1, document: document, intent: intent) else { return }
         if document.sync != nil {
             Task { _ = await cloud.submit(batch: batch) }
             return
@@ -603,7 +710,7 @@ final class DocumentStore: ObservableObject {
         catch { lastError = "打包批注失败:\(error.localizedDescription)" }
     }
 
-    private func makeBatch(_ notes: [Note], id: String, completedAt: String, document: OpenedDocument) -> AnnotationBatch? {
+    private func makeBatch(_ notes: [Note], id: String, completedAt: String, document: OpenedDocument, intent: String? = nil) -> AnnotationBatch? {
         guard let data = try? JSONSerialization.data(withJSONObject: notes.map { $0.raw }),
               let json = String(data: data, encoding: .utf8) else { lastError = "打包批注失败。"; return nil }
         // 外层身份取自批注自己创建时固定的身份(v2.3 第 6.2 条),不用当前会话身份覆盖;本地独立文件没有身份,批次是 version 1
@@ -612,7 +719,7 @@ final class DocumentStore: ObservableObject {
         let reviewId = document.sync == nil ? nil : (first?.reviewId ?? document.contentReviewId)
         return AnnotationBatch(batchId: id, documentName: document.name, baseVersion: first?.baseVersion ?? document.hash,
                                completedAt: completedAt, device: UIDevice.current.name, annotationsJSON: json,
-                               docId: docId, reviewId: reviewId)
+                               docId: docId, reviewId: reviewId, intent: intent)
     }
 
     // MARK: Mac 推来的文档(跨端规则第 12 节)
@@ -684,14 +791,39 @@ final class DocumentStore: ObservableObject {
         document.notice = document.returnCard != nil ? nil : "已换成第 \(latest.round) 轮的正文"
     }
 
-    /// Mac 的回执到了:对应批次的批注标为"Mac 已接收"或"未被采用(原因)"(跨端规则 6.5、6.6)
+    /// Mac 的回执到了:对应批次的批注标为"Mac 已接收"或"未被采用(原因)"(跨端规则 6.5、6.6)。
+    /// 批注落盘成功才标「回执已应用」;没标的启动时再来一遍(v2.4 第 6.9 条:手机应用回执可恢复)
     private func apply(receipt: SyncReceipt) {
+        // 定稿请求没有批注可挂:按批次编号认领;接受就清掉,拒收记下原因给界面
+        if let entry = finalizeRequests.first(where: { $0.value.batchId == receipt.batchId }) {
+            if receipt.accepted { finalizeRequests[entry.key] = nil } else { finalizeRequests[entry.key]?.rejectedReason = Self.rejectionText(receipt) }
+            if saveFinalizeRequests() { cloud.markReceiptApplied(receipt.batchId) }
+            return
+        }
+        if applyReceiptToNotes(receipt) { cloud.markReceiptApplied(receipt.batchId) }
+    }
+
+    /// 被拒的定稿请求,看过原因后收起
+    func dismissFinalizeRejection(docId: String) {
+        guard finalizeRequests[docId]?.rejectedReason != nil else { return }
+        finalizeRequests[docId] = nil
+        saveFinalizeRequests()
+    }
+
+    private func reapplyPendingReceipts() {
+        for receipt in cloud.unappliedReceipts() { apply(receipt: receipt) }
+    }
+
+    @discardableResult
+    private func applyReceiptToNotes(_ receipt: SyncReceipt) -> Bool {
         let key = "synced:\(receipt.docId)"
         let mutate: (inout [Note]) -> Void = { notes in
             for index in notes.indices where notes[index].submittedBatchId == receipt.batchId && (notes[index].isSubmitted || notes[index].isRejected) {
                 if receipt.accepted && receipt.acceptedIds.contains(notes[index].id) {
                     notes[index].raw["status"] = "received"
                     notes[index].raw.removeValue(forKey: "rejectedReason")
+                    // next-round:创建身份不变,另记 Mac 新开的那一轮(v2.4 第 6.9 条)
+                    if let target = receipt.targetReviewId, notes[index].isNextRound { notes[index].raw["acceptedReviewId"] = target }
                 } else {
                     notes[index].raw["status"] = "rejected"
                     notes[index].raw["rejectedReason"] = receipt.accepted ? "Mac 已有同编号的批注,没有重复写入" : Self.rejectionText(receipt)
@@ -704,15 +836,13 @@ final class DocumentStore: ObservableObject {
             var notes = document.notes
             mutate(&notes)
             document.notes = notes
-            persistNotes(document)
-        } else {
-            var notes = loadNotes(forKey: key)
-            mutate(&notes)
-            let object: [String: Any] = ["version": 1, "annotations": notes.map { $0.raw }]
-            if let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
-                try? data.write(to: annotationsFile(forKey: key), options: .atomic)
-            }
+            return persistNotes(document)
         }
+        var notes = loadNotes(forKey: key)
+        mutate(&notes)
+        let object: [String: Any] = ["version": 1, "annotations": notes.map { $0.raw }]
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) else { return false }
+        do { try data.write(to: annotationsFile(forKey: key), options: .atomic); return true } catch { return false }
     }
 
     /// 回执的拒收原因:Mac 写的说明优先;没有就按原因代码给一句人话
@@ -725,6 +855,9 @@ final class DocumentStore: ObservableObject {
         case "version-mismatch": return "Mac 上的原文和手机上的不一样了"
         case "missing-identity": return "手机上的回稿版本太旧,请更新"
         case "no-session": return "Mac 上找不到这篇的审阅"
+        case "invalid-batch": return "Mac 上的回稿需要更新,才能收这类请求"
+        case "user-editing": return "Mac 上正在编辑这篇,等编辑完再交"
+        case "has-open-notes": return "Mac 上这篇还有没处理的批注,先在 Mac 上处理"
         default: return receipt.reason.isEmpty ? "Mac 没有收下" : "Mac 没有收下(\(receipt.reason))"
         }
     }

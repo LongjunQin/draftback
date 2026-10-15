@@ -24,6 +24,7 @@ struct ReaderView: View {
     /// 回稿卡「显示改动」开着:对比是只读视图,这时不能批注
     @State private var showingChanges = false
     @State private var showResults = false
+    @State private var confirmFinalize: ReaderStatus.Primary?
     @State private var confirmNewVersion = false
     @State private var handOffCount = 0
     @State private var clock = Date()
@@ -50,7 +51,17 @@ struct ReaderView: View {
             received: document.receivedNotes.count, rejected: document.rejectedNotes.count,
             pendingUploads: store.pendingUploads,
             oldestSubmittedAt: submitted.compactMap { $0.raw["submittedAt"] as? String }.compactMap(formatter.date(from:)).min(),
-            now: clock))
+            now: clock,
+            supportsIntents: document.sync?.supportsIntents ?? false,
+            macOpenCount: document.sync?.openCount ?? 0,
+            finalize: finalizeState,
+            nextRoundInFlight: document.nextRoundInFlight.count))
+    }
+
+    private var finalizeState: ReaderStatus.FinalizeState? {
+        guard let docId = document.sync?.docId, let request = store.finalizeRequests[docId] else { return nil }
+        if let reason = request.rejectedReason { return .rejected(reason) }
+        return .pending
     }
 
     private var fontScale: Double {
@@ -111,6 +122,7 @@ struct ReaderView: View {
         }
         .sheet(isPresented: $showNotes) {
             NotesSheet(document: document, canAnnotate: status.canAnnotate,
+                       onCopy: { note in copyToRound(note) },
                        onFocus: { id in bridge?.focus(noteId: id); showNotes = false },
                        onEdit: { note in composer = Composer(anchor: nil, quote: note.quote, scope: note.isDocumentScope ? "document" : nil, editingNoteId: note.id, initialComment: note.comment) },
                        onDelete: { note in store.remove(noteId: note.id, from: document); reloadToken += 1 })
@@ -129,6 +141,15 @@ struct ReaderView: View {
                 bridge?.clearSelection()
                 return true
             }
+        }
+        .confirmationDialog(confirmFinalize == .approve ? "通过并定稿?" : "定稿?", isPresented: Binding(get: { confirmFinalize != nil }, set: { if !$0 { confirmFinalize = nil } }),
+                            titleVisibility: .visible) {
+            Button(confirmFinalize == .approve ? "通过 · 定稿" : "定稿") { store.requestFinalize(for: document); confirmFinalize = nil }
+            Button("取消", role: .cancel) { confirmFinalize = nil }
+        } message: {
+            Text(confirmFinalize == .approve
+                 ? "全文没有任何批注:记为通过并定稿,AI 会收到「审阅结束」。想让 AI 再改,先写一条批注再交出。"
+                 : "这版就是终稿,AI 会收到「审阅结束」。以后再批注,会开始新的一轮。")
         }
         .confirmationDialog("换成新版?", isPresented: $confirmNewVersion, titleVisibility: .visible) {
             Button("换成新版") { loadNewVersion() }
@@ -298,7 +319,10 @@ struct ReaderView: View {
     }
 
     private func statusSlot(_ status: ReaderStatus) -> some View {
-        Button { if status.statusTap == .openNotes { showNotes = true } } label: {
+        Button {
+            if status.statusTap == .openNotes { showNotes = true }
+            if status.statusTap == .dismissFinalize, let docId = document.sync?.docId { store.dismissFinalizeRejection(docId: docId) }
+        } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(status.statusLine).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                 if let detail = status.statusDetail {
@@ -310,7 +334,7 @@ struct ReaderView: View {
         }
         .buttonStyle(.plain)
         .allowsHitTesting(status.statusTap != nil)
-        .accessibilityHint(status.statusTap == .openNotes ? "打开批注列表" : "")
+        .accessibilityHint(status.statusTap == .openNotes ? "打开批注列表" : status.statusTap == .dismissFinalize ? "收起这条说明" : "")
     }
 
     private func primaryButton(_ primary: ReaderStatus.Primary) -> some View {
@@ -331,6 +355,8 @@ struct ReaderView: View {
         case .handOffDisabled: return ("交给 AI", false)
         case .handedOff: return ("已交出", false)
         case .busy: return ("改稿中…", false)
+        case .finalize: return ("定稿", true)
+        case .approve: return ("通过 · 定稿", true)
         case .resend: return ("重新发送", true)
         case .exportBatch(let count): return ("导出批注 · \(count)", true)
         case .reexport: return ("重新导出", true)
@@ -344,6 +370,8 @@ struct ReaderView: View {
             handOffCount += 1
         case .resend, .reexport:
             store.resubmitBatch(for: document)
+        case .finalize, .approve:
+            confirmFinalize = primary
         case .handOffDisabled, .handedOff, .busy:
             break
         }
@@ -375,6 +403,19 @@ struct ReaderView: View {
         case .noSelection: message = "没有识别到有效的文字选区,请重新选择。"
         case .error(let text): message = text
         }
+    }
+
+    /// 复制到本轮:引文在本轮正文里还在就重新算锚点,找不到就复制成总体意见(带原引文)
+    private func copyToRound(_ note: Note) {
+        let finish: ([String: Any]?) -> Void = { anchor in
+            if store.copyToRound(note, anchor: anchor, in: document) {
+                reloadToken += 1
+                message = anchor == nil && !note.isDocumentScope && !note.quote.isEmpty ? "本轮正文里找不到原来那句,已复制成总体意见,带上了原引文。" : nil
+            }
+        }
+        if note.isDocumentScope || note.quote.isEmpty { finish(nil); return }
+        guard let bridge else { finish(nil); return }
+        bridge.anchorForQuote(note.quote) { anchor in DispatchQueue.main.async { finish(anchor) } }
     }
 
     private func exportPDF() {
@@ -485,6 +526,8 @@ struct OutlineSheet: View {
 struct NotesSheet: View {
     @ObservedObject var document: OpenedDocument
     let canAnnotate: Bool
+    /// 复制到本轮(被拒收的、旧版本上的)
+    let onCopy: (Note) -> Void
     let onFocus: (String) -> Void
     let onEdit: (Note) -> Void
     let onDelete: (Note) -> Void
@@ -541,6 +584,7 @@ struct NotesSheet: View {
                                 NoteRow(note: note)
                                 Text(note.rejectedReason ?? "Mac 没有收下").font(.caption).foregroundStyle(Tone.conflict.text)
                             }
+                            .swipeActions { if canAnnotate { copyButton(note) } }
                         }
                     } header: {
                         Text("被 Mac 拒收 \(document.rejectedNotes.count)")
@@ -556,11 +600,12 @@ struct NotesSheet: View {
                                 NoteRow(note: note)
                                 Text(olderLabel(note)).font(.caption).foregroundStyle(.secondary)
                             }
+                            .swipeActions { if canAnnotate && (note.isOpen || note.isRejected) { copyButton(note) } }
                         }
                     } header: {
                         Text("旧版本上的批注 \(older.count)")
                     } footer: {
-                        Text("正文已换成新版。这些批注写在旧版上,只读保留,不会再交出。")
+                        Text(canAnnotate ? "这些批注写在旧版上,只读保留。左滑「复制到本轮」可以在这一轮再交一次。" : "正文已换成新版。这些批注写在旧版上,只读保留,不会再交出。")
                     }
                 }
             }
@@ -568,6 +613,10 @@ struct NotesSheet: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func copyButton(_ note: Note) -> some View {
+        Button { onCopy(note) } label: { Label("复制到本轮", systemImage: "doc.on.doc") }.tint(Tone.turn.color)
     }
 
     private func olderLabel(_ note: Note) -> String {

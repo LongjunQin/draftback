@@ -135,13 +135,16 @@ test('崩溃重放:导入记录停在各阶段,重放都补齐到定稿回执,�
     if (stage === 'notes') await store.mutateReviews((data) => { const r = data.reviews[review.id]; r.status = 'reviewing'; delete r.memberAnnotationIds; delete r.submittedAt; return null; }, f.options);
     fs.writeFileSync(path.join(f.dataDir, 'imports', `${batch.batchId}.json`), JSON.stringify(record));
     assert.ok(batches.pendingImportFor(doc, f.options));
-    await assert.rejects(() => store.beginApply(doc, { applyMode: 'agent', ...f.options }), (e) => e.code === 'IMPORT_PENDING', '未收敛时不得改稿');
+    assert.throws(() => store.assertNoPendingImport(doc, f.options), (e) => e.code === 'IMPORT_PENDING', '锁内检查:未收敛时拒绝');
+    // v2.4 第 6.9 条:动手(开始改稿)之前先把在途导入收敛到原回执,再开始改稿;不会拿半份批注改稿
+    await store.beginApply(doc, { applyMode: 'agent', ...f.options });
+    assert.equal(batches.pendingImportFor(doc, f.options), null, stage);
+    assert.equal((await store.getReviewById(review.id, f.options)).status, 'applying');
+    assert.equal(store.readAnnotations(doc).annotations.length, 2);
     const replayed = await batches.importBatch(batch, f.options);
     assert.equal(replayed.receipt.accepted, true, stage);
+    assert.equal(replayed.receipt.reused, true, '收敛时已经定稿回执');
     assert.deepEqual(replayed.receipt.acceptedIds, ['n-phone-1', 'n-phone-2']);
-    assert.equal(replayed.review.status, 'ready_to_apply');
-    assert.equal(store.readAnnotations(doc).annotations.length, 2);
-    assert.equal(batches.pendingImportFor(doc, f.options), null);
   }
   // 空批次 → 零批注通过也有回执;全部去重 → 回执 accepted、acceptedIds 为空
   const { doc, review } = await openDoc(f, '空批次.md');

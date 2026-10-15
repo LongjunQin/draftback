@@ -296,6 +296,7 @@ function rememberDeletedNote(reviewId, note, index) {
 }
 async function restoreDeletedNote(review, noteId) {
   const key = `${review.id}:${noteId}`;
+  try { await batches.settlePendingImportFor(review.absPath); } catch (_) {}
   const entry = deletedNotes.get(key);
   if (!entry || Date.now() - entry.at > DELETED_NOTE_TTL_MS) {
     deletedNotes.delete(key);
@@ -372,6 +373,8 @@ async function forkConflictRound(ref, targetPath) {
 
 async function requireWritableReview(ref) {
   let review = await requireReview(ref);
+  // 手机交来的批次还在处理(锁内只能检查,收敛在拿锁之前的 settle 里做)
+  store.assertNoPendingImport(review.absPath);
   if (review.status !== 'reviewing') throw reviewReadOnly(review);
   review = await store.assertReviewUnchanged(review.id);
   if (review.status !== 'reviewing') throw reviewReadOnly(review);
@@ -450,6 +453,8 @@ function applyCommentEdit(annotation, comment, actor) {
 async function handleReviewAnnotations(req, res, q, review) {
   const absMd = review.absPath;
   if (req.method === 'GET') return sendJson(res, 200, store.readAnnotations(absMd));
+  // 写批注之前先收敛这篇的在途手机批次(跨端规则 v2.4 第 6.9 条);收敛后这一轮可能已交出,下面会按只读拒绝
+  try { await batches.settlePendingImportFor(absMd); } catch (_) {}
 
   if (req.method === 'POST') {
     const note = await readBody(req);

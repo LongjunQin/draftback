@@ -246,6 +246,10 @@
     if (!state.rendered || !selection || selection.isCollapsed || !selection.rangeCount) return null;
     const range = selection.getRangeAt(0);
     if (!content.contains(range.startContainer) || !content.contains(range.endContainer)) return null;
+    return anchorForRange(range, selection.toString());
+  }
+  // 一段正文范围 → 锚点(与桌面端算法一致);划词与「复制到本轮」共用
+  function anchorForRange(range, quoteText) {
     const leaves = leafBlocks(); const picked = [];
     leaves.forEach((block, index) => { const part = intersect(range, block); if (part) picked.push({ block, index, part }); });
     if (!picked.length) return null;
@@ -255,8 +259,8 @@
     if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
     try {
       const anchor = Anchor.createAnchorFromBlocks(descriptors(leaves), { blockIndex: first.index, offset: start }, { blockIndex: last.index, offset: end },
-        { headingPath: headingPathFor(first.block), figureRef: figureRefOf(first.block, selection.toString()) });
-      return { anchor, quote: selection.toString() };
+        { headingPath: headingPathFor(first.block), figureRef: figureRefOf(first.block, quoteText) });
+      return { anchor, quote: quoteText };
     } catch (error) { post({ type: 'error', message: `锚点失败:${error.message}` }); return null; }
   }
 
@@ -414,25 +418,32 @@
   }
 
   // 逐条结果点一条:在正文里找到那句引文,滚过去并闪一下;找不到(被改掉了)告诉原生
-  function locateQuote(quote) {
+  // 在正文里找一段引文(空白差异不算),返回范围;whole 为真时要整句都找到
+  function rangeForQuote(quote, whole) {
     const wanted = String(quote || '').replace(/\s+/g, ' ').trim();
-    if (!wanted) return false;
-    if (changes.showing) void setShowingChanges(false);
-    const probe = wanted.slice(0, 40);
+    if (!wanted) return null;
+    const probe = whole ? wanted : wanted.slice(0, 40);
     const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
     const nodes = []; let text = '';
     for (let node = walker.nextNode(); node; node = walker.nextNode()) { nodes.push({ node, start: text.length }); text += node.data; }
     const flat = text.replace(/\s/g, ' ');
     const at = flat.indexOf(probe);
-    if (at < 0) { post({ type: 'locateFailed' }); return false; }
+    if (at < 0) return null;
     const point = (offset) => {
       for (let i = nodes.length - 1; i >= 0; i -= 1) if (nodes[i].start <= offset) return { node: nodes[i].node, offset: Math.min(offset - nodes[i].start, nodes[i].node.data.length) };
       return null;
     };
     const start = point(at), end = point(at + probe.length);
-    if (!start || !end) return false;
+    if (!start || !end) return null;
     const range = document.createRange(); range.setStart(start.node, start.offset); range.setEnd(end.node, end.offset);
-    start.node.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return range;
+  }
+
+  function locateQuote(quote) {
+    if (changes.showing) void setShowingChanges(false);
+    const range = rangeForQuote(quote, false);
+    if (!range) { post({ type: 'locateFailed' }); return false; }
+    range.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     if (globalThis.CSS && CSS.highlights && globalThis.Highlight) {
       CSS.highlights.set('draftback-locate', new Highlight(range));
       setTimeout(() => CSS.highlights.delete('draftback-locate'), 2200);
@@ -491,6 +502,14 @@
     setFontScale,
     toggleChanges() { return setShowingChanges(!changes.showing); },
     locateQuote(quote) { return locateQuote(quote); },
+    // 「复制到本轮」:引文在本轮正文里还在就重新算锚点;找不到返回 null(原生改成总体意见)
+    anchorForQuote(quote) {
+      if (!state.rendered) return null;
+      const range = rangeForQuote(quote, true);
+      if (!range) return null;
+      const result = anchorForRange(range, String(quote));
+      return result ? result.anchor : null;
+    },
     scrollToTop() { (cardEl.hidden ? content : cardEl).scrollIntoView({ block: 'start' }); },
     outline,
   });

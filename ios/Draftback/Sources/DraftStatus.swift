@@ -111,8 +111,12 @@ struct ReaderStatus: Equatable {
         case resend              // 重新发送(久等没回执)
         case exportBatch(Int)    // 导出批注 · k(手机独立打开的文件)
         case reexport            // 重新导出
+        case finalize            // 定稿(稿子回来 / 通过 / 恢复之后,v2.4)
+        case approve             // 通过 · 定稿(批注中、一条批注都没有,v2.4)
     }
-    enum StatusTap: Equatable { case openNotes }
+    /// 定稿请求的状态(v2.4):在途 / 被拒(带原因)
+    enum FinalizeState: Equatable { case pending, rejected(String) }
+    enum StatusTap: Equatable { case openNotes, dismissFinalize }
 
     var subtitle: String
     var subtitleTone: Tone
@@ -135,6 +139,13 @@ struct ReaderStatus: Equatable {
         var pendingUploads = 0
         var oldestSubmittedAt: Date?
         var now = Date()
+        /// v2.4:Mac 能收带意图的批次(≥ 3)
+        var supportsIntents = false
+        /// Mac 上这一轮还没处理的批注数(批注中时决定能不能「通过 · 定稿」)
+        var macOpenCount = 0
+        var finalize: FinalizeState? = nil
+        /// 已交出、还在等 Mac 开下一轮的「为下一轮写的」批注数
+        var nextRoundInFlight = 0
     }
 
     /// 交出后多久没回执就提示「等待 Mac 在线」并给「重新发送」
@@ -165,6 +176,11 @@ struct ReaderStatus: Equatable {
     private static func synced(_ sync: SyncedDocument, _ input: Inputs) -> ReaderStatus {
         let round = "第 \(sync.round) 轮"
         let handedNote = "这一轮已交给 AI。稿子回来后再批注。"
+        if case .pending = input.finalize {
+            return ReaderStatus(subtitle: subtitleFor(sync), subtitleTone: toneFor(sync), statusLine: "已请求定稿", statusDetail: "等 Mac 收到",
+                                canAnnotate: false, blockedReason: "已经请求定稿,等 Mac 收到。")
+        }
+        if sync.isTerminal && input.supportsIntents { return terminalWithIntents(sync, input) }
         switch sync.phoneState {
         case "reviewing":
             let subtitle = "\(round) · 可批注"
@@ -194,8 +210,12 @@ struct ReaderStatus: Equatable {
                 return ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "\(input.rejected) 条被 Mac 拒收", statusDetail: "点这里看原因",
                                     statusTap: .openNotes, primary: .handOffDisabled, canAnnotate: true)
             }
-            return ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "\(round) · 可批注", statusDetail: "选中文字就能批注",
-                                primary: .handOffDisabled, canAnnotate: true)
+            // 一条批注都没有:Mac 支持且 Mac 上这一轮也没有批注时,可以「通过 · 定稿」(与 Mac 同一个顺序:先记为通过再定稿)
+            let approve = input.supportsIntents && input.macOpenCount == 0
+            var status = ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "\(round) · 可批注", statusDetail: "选中文字就能批注",
+                                      primary: approve ? .approve : .handOffDisabled, canAnnotate: true)
+            if case .rejected(let reason) = input.finalize { status.statusLine = "没有定稿"; status.statusDetail = reason; status.statusTap = .dismissFinalize }
+            return status
         case "waiting-agent":
             // 副标题已经说了「已交出」,横幅只说三档里的哪一档
             let agentState = sync.effectiveAgentState(now: input.now)
@@ -246,6 +266,56 @@ struct ReaderStatus: Equatable {
             return ReaderStatus(subtitle: "未知状态", subtitleTone: .idle, statusLine: "手机还不认识这个状态", statusDetail: "请更新回稿",
                                 canAnnotate: false, blockedReason: "手机还不认识这篇的状态,请更新回稿。")
         }
+    }
+
+    private static func subtitleFor(_ sync: SyncedDocument) -> String {
+        switch sync.phoneState {
+        case "completed": return sync.outcome == "approved" ? "第 \(sync.round) 轮 · 已通过" : "第 \(sync.round) 轮回稿"
+        case "restored": return "已恢复到改稿前"
+        case "finalized": return "已定稿"
+        case "cancelled": return "本轮已作废"
+        case "reviewing": return "第 \(sync.round) 轮 · 可批注"
+        default: return "已交出"
+        }
+    }
+    private static func toneFor(_ sync: SyncedDocument) -> Tone {
+        switch sync.phoneState {
+        case "completed", "restored": return .back
+        case "finalized": return .done
+        case "cancelled": return .idle
+        case "reviewing": return .turn
+        default: return .waiting
+        }
+    }
+
+    /// v2.4:稿子回来(或通过、恢复、定稿、作废)之后,Mac 支持时手机上接着批就是开第 N+1 轮;回稿 / 通过 / 恢复可以定稿
+    private static func terminalWithIntents(_ sync: SyncedDocument, _ input: Inputs) -> ReaderStatus {
+        let next = "第 \(sync.round + 1) 轮"
+        let subtitle = subtitleFor(sync), tone = toneFor(sync)
+        if input.nextRoundInFlight > 0 {
+            return ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: "已交出 \(input.nextRoundInFlight) 条", statusDetail: "等 Mac 开\(next)",
+                                statusTap: .openNotes, primary: .handedOff, canAnnotate: false, blockedReason: "这批已经交出,等 Mac 开\(next)后再批。")
+        }
+        guard input.annotationAllowed else {
+            return ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: "正文还在同步", statusDetail: "同步完成后才能批注",
+                                canAnnotate: false, blockedReason: "正文还不是最新的。同步完成后才能批注。")
+        }
+        if input.open > 0 {
+            return ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: "本地已保存 \(input.open) 条 · \(next)", statusDetail: "交出时 Mac 会开\(next)",
+                                statusTap: .openNotes, primary: .handOff(input.open), canAnnotate: true)
+        }
+        let line: String
+        switch sync.phoneState {
+        case "completed": line = sync.outcome == "approved" ? "已通过 · 没有批注" : "稿子回来了"
+        case "restored": line = "已恢复到改稿前"
+        case "finalized": line = "这篇已定稿"
+        default: line = "本轮已作废"
+        }
+        let canFinalize = sync.phoneState == "completed" || sync.phoneState == "restored"
+        var status = ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: line, statusDetail: "划词就开始\(next)",
+                                  primary: canFinalize ? .finalize : nil, canAnnotate: true)
+        if case .rejected(let reason) = input.finalize { status.statusLine = "没有定稿"; status.statusDetail = reason; status.statusTap = .dismissFinalize }
+        return status
     }
 
     private static func receivedLine(_ input: Inputs) -> String {

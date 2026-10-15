@@ -134,7 +134,7 @@ test('已交出三档(没人接入 / AI 在线 / 已领取)一变就再推;其�
   fs.writeFileSync(doc, '# 三档\n\n正文。\n');
   const { review } = await store.openReview(doc, f.options);
   const reviewing = await store.getReviewById(review.id, f.options);
-  assert.equal(sync.pushSignature(reviewing, f.options).split('|').length, 6, '批注中不带三档,签名与旧版一致(升级后不重推)');
+  assert.doesNotMatch(sync.pushSignature(reviewing, f.options), /\|(none|listening|claimed)$/, '批注中不带三档');
   await sync.markPushed(review.id, {}, f.options);
 
   sidecar(doc, [{ id: 'n1', comment: '改', status: 'open' }]);

@@ -24,12 +24,16 @@ struct Note: Identifiable, Equatable {
     /// 创建时固定的轮次身份(跨端规则 v2.3 第 6.1 条):打包按它走,不取当前会话身份覆盖
     var docId: String? { raw["docId"] as? String }
     var reviewId: String? { raw["reviewId"] as? String }
+    /// 「为下一轮写的」(跨端规则 v2.4 第 6.9 条):稿子回来后写的批注,创建时就标,之后不改
+    var isNextRound: Bool { (raw["intent"] as? String) == "next-round" }
+    /// Mac 收下后的目标轮(回执里的 targetReviewId);创建身份不变,判断归属时它优先
+    var acceptedReviewId: String? { raw["acceptedReviewId"] as? String }
     /// 批注是否属于这一轮:正文指纹对得上,且(Mac 推来的文档)轮次身份也对得上;没有轮次身份的旧批注不算当前轮
     func belongs(toVersion hash: String, reviewId current: String? = nil) -> Bool {
         guard let baseVersion else { return current == nil } // 没有指纹的旧数据:只在本地独立文件里按当前版本对待
         guard baseVersion == hash else { return false }
         guard let current else { return true }
-        return reviewId == current
+        return (acceptedReviewId ?? reviewId) == current
     }
     var isDocumentScope: Bool { (raw["scope"] as? String) == "document" }
     var headingPath: [String] { raw["headingPath"] as? [String] ?? [] }
@@ -82,7 +86,7 @@ protocol SyncTransport {
 }
 
 struct AnnotationBatch: Codable {
-    /// 有轮次身份(Mac 推来的文档)就是 version 2(逐条带身份);手机独立文件导出仍是 1
+    /// 有轮次身份(Mac 推来的文档)就是 version 2(逐条带身份);带意图的是 3(v2.4);手机独立文件导出仍是 1
     var version: Int = 2
     var batchId: String
     var documentName: String
@@ -92,14 +96,18 @@ struct AnnotationBatch: Codable {
     var annotationsJSON: String  // 批注数组的 JSON 原文(保留全部字段)
     var docId: String? = nil     // Mac 推来的文档才有(跨端规则第 3 节:手机只认文档标识,不认路径)
     var reviewId: String? = nil
+    /// next-round / finalize(v2.4 第 6.9 条);带意图的批次是 version 3,旧 Mac 一律拒收
+    var intent: String? = nil
 
     func asJSONData() throws -> Data {
+        let identified = docId != nil && reviewId != nil
         var object: [String: Any] = [
-            "version": (docId != nil && reviewId != nil) ? version : 1, "batchId": batchId, "documentName": documentName,
+            "version": identified ? (intent != nil ? 3 : 2) : 1, "batchId": batchId, "documentName": documentName,
             "baseVersion": baseVersion, "completedAt": completedAt, "device": device,
         ]
         if let docId { object["docId"] = docId }
         if let reviewId { object["reviewId"] = reviewId }
+        if identified, let intent { object["intent"] = intent }
         if let data = annotationsJSON.data(using: .utf8), let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             object["annotations"] = array
         } else {

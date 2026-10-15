@@ -213,6 +213,13 @@ final class ReaderBridge {
     func scrollToTop() { call("window.DraftbackReader.scrollToTop()") }
     /// 逐条结果点一条:在正文里找到那句引文
     func locateQuote(_ quote: String) { call("window.DraftbackReader.locateQuote(\(json(quote)))") }
+    /// 「复制到本轮」:引文在本轮正文里还在就算出锚点;找不到给 nil
+    func anchorForQuote(_ quote: String, completion: @escaping ([String: Any]?) -> Void) {
+        guard let webView else { completion(nil); return }
+        webView.evaluateJavaScript("window.DraftbackReader.anchorForQuote(\(json(quote)))") { result, _ in
+            completion(result as? [String: Any])
+        }
+    }
     #if DEBUG
     /// 仅调试版:模拟器截图时选中第 n 段
     func debugSelectParagraph(_ index: Int) {

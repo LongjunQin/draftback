@@ -37,6 +37,11 @@ struct SyncedDocument: Identifiable, Codable, Equatable {
     var agentState: String? = nil
     /// 稿子回来时的逐条结果与计数(v2.4);别的状态为空
     var results: RoundResults? = nil
+    /// 这台 Mac 能收的批次协议(v2.4):≥ 3 才给「稿子回来后接着批」和「定稿」;旧 Mac 没有这个字段
+    var macProtocol: Int? = nil
+    /// 终态(稿子回来、通过、恢复、定稿、作废):Mac 支持时,手机上划词就开始下一轮
+    var isTerminal: Bool { ["completed", "restored", "finalized", "cancelled"].contains(phoneState) }
+    var supportsIntents: Bool { (macProtocol ?? 0) >= 3 }
 
     /// 「AI 在线,等待领取」要有期限:Mac 在 AI 监听期间每 10 分钟重推一次;超过 20 分钟没刷新(Mac 关机、断网),
     /// 手机不再说 AI 在线,只说已交出(跨端规则第 7 节:过期监听不得继续显示为在线)
@@ -93,6 +98,9 @@ struct SyncReceipt: Codable, Equatable {
     var batchReviewId: String? = nil
     var baseVersion: String? = nil
     var latestRound: Int? = nil
+    /// v2.4:执行的意图与目标轮(next-round 新开的一轮)
+    var intent: String? = nil
+    var targetReviewId: String? = nil
 }
 
 /// 与 iCloud 打交道的全部逻辑:拉取文档与回执、提交批次(失败进待上传队列,联网后重试)、订阅静默推送。
@@ -193,6 +201,19 @@ final class CloudSyncEngine: ObservableObject {
             try? fileManager.removeItem(at: previousInfoURL(for: docId))
         }
     }
+    /// 回执落盘后、批注改完前 App 被杀:启动时把还没标「已应用」的回执再应用一遍(应用本身幂等)
+    private func receiptAppliedURL(_ batchId: String) -> URL { stateDir.appendingPathComponent("receipts/\(batchId).applied") }
+    func markReceiptApplied(_ batchId: String) { try? Data().write(to: receiptAppliedURL(batchId), options: .atomic) }
+    func unappliedReceipts() -> [SyncReceipt] {
+        let dir = stateDir.appendingPathComponent("receipts")
+        let names = (try? fileManager.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.filter { $0.hasSuffix(".json") }.compactMap { name -> SyncReceipt? in
+            let batchId = String(name.dropLast(5))
+            guard !fileManager.fileExists(atPath: receiptAppliedURL(batchId).path) else { return nil }
+            return receipt(for: batchId)
+        }
+    }
+
     func receipt(for batchId: String) -> SyncReceipt? {
         guard let data = try? Data(contentsOf: stateDir.appendingPathComponent("receipts/\(batchId).json")) else { return nil }
         return try? JSONDecoder().decode(SyncReceipt.self, from: data)
@@ -266,7 +287,8 @@ final class CloudSyncEngine: ObservableObject {
             }
             for (_, result) in page.modificationResultsByID {
                 guard case .success(let modification) = result else { continue }
-                if apply(record: modification.record) { touched = true }
+                // 回执写不进手机就抛错:这一页不推进拉取进度,下次重拉(v2.4:手机应用回执可恢复)
+                if try apply(record: modification.record) { touched = true }
             }
             for deletion in page.deletions where deletion.recordType == CloudSchema.reviewDocument {
                 remove(docId: deletion.recordID.recordName)
@@ -280,11 +302,11 @@ final class CloudSyncEngine: ObservableObject {
     }
 
     /// 返回是否改动了本地状态
-    private func apply(record: CKRecord) -> Bool {
+    private func apply(record: CKRecord) throws -> Bool {
         switch record.recordType {
         case CloudSchema.reviewDocument: return applyDocument(record)
         case CloudSchema.attachment: return applyAttachment(record)
-        case CloudSchema.receipt: return applyReceipt(record)
+        case CloudSchema.receipt: return try applyReceipt(record)
         default: return false
         }
     }
@@ -336,7 +358,8 @@ final class CloudSyncEngine: ObservableObject {
             revision: revision,
             outcome: record["outcome"] as? String,
             agentState: (record["agentState"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-            results: (record["results"] as? String).flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode(RoundResults.self, from: $0) }
+            results: (record["results"] as? String).flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode(RoundResults.self, from: $0) },
+            macProtocol: (record["macProtocol"] as? Int64).map(Int.init)
         )
         // 一次换整个数组:先删后插会多发一次中间状态(那一刻这篇不在列表里),通知判断会被骗
         var next = documents.filter { $0.docId != docId }
@@ -360,7 +383,7 @@ final class CloudSyncEngine: ObservableObject {
         return true
     }
 
-    private func applyReceipt(_ record: CKRecord) -> Bool {
+    private func applyReceipt(_ record: CKRecord) throws -> Bool {
         guard let batchId = record["batchId"] as? String else { return false }
         var ids: [String] = []
         if let json = record["acceptedIds"] as? String, let data = json.data(using: .utf8),
@@ -369,10 +392,11 @@ final class CloudSyncEngine: ObservableObject {
                                   accepted: (record["accepted"] as? Int64 ?? 0) == 1, reason: record["reason"] as? String ?? "",
                                   message: record["message"] as? String ?? "", acceptedIds: ids, receivedAt: record["receivedAt"] as? Date,
                                   batchReviewId: record["batchReviewId"] as? String, baseVersion: record["baseVersion"] as? String,
-                                  latestRound: (record["latestRound"] as? Int64).map(Int.init))
-        if let data = try? JSONEncoder().encode(receipt) {
-            try? data.write(to: stateDir.appendingPathComponent("receipts/\(batchId).json"), options: .atomic)
-        }
+                                  latestRound: (record["latestRound"] as? Int64).map(Int.init),
+                                  intent: (record["intent"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                                  targetReviewId: (record["targetReviewId"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+        let data = try JSONEncoder().encode(receipt)
+        try data.write(to: stateDir.appendingPathComponent("receipts/\(batchId).json"), options: .atomic)
         // 收到回执说明这批已经送达,待上传队列里的副本可以删了
         try? fileManager.removeItem(at: stateDir.appendingPathComponent("outbox/\(batchId).json"))
         pendingUploads = outboxFiles().count
@@ -401,6 +425,11 @@ final class CloudSyncEngine: ObservableObject {
         return uploaded
     }
 
+    /// 这个批次的快照还在待上传队列里
+    func hasQueued(batchId: String) -> Bool {
+        fileManager.fileExists(atPath: stateDir.appendingPathComponent("outbox/\(batchId).json").path)
+    }
+
     private func outboxFiles() -> [URL] {
         (try? fileManager.contentsOfDirectory(at: stateDir.appendingPathComponent("outbox"), includingPropertiesForKeys: nil)) ?? []
     }
@@ -425,6 +454,7 @@ final class CloudSyncEngine: ObservableObject {
         record["baseVersion"] = object["baseVersion"] as? String ?? ""
         record["completedAt"] = object["completedAt"] as? String ?? ""
         record["device"] = object["device"] as? String ?? UIDevice.current.name
+        if let intent = object["intent"] as? String { record["intent"] = intent }
         if let annotations = object["annotations"], let json = try? JSONSerialization.data(withJSONObject: annotations) {
             record["annotations"] = String(decoding: json, as: UTF8.self)
         } else {

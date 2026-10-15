@@ -142,6 +142,8 @@ final class SyncLoop {
         if let revision = payload["revision"] as? Int { record["revision"] = Int64(revision) }
         record["outcome"] = payload["outcome"] as? String ?? ""
         record["agentState"] = payload["agentState"] as? String ?? ""
+        // 这台 Mac 能收的批次协议(跨端规则 v2.4 第 6.9 条):手机据此决定给不给「接着批开下一轮」与「定稿」
+        record["macProtocol"] = Int64((payload["macProtocol"] as? Int) ?? 2)
         record["versionId"] = payload["versionId"] as? String ?? ""
         record["docId"] = docId
         record["reviewId"] = reviewId
@@ -294,7 +296,8 @@ final class SyncLoop {
                                accepted: (receipt["accepted"] as? Bool) == true, reason: receipt["reason"] as? String ?? "",
                                message: receipt["message"] as? String ?? "", acceptedIds: acceptedIds,
                                batchReviewId: receipt["batchReviewId"] as? String, baseVersion: receipt["baseVersion"] as? String,
-                               latestRound: receipt["latestRound"] as? Int)
+                               latestRound: receipt["latestRound"] as? Int,
+                               intent: receipt["intent"] as? String, targetReviewId: receipt["targetReviewId"] as? String)
         if !reviewId.isEmpty { try? await server.markReceiptSent(reviewId: reviewId, batchId: batchId) }
         let verdict = (receipt["accepted"] as? Bool) == true ? "已采用 \(acceptedIds.count) 条" : "拒收(\(receipt["reason"] ?? "?"))"
         log.info("收到手机批次 \(batchId.prefix(8)) → \(verdict)")
@@ -302,7 +305,8 @@ final class SyncLoop {
 
     /// 回执带批次原身份与指纹(跨端规则 v2.3 第 6.6 条),手机据此把拒收原因挂到正确的批注上
     private func writeReceipt(batchId: String, docId: String, reviewId: String, accepted: Bool, reason: String, message: String, acceptedIds: [String],
-                              batchReviewId: String? = nil, baseVersion: String? = nil, latestRound: Int? = nil) async throws {
+                              batchReviewId: String? = nil, baseVersion: String? = nil, latestRound: Int? = nil,
+                              intent: String? = nil, targetReviewId: String? = nil) async throws {
         let receiptRecord = CKRecord(recordType: CloudSchema.receipt, recordID: cloud.recordID(CloudSchema.receiptName(batchId: batchId)))
         receiptRecord["batchId"] = batchId
         receiptRecord["docId"] = docId
@@ -310,6 +314,9 @@ final class SyncLoop {
         receiptRecord["batchReviewId"] = batchReviewId ?? ""
         receiptRecord["baseVersion"] = baseVersion ?? ""
         if let latestRound { receiptRecord["latestRound"] = Int64(latestRound) }
+        // v2.4:执行的意图与目标轮(next-round 新开的一轮;手机据此记 acceptedReviewId)
+        if let intent, !intent.isEmpty { receiptRecord["intent"] = intent }
+        if let targetReviewId, !targetReviewId.isEmpty { receiptRecord["targetReviewId"] = targetReviewId }
         receiptRecord["accepted"] = Int64(accepted ? 1 : 0)
         receiptRecord["reason"] = reason
         receiptRecord["message"] = message
