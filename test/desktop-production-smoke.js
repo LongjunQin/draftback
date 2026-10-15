@@ -777,11 +777,12 @@ async function main() {
 
     // 2. History starts collapsed, is present in the rail, and has no body
     // marker/highlight even though it has a valid v3 anchor.
+    // 规则⑤第三段起历史按轮折叠:这些旧批注的 reviewSessionId 没有对应的版本事件,归成一个「未归档」的轮,逐条结果在轮里
     const initialHistory = await chrome.cdp.evaluate(`(() => ({
       open: document.querySelector('#historySection').open,
       count: document.querySelector('#historyNotesCount').textContent,
-      cardCount: document.querySelectorAll('#historyNotesList .note-card').length,
-      cardVisible: Array.from(document.querySelectorAll('#historyNotesList .note-card'))
+      cardCount: document.querySelectorAll('#historyNotesList .result-item').length,
+      cardVisible: Array.from(document.querySelectorAll('#historyNotesList .result-item'))
         .some((card) => card.getClientRects().length > 0),
       legacyTint: document.querySelector('#history-target').classList.contains('legacy-note-block'),
       highlightRanges: CSS.highlights && CSS.highlights.get('draftback-open')
@@ -789,7 +790,7 @@ async function main() {
     }))()`);
     assert.deepEqual(initialHistory, {
       open: false,
-      count: String(HISTORY_COUNT),
+      count: '1 轮',
       cardCount: HISTORY_COUNT,
       cardVisible: false,
       legacyTint: false,
@@ -962,7 +963,7 @@ async function main() {
       const ranges = highlight ? Array.from(highlight).map((range) => range.toString()) : [];
       return {
         historyOpen: document.querySelector('#historySection').open,
-        historyVisible: Array.from(document.querySelectorAll('#historyNotesList .note-card'))
+        historyVisible: Array.from(document.querySelectorAll('#historyNotesList .result-item'))
           .some((card) => card.getClientRects().length > 0),
         historyTint: document.querySelector('#history-target').classList.contains('legacy-note-block'),
         historyInHighlight: ranges.some((text) => text.includes(${JSON.stringify(historyText)})),

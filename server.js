@@ -613,7 +613,8 @@ async function handleAppApi(req, res, pathname, q) {
     if (!allowMethods(req, res, ['GET'])) return;
     const docId = q.get('docId');
     if (!docId) return sendJson(res, 400, { error: 'bad_request', message: '缺少 docId。' });
-    return sendJson(res, 200, { document: versionStore.getDocument(docId), versions: versionStore.listVersions(docId) });
+    const includeAnnotations = q.get('detail') === '1';
+    return sendJson(res, 200, { document: versionStore.getDocument(docId), versions: versionStore.listVersions(docId, { includeAnnotations }) });
   }
   if (pathname === '/api/app/version') {
     if (!allowMethods(req, res, ['GET'])) return;

@@ -4,7 +4,10 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const Anchor = window.DraftbackAnchor;
+  const History = window.DraftbackHistory;   // 回稿卡与历史分轮的数据(规则⑤第三段)
+  const Diff = window.DraftbackDiff;         // 轮次对比算法
   const bridge = window.draftbackDesktop || null;
+  const ACTIVE_REVIEW = new Set(['reviewing', 'ready_to_apply', 'applying', 'conflict']);
 
   const nodes = {
     shell: $('#appShell'), tabList: $('#tabList'), openTabButton: $('#openTabButton'), primaryAction: $('#primaryAction'), secondaryAction: $('#secondaryAction'), findButton: $('#findButton'),
@@ -30,6 +33,10 @@
     confirmAccept: $('#confirmAccept'), confirmCancel: $('#confirmCancel'), toastRegion: $('#toastRegion'),
     findBar: $('#findBar'), findInput: $('#findInput'), findCount: $('#findCount'), findPrev: $('#findPrev'), findNext: $('#findNext'), findClose: $('#findClose'),
     dropOverlay: $('#dropOverlay'),
+    returnCard: $('#returnCard'), timelinePopover: $('#timelinePopover'),
+    compareView: $('#compareView'), compareTitle: $('#compareTitle'), compareMeta: $('#compareMeta'), comparePosition: $('#comparePosition'),
+    comparePrev: $('#comparePrev'), compareNext: $('#compareNext'), compareClose: $('#compareClose'), compareScroll: $('#compareScroll'),
+    compareContent: $('#compareContent'), compareNote: $('#compareNote'),
   };
 
   // 改名前的本地存储键 mdturn.*(标签、未保存草稿、阅读偏好)一次性搬到 draftback.*;命名沿革见 docs/naming-history.md
@@ -219,6 +226,11 @@
       outline: [],
       focusedNoteId: null,
       historyOpen: false,
+      versions: null,        // 版本事件列表(GET /api/app/document/versions?detail=1),回稿卡与历史分轮的数据源
+      versionsKey: '',
+      versionsRetryAt: 0,
+      openRounds: new Set(), // 历史里展开着的轮
+      autoCompare: null,     // 稿子刚回来:等版本记录到了自动打开对比视图(一次)
     };
     const draft = readDraft(tab.id, tab.sourceHash);
     if (draft && draft.content !== tab.source) {
@@ -357,7 +369,7 @@
         const active = item.activeReview;
         const stateText = !item.exists ? '文件已不存在'
           : active ? `${statusLabel(active.status, active.applyMode)}${active.openCount ? ` · ${active.openCount} 条未处理` : ''}`
-            : item.editing ? '编辑中' : item.lastReview ? '上次审阅已结束' : '普通文档';
+            : item.editing ? '编辑中' : item.lastReview ? statusLabel(item.lastReview.status, item.lastReview.applyMode, item.lastReview.outcome) : '普通文档';
         meta.textContent = `${formatDirectory(item.directory)} · ${stateText}`;
         button.append(title, meta);
         button.disabled = !item.exists;
@@ -401,8 +413,11 @@
       const payload = await requestJson('/api/app/document/open', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath }),
       });
-      if (payload.activeReview && payload.activeReview.id) {
-        await openReviewId(payload.activeReview.id);
+      // 有活动会话进活动会话;没有活动会话但有审阅记录(稿子回来了 / 已通过 / 已恢复 / 已定稿 / 已作废)进最新一轮,
+      // 回稿卡、历史、对比视图才看得到。只有从没审阅过的文档才按普通文档打开。
+      const session = (payload.activeReview && payload.activeReview.id) ? payload.activeReview : (payload.latestReview && payload.latestReview.id ? payload.latestReview : null);
+      if (session) {
+        await openReviewId(session.id);
         await refreshRecents();
         return;
       }
@@ -665,6 +680,8 @@
     applyBundleToTab(tab, normalized, { forceSource: options.forceSource === true });
     await refreshRecents();
     if (isVerifiedAgentCompletion(tab.review, options, priorStatus, priorMode)) {
+      // 稿子回来是一个时刻:正在看这篇就默认打开对比视图(等版本记录到了再开,见 maybeAutoCompare)
+      if (tab.id === state.activeId && tab.mode === 'read') { tab.autoCompare = completionKey(tab.review); renderNotes(tab); }
       await announceAgentCompletion(tab.review);
     }
   }
@@ -791,6 +808,7 @@
       clearDraft(tab);
     }
     if (tab.editingRegistered) void setEditing(tab, false);
+    if (Compare.isOpen() && Compare.current().tabId === id) Compare.close();
     const index = state.tabs.indexOf(tab);
     state.tabs.splice(index, 1);
     if (state.editorTabId === id) destroyEditor();
@@ -852,6 +870,24 @@
     if (command === 'export-html') { void exportHtml(); return; }
     if (command === 'export-docx') { void exportDocx(); return; }
     if (command === 'new') { void newDocument(); return; }
+    if (command === 'compare-toggle') { toggleCompare(); return; }
+    if (command === 'compare-prev' || command === 'compare-next') {
+      if (!Compare.isOpen()) { toggleCompare(); return; }
+      Compare.step(command === 'compare-prev' ? -1 : 1); return;
+    }
+    if (command === 'show-return-card') {
+      const tab = activeTab();
+      if (!tab || nodes.returnCard.hidden) { toast('现在没有回稿卡:稿子回来、通过或恢复后才会出现。'); return; }
+      toggleRight(false); nodes.returnCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); return;
+    }
+    if (command === 'restore-round') {
+      const tab = activeTab();
+      if (!tab || isPlain(tab)) { toast('普通文档没有轮次,没有可恢复的改稿。'); return; }
+      tab.historyOpen = true; toggleRight(false); renderNotes(tab);
+      nodes.historySection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      toast('在右栏「历史」里选一轮,点「恢复到这轮改稿前」。'); return;
+    }
+    if (command === 'timeline') { toggleTimeline(); return; }
     if (command === 'print') void printDocument();
   }
 
@@ -1222,7 +1258,7 @@
     nodes.welcome.hidden = true;
     renderStatus(tab);
     renderNotes(tab);
-    if (tab.mode === 'edit') renderEditor(tab);
+    if (tab.mode === 'edit') { if (Compare.isOpen()) Compare.close(); renderEditor(tab); }
     else renderReader(tab);
   }
 
@@ -1290,6 +1326,7 @@
   function renderReader(tab) {
     destroyEditor();
     tab.mode = 'read';
+    if (Compare.isOpen() && Compare.current().tabId !== tab.id) Compare.close();
     nodes.readerPane.hidden = false;
     nodes.readerScroll.hidden = false;
     nodes.editorPane.hidden = true;
@@ -1382,6 +1419,21 @@
   }
 
   const md = markdownEngine();
+  // 独立只读对比视图(规则⑤第三段):算法与 DOM 都在各自模块里,这里只注入渲染器与取版本正文的接口
+  const Compare = window.DraftbackCompare.create({
+    elements: {
+      view: nodes.compareView, title: nodes.compareTitle, meta: nodes.compareMeta, position: nodes.comparePosition, prev: nodes.comparePrev,
+      next: nodes.compareNext, close: nodes.compareClose, scroll: nodes.compareScroll, content: nodes.compareContent, note: nodes.compareNote,
+    },
+    md, dmp: new window.diff_match_patch(), Diff, renderMarkdown,
+    loadVersion: (docId, versionId, which) => requestJson(`/api/app/version?docId=${encodeURIComponent(docId)}&versionId=${encodeURIComponent(versionId)}&which=${which}`),
+    onChange: ({ open }) => {
+      nodes.readerPane.classList.toggle('compare-open', open);
+      nodes.annotate.hidden = true;
+      if (open) { toggleTimeline(false); window.getSelection()?.removeAllRanges(); }
+      else { nodes.readerScroll.setAttribute('tabindex', '-1'); nodes.readerScroll.focus({ preventScroll: true }); }
+    },
+  });
   // strict:图表文字经 Mermaid 自带的净化,不允许 HTML 标签与点击脚本进入 SVG。
   const prefersDark = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
   if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: prefersDark ? 'dark' : 'default' });
@@ -1896,27 +1948,341 @@
   function renderNotes(tab) {
     nodes.openNotesList.replaceChildren(); nodes.historyNotesList.replaceChildren();
     nodes.docNoteButton.hidden = !tab || tab.mode !== 'read' || !ANNOTATABLE.has(tab.review.status) || Boolean(tab.source && tab.source.readOnly);
+    const openSection = nodes.openNotesList.parentElement;
     if (!tab || isPlain(tab)) {
+      nodes.returnCard.hidden = true; nodes.returnCard.replaceChildren(); openSection.hidden = false;
       nodes.notesTotal.textContent = '0'; nodes.openNotesCount.textContent = '0'; nodes.historyNotesCount.textContent = '0';
       nodes.openNotesList.appendChild(emptyBlock(tab
         ? '还没有批注。划词写下第一条,就开始第 1 轮审阅并锁定原文;批注会交给 AI。'
         : '打开文档后，这里会显示当前轮次的批注。'));
       return;
     }
+    void ensureVersions(tab);
     state.renderingHistory = true;
     nodes.historySection.open = !!tab.historyOpen;
     state.renderingHistory = false;
     const organized = Anchor.organizeAnnotations(tab.annotations, { historyExpanded: nodes.historySection.open });
+    const versions = tab.versions || [];
+    // 回稿卡(规则⑤第三段):稿子回来 / 通过 / 恢复 / 作废时右栏顶部;数据来自版本事件,不读会继续变的旁注
+    const card = History.returnCard({ review: tab.review, versions, annotations: tab.annotations });
+    renderReturnCard(tab, card);
     nodes.notesTotal.textContent = String(organized.totalCount);
     nodes.openNotesCount.textContent = String(organized.open.count);
-    nodes.historyNotesCount.textContent = String(organized.history.count);
     // 总体意见(scope=document)固定置顶,组内仍保持最新在前。
     const openItems = organized.open.items.slice()
       .sort((left, right) => (isDocNote(right) ? 1 : 0) - (isDocNote(left) ? 1 : 0));
+    openSection.hidden = card.show && !openItems.length;
     if (!openItems.length) nodes.openNotesList.appendChild(emptyBlock('本轮还没有批注。选中正文可划词批注；针对全篇的意见请点上方“写总体意见”。'));
     else openItems.forEach((note) => nodes.openNotesList.appendChild(noteCard(tab, note, false)));
-    if (!organized.history.items.length) nodes.historyNotesList.appendChild(emptyBlock('还没有历史批注。'));
-    else organized.history.items.forEach((note) => nodes.historyNotesList.appendChild(noteCard(tab, note, true)));
+    // 历史按轮折叠:每轮一行「第 N 轮 · 类型 · 采纳 a · 未采纳 b」;没有轮次归属的旧批注归「更早(未分轮)」
+    const grouped = History.buildRounds({ review: tab.review, versions, annotations: tab.annotations });
+    const roundCount = grouped.rounds.length + (grouped.legacy ? 1 : 0);
+    nodes.historyNotesCount.textContent = roundCount ? `${roundCount} 轮` : '0';
+    if (!roundCount) nodes.historyNotesList.appendChild(emptyBlock('还没有历史。走完第一轮后,这里按轮显示当时的批注、处理结果,以及「显示改动」「恢复到这轮改稿前」。'));
+    else {
+      grouped.rounds.forEach((round) => nodes.historyNotesList.appendChild(roundGroup(tab, round)));
+      if (grouped.legacy) nodes.historyNotesList.appendChild(legacyGroup(tab, grouped.legacy));
+    }
+    maybeAutoCompare(tab, card);
+  }
+
+  // ---------- 版本记录(回稿卡、历史分轮、时间线、对比视图共用) ----------
+
+  function versionsKey(review) {
+    return [review.id, review.status, review.outcome || '', review.completedAt || '', review.versionId || '', review.updatedAt || '', review.round || ''].join('|');
+  }
+
+  async function ensureVersions(tab, options = {}) {
+    if (!tab || isPlain(tab) || !tab.review.docId) { if (tab) tab.versions = []; return; }
+    const key = versionsKey(tab.review);
+    if (!options.force && (tab.versionsKey === key || Date.now() < tab.versionsRetryAt)) return;
+    tab.versionsKey = key;
+    try {
+      const result = await requestJson(`/api/app/document/versions?docId=${encodeURIComponent(tab.review.docId)}&detail=1`);
+      tab.versions = Array.isArray(result.versions) ? result.versions : [];
+    } catch (error) {
+      tab.versions = tab.versions || [];
+      tab.versionsKey = '';
+      tab.versionsRetryAt = Date.now() + 10_000;
+      console.warn('读取版本记录失败', error);
+      return;
+    }
+    if (activeTab() === tab) { renderNotes(tab); if (!nodes.timelinePopover.hidden) renderTimeline(tab); }
+  }
+
+  function el(tag, className = '', text = null) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== null) node.textContent = text;
+    return node;
+  }
+  function icon(name) { const node = document.createElement('i'); node.className = `ph ${name}`; node.setAttribute('aria-hidden', 'true'); return node; }
+  function smallButton(text, handler, className = '') {
+    const button = el('button', className, text); button.type = 'button';
+    button.addEventListener('click', (event) => { event.stopPropagation(); void handler(); });
+    return button;
+  }
+
+  function renderReturnCard(tab, card) {
+    const root = nodes.returnCard;
+    root.replaceChildren();
+    root.hidden = !card.show;
+    if (!card.show) return;
+    root.dataset.kind = card.kind;
+    const head = el('div', 'return-card-head');
+    const title = document.createElement('h3');
+    title.append(icon(card.kind === 'restored' ? 'ph-clock-counter-clockwise' : card.kind === 'cancelled' ? 'ph-x-circle' : card.kind === 'approved' ? 'ph-check-circle' : card.kind === 'manual' ? 'ph-pencil-simple-line' : 'ph-arrow-u-down-left'), document.createTextNode(card.title));
+    head.appendChild(title);
+    root.appendChild(head);
+    if (card.subtitle) root.appendChild(el('p', 'return-card-sub', card.subtitle));
+    const version = card.version;
+    if (card.counts) {
+      const badges = el('div', 'return-badges');
+      badges.appendChild(el('span', 'return-badge applied', `采纳 ${card.counts.applied}`));
+      badges.appendChild(el('span', 'return-badge wontfix', `未采纳 ${card.counts.wontfix}`));
+      if (card.counts.cancelled) badges.appendChild(el('span', 'return-badge wontfix', `作废 ${card.counts.cancelled}`));
+      if (card.counts.open) badges.appendChild(el('span', 'return-badge wontfix', `未处理 ${card.counts.open}`));
+      if (card.canCompare && version) {
+        const changes = el('span', 'return-badge changes', '改动处数…');
+        badges.appendChild(changes);
+        // 改动处数来自对比计算(UI 方案 3.8 第 5 条),算完再填;不显示「AI 用时」
+        void Compare.changeCount(tab.review.docId, version.versionId).then((count) => {
+          if (!changes.isConnected) return;
+          if (count === null) changes.remove(); else changes.textContent = count ? `改了 ${count} 处` : '正文没有改动';
+        });
+      }
+      root.appendChild(badges);
+    }
+    if (card.summary) {
+      const summary = el('p', 'return-summary', card.summary);
+      const long = card.summary.split('\n').length > 6 || card.summary.length > 260;
+      if (long && !tab.summaryExpanded) {
+        summary.classList.add('clamped');
+        root.appendChild(summary);
+        root.appendChild(smallButton('展开全文', () => { tab.summaryExpanded = true; renderNotes(tab); }, 'return-more'));
+      } else root.appendChild(summary);
+    }
+    if (card.degraded) {
+      const warn = el('div', 'return-degraded');
+      warn.append(icon('ph-warning'), document.createTextNode(card.degradedText));
+      root.appendChild(warn);
+    }
+    const actions = el('div', 'return-actions');
+    if (card.canCompare && version) {
+      const button = smallButton('', () => openCompareFor(tab, { versionId: version.versionId, round: version.round, kind: version.kind }), 'primary-button');
+      button.append(icon('ph-git-diff'), document.createTextNode(card.kind === 'restored' ? '对比恢复前后' : '显示改动'));
+      button.title = '打开独立的只读对比视图(⇧⌘D)';
+      actions.appendChild(button);
+    }
+    if (card.canRetryPublish && version) actions.appendChild(smallButton('重试发布', () => retryPublish(tab, version.versionId), 'secondary-button'));
+    if (card.kind === 'restored' && card.restoreBackVersionId) {
+      actions.appendChild(smallButton('恢复到恢复前的稿子', () => restoreToRound(tab, { versionId: card.restoreBackVersionId, round: version ? version.round : null }, { back: true }), 'secondary-button'));
+    }
+    if (actions.childElementCount) root.appendChild(actions);
+    if (card.kind === 'agent' || card.kind === 'manual') root.appendChild(el('p', 'return-hint', '处理说明是改稿者的自述,正文差异才是复核依据。再划词批注就开始下一轮;没问题就「通过 · 定稿」。'));
+    else if (card.kind === 'approved' || card.kind === 'restored') root.appendChild(el('p', 'return-hint', '再划词批注会开始新一轮;没问题就「通过 · 定稿」。'));
+    if (card.items.length) {
+      const heading = el('div', 'result-heading');
+      heading.append(el('span', '', '逐条结果'), el('span', '', String(card.items.length)));
+      root.appendChild(heading);
+      const list = el('div', 'result-list');
+      const roundLike = version ? { versionId: version.versionId, round: version.round, kind: version.kind, canCompare: card.canCompare } : null;
+      card.items.forEach((item) => list.appendChild(resultItem(tab, item, roundLike, card.kind === 'manual' ? '我' : 'AI')));
+      root.appendChild(list);
+    }
+  }
+
+  function resultItem(tab, item, round, actorLabel = 'AI') {
+    const node = el('div', `result-item ${item.status}`);
+    node.dataset.noteId = item.id;
+    const mark = el('span', 'result-mark', item.status === 'applied' ? '✓' : item.status === 'wontfix' ? '✕' : item.status === 'cancelled' ? '–' : '…');
+    mark.title = item.status === 'applied' ? '已采纳' : item.status === 'wontfix' ? '未采纳' : item.status === 'cancelled' ? '已作废' : '未处理';
+    node.appendChild(mark);
+    const quote = el('p', 'result-quote');
+    if (item.scope === 'document') { quote.classList.add('doc-scope'); quote.textContent = '全篇 · 总体意见'; }
+    else quote.textContent = `“${item.quote.slice(0, 120)}”`;
+    node.appendChild(quote);
+    const you = el('p', 'result-you'); you.append(el('b', '', '你'), document.createTextNode(item.you)); node.appendChild(you);
+    const ai = el('p', 'result-ai'); ai.append(el('b', '', actorLabel), document.createTextNode(item.ai)); node.appendChild(ai);
+    node.addEventListener('click', () => { void focusResultItem(tab, item, round); });
+    return node;
+  }
+
+  // 点逐条结果:原文还在就定位到正文;被删或改写了就打开对比视图定位到原稿(UI 方案 3.8 第 3 条),不把旧圆钉硬挂到完成稿
+  async function focusResultItem(tab, item, round) {
+    const note = tab.annotations.find((candidate) => candidate.id === item.id);
+    if (note && tab.mode === 'read' && !Compare.isOpen()) {
+      if (isDocNote(note)) { focusNote(note.id, { scrollOnly: true }); return; }
+      const leaves = mappedLeafBlocks();
+      const resolved = Anchor.resolveAnchor(note, blockDescriptors(leaves));
+      if (resolved.matched) { focusNote(note.id, { scrollOnly: true }); return; }
+    }
+    if (round && round.canCompare && item.quote) {
+      if (!(await openCompareFor(tab, round))) return;
+      if (!Compare.locateText(item.quote)) toast('这条引用的文字在对比里没找到,可能已被改写。');
+      return;
+    }
+    if (note) focusNote(note.id, { scrollOnly: true });
+    else toast('这条批注引用的文字已不在当前稿里。');
+  }
+
+  function roundGroup(tab, round) {
+    const details = document.createElement('details');
+    details.className = 'round-group'; details.dataset.kind = round.kind;
+    if (round.degraded) details.dataset.degraded = '1';
+    details.open = tab.openRounds.has(round.key);
+    details.addEventListener('toggle', () => { if (details.open) tab.openRounds.add(round.key); else tab.openRounds.delete(round.key); });
+    const summary = document.createElement('summary');
+    const main = el('div');
+    main.appendChild(el('strong', '', Number.isInteger(round.round) ? `第 ${round.round} 轮` : '未知轮次'));
+    const counts = round.counts.total ? ` · 采纳 ${round.counts.applied} · 未采纳 ${round.counts.wontfix}${round.counts.cancelled ? ` · 作废 ${round.counts.cancelled}` : ''}` : '';
+    main.appendChild(el('span', 'round-sub', `${round.label}${counts}`));
+    summary.append(icon(round.icon), main, el('span', 'round-time', History.when(round.time)));
+    details.appendChild(summary);
+    const body = el('div', 'round-body');
+    if (round.summary) body.appendChild(el('p', 'round-summary', round.summary));
+    if (round.degraded && !round.active) body.appendChild(el('p', 'round-degraded', round.degradedText));
+    const actions = el('div', 'round-actions');
+    if (round.canCompare) actions.appendChild(smallButton(round.kind === 'restored' ? '对比恢复前后' : '显示改动', () => openCompareFor(tab, round)));
+    if (round.canRestore) {
+      const blocked = ACTIVE_REVIEW.has(tab.review.status) ? '这篇还有进行中的一轮,先走完或作废再恢复' : tab.mode !== 'read' || tab.dirty ? '先退出编辑再恢复' : '';
+      const label = round.kind === 'restored' ? '恢复到恢复前的稿子' : '恢复到这轮改稿前';
+      const button = smallButton(label, () => restoreToRound(tab, round, { back: round.kind === 'restored' }), 'danger-ish');
+      if (blocked) { button.disabled = true; button.title = blocked; }
+      actions.appendChild(button);
+    }
+    if (actions.childElementCount) body.appendChild(actions);
+    if (round.items.length) {
+      const list = el('div', 'result-list');
+      round.items.forEach((item) => list.appendChild(resultItem(tab, item, round, round.kind === 'manual' || (round.kind === 'review' && round.label === '我自己改') ? '我' : 'AI')));
+      body.appendChild(list);
+    } else if (round.active) body.appendChild(el('p', 'round-empty', '进行中:本轮批注在上面的列表里。'));
+    else if (round.kind === 'approved') body.appendChild(el('p', 'round-empty', '这轮没有批注,直接通过。'));
+    else if (round.kind === 'restored') body.appendChild(el('p', 'round-empty', `正文换回了第 ${round.restoredFrom && round.restoredFrom.round ? round.restoredFrom.round : '?'} 轮改稿前;这一轮的「原稿」就是恢复前的稿子。`));
+    else body.appendChild(el('p', 'round-empty', '这轮没有批注记录。'));
+    details.appendChild(body);
+    return details;
+  }
+
+  function legacyGroup(tab, legacy) {
+    const details = document.createElement('details');
+    details.className = 'round-group legacy-group'; details.dataset.kind = 'legacy';
+    details.open = tab.openRounds.has('legacy');
+    details.addEventListener('toggle', () => { if (details.open) tab.openRounds.add('legacy'); else tab.openRounds.delete('legacy'); });
+    const summary = document.createElement('summary');
+    const main = el('div');
+    main.appendChild(el('strong', '', '更早(未分轮)'));
+    main.appendChild(el('span', 'round-sub', `${legacy.count} 条旧批注,没有轮次归属`));
+    summary.append(icon('ph-archive'), main, el('span', 'round-time', ''));
+    details.appendChild(summary);
+    const body = el('div', 'round-body');
+    const list = el('div', 'result-list');
+    legacy.items.forEach((item) => list.appendChild(resultItem(tab, item, null)));
+    body.appendChild(list);
+    details.appendChild(body);
+    return details;
+  }
+
+  async function openCompareFor(tab, round, options = {}) {
+    if (!tab || !round || !round.versionId || !tab.review.docId) return false;
+    if (tab.mode !== 'read') { toast('先回到阅读模式再看改动。'); return false; }
+    await Compare.open({
+      tab, docId: tab.review.docId, versionId: round.versionId, round: round.round, kind: round.kind === 'restored' ? 'restored' : 'review',
+      currentHash: tab.sourceHash, startIndex: options.startIndex,
+    });
+    return true;
+  }
+
+  function toggleCompare() {
+    if (Compare.isOpen()) { Compare.close(); return; }
+    const tab = activeTab();
+    if (!tab) return;
+    if (isPlain(tab)) { toast('普通文档没有轮次,没有可对比的改动。'); return; }
+    const versions = tab.versions || [];
+    const card = History.returnCard({ review: tab.review, versions, annotations: tab.annotations });
+    let target = card.show && card.canCompare && card.version ? { versionId: card.version.versionId, round: card.version.round, kind: card.version.kind } : null;
+    if (!target) target = History.buildRounds({ review: tab.review, versions, annotations: tab.annotations }).rounds.find((round) => round.canCompare) || null;
+    if (!target) { toast('还没有可对比的轮次:稿子回来后才有原稿与完成稿。'); return; }
+    void openCompareFor(tab, target);
+  }
+
+  function maybeAutoCompare(tab, card) {
+    if (!tab.autoCompare || !tab.versions || activeTab() !== tab || tab.mode !== 'read') return;
+    if (tab.autoCompare !== completionKey(tab.review)) { tab.autoCompare = null; return; }
+    if (!card.show || !card.canCompare || !card.version) return;
+    tab.autoCompare = null;
+    if (!Compare.isOpen()) void openCompareFor(tab, { versionId: card.version.versionId, round: card.version.round, kind: card.version.kind });
+  }
+
+  async function restoreToRound(tab, round, options = {}) {
+    if (!tab || !tab.review.docId || !round || !round.versionId) return;
+    if (ACTIVE_REVIEW.has(tab.review.status)) { toast('这篇还有进行中的一轮,先走完或作废再恢复。', 'error'); return; }
+    if (tab.mode !== 'read' || tab.dirty) { toast('先退出编辑再恢复。', 'error'); return; }
+    const roundNo = Number.isInteger(round.round) ? round.round : '?';
+    const title = options.back ? '恢复到恢复前的稿子？' : `恢复到第 ${roundNo} 轮改稿前？`;
+    const message = options.back
+      ? `正文会换回第 ${roundNo} 轮恢复之前的样子。现在这一版同样留在历史里,可以再恢复回来;附件不随恢复变化。`
+      : History.restoreConfirmText(round.round);
+    if (!(await confirmAction(title, message, '恢复'))) return;
+    try {
+      const result = await requestJson('/api/app/document/restore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docId: tab.review.docId, toVersionId: round.versionId, expectedCurrentHash: tab.sourceHash, expectedLatestReviewId: tab.review.id, clientRequestId: requestId('restore') }),
+      });
+      Compare.close();
+      await openReviewId(result.reviewId);
+      toast(options.back ? '已恢复到恢复前的稿子。' : `已恢复到第 ${(result.restoredFrom && result.restoredFrom.round) || roundNo} 轮改稿前;恢复前的稿子留在历史里。`);
+      void refreshRecents();
+    } catch (error) {
+      toast(friendlyError(error, '恢复'), 'error');
+      void refreshTab(tab, { silent: true });
+    }
+  }
+
+  async function retryPublish(tab, versionId) {
+    try {
+      await requestJson('/api/app/document/archive-retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docId: tab.review.docId, versionId }) });
+      Compare.invalidate(tab.review.docId, versionId);
+      toast('这一轮的记录已重新发布。');
+      await ensureVersions(tab, { force: true });
+    } catch (error) { toast(friendlyError(error, '重试发布'), 'error'); }
+  }
+
+  // ---------- 轮次时间线(状态区点开) ----------
+
+  function renderTimeline(tab) {
+    const root = nodes.timelinePopover;
+    root.replaceChildren();
+    root.appendChild(el('div', 'timeline-title', '轮次时间线'));
+    if (!tab || isPlain(tab)) { root.appendChild(el('div', 'timeline-empty', '普通文档没有轮次。划词写下第一条批注就开始第 1 轮。')); return; }
+    const entries = History.timeline({ review: tab.review, versions: tab.versions || [] });
+    if (!entries.length) { root.appendChild(el('div', 'timeline-empty', '还没有轮次记录。')); return; }
+    entries.forEach((entry) => {
+      const item = el('div', `timeline-item${entry.current ? ' current' : ''}${entry.degraded ? ' degraded' : ''}`);
+      item.appendChild(icon(entry.icon));
+      item.appendChild(el('strong', '', Number.isInteger(entry.round) ? `第 ${entry.round} 轮` : '未知轮次'));
+      item.appendChild(el('span', 'timeline-time', History.when(entry.time)));
+      const counts = entry.counts && entry.counts.total ? ` · 采纳 ${entry.counts.applied} · 未采纳 ${entry.counts.wontfix}` : '';
+      item.appendChild(el('span', 'timeline-sub', `${entry.label}${counts}${entry.degraded ? ' · 发布失败' : ''}`));
+      if (entry.versionId) {
+        item.addEventListener('click', () => {
+          tab.historyOpen = true; tab.openRounds.add(entry.versionId);
+          toggleTimeline(false); toggleRight(false); renderNotes(tab);
+          const group = nodes.historyNotesList.querySelector(`.round-group[data-kind]`);
+          const target = Array.from(nodes.historyNotesList.querySelectorAll('.round-group')).find((node) => node.open) || group;
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      }
+      root.appendChild(item);
+    });
+  }
+
+  function toggleTimeline(force) {
+    const open = typeof force === 'boolean' ? force : nodes.timelinePopover.hidden;
+    if (open === !nodes.timelinePopover.hidden) return;
+    nodes.timelinePopover.hidden = !open;
+    nodes.reviewState.setAttribute('aria-expanded', String(open));
+    if (open) { const tab = activeTab(); renderTimeline(tab); if (tab) void ensureVersions(tab); }
   }
 
   function noteCard(tab, note, historical) {
@@ -2560,6 +2926,8 @@
     nodes.primaryAction.addEventListener('click', handlePrimaryAction);
     nodes.secondaryAction.addEventListener('click', handleSecondaryAction);
     nodes.findButton.addEventListener('click', () => openFind());
+    nodes.reviewState.addEventListener('click', (event) => { event.stopPropagation(); toggleTimeline(); });
+    document.addEventListener('click', (event) => { if (!nodes.timelinePopover.hidden && !event.target.closest('#timelinePopover, #reviewStatePill')) toggleTimeline(false); });
     nodes.finishManual.addEventListener('click', finishManualApply);
     nodes.saveButton.addEventListener('click', () => saveSource());
     nodes.annotationSave.addEventListener('click', saveAnnotation);
@@ -2633,9 +3001,13 @@
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); handleDesktopCommand('find'); }
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && nodes.annotationDialog.hidden && nodes.confirmDialog.hidden && !nodes.primaryAction.hidden) { event.preventDefault(); handlePrimaryAction(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g') { event.preventDefault(); handleDesktopCommand(event.shiftKey ? 'find-prev' : 'find-next'); }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'd' && nodes.annotationDialog.hidden && nodes.confirmDialog.hidden) { event.preventDefault(); handleDesktopCommand('compare-toggle'); }
+      if ((event.metaKey || event.ctrlKey) && event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && Compare.isOpen()) { event.preventDefault(); Compare.step(event.key === 'ArrowLeft' ? -1 : 1); }
       if (event.key === 'Escape') {
         if (event.isComposing || event.keyCode === 229) return; // 输入法在取消候选词,不是要关东西
         if (!nodes.annotationDialog.hidden) dismissAnnotationDialog();
+        else if (!nodes.timelinePopover.hidden) toggleTimeline(false);
+        else if (Compare.isOpen()) Compare.close();
         else if (!nodes.findBar.hidden) closeFind();
         else if (activeTab() && activeTab().mode === 'edit') { /* 交给编辑器:这里清空选区会让光标消失 */ }
         else { nodes.annotate.hidden = true; window.getSelection()?.removeAllRanges(); }

@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=8">
-  <link rel="stylesheet" href="/static/desktop.css?v=17">
+  <link rel="stylesheet" href="/static/desktop.css?v=18">
 </head>
 <body>
   <div id="appShell" class="app-shell">
@@ -76,10 +76,13 @@
           </button>
         </div>
         <span class="toolbar-spacer"></span>
-        <div id="reviewStatePill" class="review-state" data-status="reviewing"
-          role="status" aria-live="polite" aria-atomic="true">
-          <i id="reviewStateIcon" class="ph ph-lock-key" aria-hidden="true"></i>
-          <span id="reviewStateText">批注中 · 0 条</span>
+        <div class="review-state-wrap">
+          <button id="reviewStatePill" class="review-state" data-status="reviewing" type="button"
+            role="status" aria-live="polite" aria-atomic="true" aria-haspopup="dialog" aria-expanded="false" title="点开看轮次时间线">
+            <i id="reviewStateIcon" class="ph ph-lock-key" aria-hidden="true"></i>
+            <span id="reviewStateText">批注中 · 0 条</span>
+          </button>
+          <div id="timelinePopover" class="popover-menu timeline-popover" role="dialog" aria-label="轮次时间线" hidden></div>
         </div>
         <span class="toolbar-spacer"></span>
         <div id="findBar" class="find-bar" role="search" hidden>
@@ -126,6 +129,27 @@
           <article id="documentContent" class="markdown-body"></article>
         </div>
         <div id="annotationOverlay" class="annotation-overlay" role="group" aria-label="正文批注标记"></div>
+        <!-- 独立只读对比视图:盖在正文上,关掉回到纯完成稿;不往批注用的正文里插删除线 -->
+        <section id="compareView" class="compare-view" aria-label="对比视图" hidden>
+          <header class="compare-bar">
+            <div class="compare-title">
+              <i class="ph ph-git-diff" aria-hidden="true"></i>
+              <strong id="compareTitle">改动</strong>
+              <span id="compareMeta" class="compare-meta"></span>
+            </div>
+            <div class="compare-nav">
+              <span id="comparePosition" class="compare-position"></span>
+              <button id="comparePrev" class="icon-button compact" type="button" title="上一处改动(⌥⌘←)" aria-label="上一处改动"><i class="ph ph-caret-up" aria-hidden="true"></i></button>
+              <button id="compareNext" class="icon-button compact" type="button" title="下一处改动(⌥⌘→)" aria-label="下一处改动"><i class="ph ph-caret-down" aria-hidden="true"></i></button>
+              <button id="compareClose" class="secondary-button compact-button" type="button" title="关闭对比视图,回到完成稿(⇧⌘D 或 Esc)"><i class="ph ph-x" aria-hidden="true"></i>关闭</button>
+            </div>
+          </header>
+          <p id="compareNote" class="compare-note" hidden></p>
+          <div id="compareScroll" class="compare-scroll">
+            <div class="compare-legend"><span class="legend-insert">新增</span><span class="legend-delete">删除</span><span class="legend-replace">替换</span><span class="legend-hint">只读 · 要继续批注请关闭视图</span></div>
+            <article id="compareContent" class="markdown-body compare-body"></article>
+          </div>
+        </section>
       </main>
 
       <section id="editorPane" class="editor-pane" hidden aria-label="Markdown 编辑器">
@@ -159,6 +183,7 @@
         </button>
       </div>
       <div id="notesContent" class="notes-content">
+        <section id="returnCard" class="return-card" aria-label="回稿卡" hidden></section>
         <button id="docNoteButton" class="doc-note-button" type="button" hidden>
           <i class="ph ph-note-pencil" aria-hidden="true"></i>写总体意见
           <span class="hint">针对全篇 · 不锚定文字</span>
@@ -172,7 +197,7 @@
         </section>
         <details id="historySection" class="history-section">
           <summary>
-            <span>历史批注</span>
+            <span>历史</span>
             <span id="historyNotesCount">0</span>
           </summary>
           <div id="historyNotesList" class="notes-list history-list"></div>
@@ -230,10 +255,14 @@
   <script src="/static/vendor/highlight.min.js"></script>
   <script src="/static/vendor/mermaid.min.js"></script>
   <script src="/static/vendor/dompurify.min.js"></script>
+  <script src="/static/vendor/diff-match-patch.js"></script>
   <script src="/static/vendor/draftback-editor.js?v=8"></script>
   <script src="/static/markdown-patch.js?v=2"></script>
   <script src="/static/desktop-anchor.js?v=5"></script>
   <script src="/static/desktop-handoff.js?v=1"></script>
-  <script src="/static/desktop.js?v=28"></script>
+  <script src="/static/desktop-diff.js?v=1"></script>
+  <script src="/static/desktop-history.js?v=1"></script>
+  <script src="/static/desktop-compare.js?v=1"></script>
+  <script src="/static/desktop.js?v=29"></script>
 </body>
 </html>

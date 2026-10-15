@@ -548,10 +548,25 @@ function installMenu() {
         { role: 'reload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
+        { label: '对比视图', accelerator: 'CmdOrCtrl+Shift+D', click: () => { sendRendererCommand('compare-toggle'); } },
+        { type: 'separator' },
         { label: '放大正文', accelerator: 'CmdOrCtrl+=', click: () => { sendRendererCommand('zoom-in'); } },
         { label: '缩小正文', accelerator: 'CmdOrCtrl+-', click: () => { sendRendererCommand('zoom-out'); } },
         { label: '重置正文缩放', accelerator: 'CmdOrCtrl+0', click: () => { sendRendererCommand('zoom-reset'); } },
         { type: 'separator' }, { role: 'togglefullscreen' },
+      ],
+    }, {
+      // 回稿独有的「稿件」菜单(UI 方案 v2 第 1.3 节):先放版本记录第三段的几项,其余随第二批补
+      label: '稿件',
+      submenu: [
+        { label: '显示回稿卡', click: () => { sendRendererCommand('show-return-card'); } },
+        { label: '打开 / 关闭对比视图', accelerator: 'CmdOrCtrl+Shift+D', click: () => { sendRendererCommand('compare-toggle'); } },
+        { label: '上一处改动', accelerator: 'Alt+CmdOrCtrl+Left', click: () => { sendRendererCommand('compare-prev'); } },
+        { label: '下一处改动', accelerator: 'Alt+CmdOrCtrl+Right', click: () => { sendRendererCommand('compare-next'); } },
+        { type: 'separator' },
+        { label: '恢复到某一轮改稿前…', click: () => { sendRendererCommand('restore-round'); } },
+        { type: 'separator' },
+        { label: '轮次时间线', click: () => { sendRendererCommand('timeline'); } },
       ],
     }, {
       label: '窗口',

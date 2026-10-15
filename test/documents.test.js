@@ -301,3 +301,19 @@ test('非 UTF-8(GBK / UTF-16)文档按原样显示但只读:读得出中文,写�
   assert.equal(opened8.source.encoding, 'utf-8');
   assert.equal(opened8.source.readOnly, false);
 });
+
+test('普通打开带 latestReview:上一轮已结束的文档也能进那一轮(回稿卡与历史在会话里)', async (t) => {
+  const f = setup(t);
+  const doc = path.join(f.docDir, '回来了.md');
+  fs.writeFileSync(doc, '# 回来了\n');
+  const { review } = await store.openReview(doc, f.options);
+  await store.submitReview(review.id, f.options); // 零批注 → approved
+  const opened = await documents.readDocument(doc, f.options);
+  assert.equal(opened.activeReview, null, '没有活动会话');
+  assert.equal(opened.latestReview.id, review.id);
+  assert.equal(opened.latestReview.status, 'complete');
+  assert.equal(opened.latestReview.outcome, 'approved');
+  const plainDoc = path.join(f.docDir, '从没审阅.md');
+  fs.writeFileSync(plainDoc, '# 普通\n');
+  assert.equal((await documents.readDocument(plainDoc, f.options)).latestReview, null, '从没审阅过的文档才是普通文档');
+});

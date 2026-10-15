@@ -123,7 +123,9 @@ Agent 的节奏固定为：`open` → 挂 `wait` → 改稿 → `complete` → �
 | `meta.json` | 轮次、事件类型(review / approved / cancelled / manual / restored)、两份文件的指纹与状态、交出时固定的本轮成员、处理结果快照、改稿摘要、附件清单 |
 
 规矩:冻结即留底,留不下就不建会话;交出时核对留底并固定本轮成员(交出后新加的批注进下一轮,不阻塞完成);终态先「固化载荷」(写不下就不推进终态,智能体重试 `complete` 即可)再「发布」(失败可用 `mdreview archive-retry` 补);complete / cancelled 之后的普通编辑是工作稿,不改历史;同步推到手机的完成稿从归档读。每篇保留最近 10 个事件。
-命令:`mdreview versions <路径>` 列历史;`mdreview restore-round <路径> --to <轮次> --yes` 恢复到第 N 轮改稿前(产生新的一轮,当前稿留在历史里;两阶段提交,中断后启动时按正文指纹补齐或撤销);`mdreview relink <旧路径> <新路径>` 文件改名 / 移动后保留身份与历史;`mdreview import-resume` 收敛中途断掉的批次导入。接口 `GET /api/app/document/versions?docId=`、`GET /api/app/version?docId=&versionId=&which=original|final`、`POST /api/app/document/restore`。对比视图与回稿卡是第三段的工作。
+命令:`mdreview versions <路径>` 列历史;`mdreview restore-round <路径> --to <轮次> --yes` 恢复到第 N 轮改稿前(产生新的一轮,当前稿留在历史里;两阶段提交,中断后启动时按正文指纹补齐或撤销);`mdreview relink <旧路径> <新路径>` 文件改名 / 移动后保留身份与历史;`mdreview import-resume` 收敛中途断掉的批次导入。接口 `GET /api/app/document/versions?docId=`、`GET /api/app/version?docId=&versionId=&which=original|final`、`POST /api/app/document/restore`。
+
+界面(第三段,beta.7 起):稿子回来 / 通过 / 恢复 / 作废时右栏顶部是**回稿卡**——标题、时间、执行者、「采纳 a」「未采纳 b」「改了 n 处」、摘要、逐条「你 / AI」,数据来自版本事件的处理记录(`GET /api/app/document/versions?docId=&detail=1`),不读会继续变的旁注;事件缺失或发布失败时降级读会话与旁注并标「这轮的处理记录没有归档」。「显示改动」(⇧⌘D)打开**独立只读对比视图**:未改块正常渲染,新增浅绿底,删除原位灰色删除线,替换块字级标注;「上一处 / 下一处」(⌥⌘← / →);Esc 关闭回到完成稿。右栏「历史」按轮折叠,每轮可「显示改动」或「恢复到这轮改稿前」(没有活动会话、没在编辑才可);恢复后的卡上有「恢复到恢复前的稿子」。状态区点开是轮次时间线。对比算法在 static/desktop-diff.js(以源文为准覆盖全部源文、块级 LCS + 锚点分段、字级 diff-match-patch),回稿卡与历史数据在 static/desktop-history.js,两者都是纯函数,Node 里可测。
 
 手机批次(跨端规则 v2.3 第 6 节):协议 `version: 2`,外层与每条批注都带 `{ docId, reviewId, baseVersion }`;接收顺序是 已有回执 → 缺身份(`missing-identity`)→ 按 docId 定位 → 最新轮次(`round-advanced`,正文相同也拒)→ 状态(`session-advanced`)→ 实际文件指纹(`version-mismatch`)→ 同一事务写旁注、固定成员、交出、定稿回执(导入记录在 `imports/`,崩溃后重放补齐)。没有身份的旧批次(手机独立文件导出、拖进窗口)只能转为当前轮的新批注:`mdreview import-batch <文件> --as-new-notes --document <路径>`。
 
