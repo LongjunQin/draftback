@@ -82,7 +82,7 @@ function syncHelperExecutable() {
 }
 
 function startSyncHelper() {
-  if (syncHelper || process.env.DRAFTBACK_SYNC_DISABLED === '1') return;
+  if (syncHelper || process.env.DRAFTBACK_SYNC_DISABLED === '1' || readSettings().syncEnabled === false) return;
   const executable = syncHelperExecutable();
   if (!executable) return;
   try {
@@ -324,6 +324,54 @@ function createWindow() {
   return mainWindow;
 }
 
+// ---------- 命令行工具 mdreview(设置 › 命令行工具):给 AI 用的命令,装到 /usr/local/bin ----------
+const CLI_PATH = '/usr/local/bin/mdreview';
+function cliScriptPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'draftback-server', 'mdreview.js')
+    : path.join(__dirname, '..', 'mdreview.js');
+}
+function cliLauncher() {
+  // 用 App 自带的运行时跑 mdreview.js(ELECTRON_RUN_AS_NODE),用户电脑上不必另装 Node
+  return [
+    '#!/bin/bash',
+    '# 回稿(Draftback)审阅命令:由回稿「设置 › 命令行工具」安装,指向 App 自带的 mdreview.js',
+    `ELECTRON_RUN_AS_NODE=1 exec ${JSON.stringify(process.execPath)} ${JSON.stringify(cliScriptPath())} "$@"`,
+    '',
+  ].join('\n');
+}
+function cliStatus() {
+  let text = '';
+  try { text = fs.readFileSync(CLI_PATH, 'utf8'); } catch { return { installed: false, path: CLI_PATH, pointsTo: null }; }
+  const target = cliScriptPath();
+  const pointsTo = text.includes(target) ? 'this-app' : /mdreview\.js/.test(text) ? 'elsewhere' : 'unknown';
+  const match = /"([^"]*mdreview\.js)"/.exec(text);
+  return { installed: true, path: CLI_PATH, pointsTo, target: match ? match[1] : null };
+}
+async function installCli() {
+  const script = cliLauncher();
+  const tmp = path.join(app.getPath('temp'), `draftback-mdreview-${process.pid}`);
+  fs.writeFileSync(tmp, script, { mode: 0o755 });
+  try {
+    fs.mkdirSync(path.dirname(CLI_PATH), { recursive: true });
+    fs.copyFileSync(tmp, CLI_PATH);
+    fs.chmodSync(CLI_PATH, 0o755);
+    return { ok: true, ...cliStatus() };
+  } catch (error) {
+    if (!error || (error.code !== 'EACCES' && error.code !== 'EPERM')) return { ok: false, message: String(error && error.message || error) };
+    // /usr/local/bin 要管理员权限:请系统弹出授权框
+    const command = `mkdir -p /usr/local/bin && cp ${JSON.stringify(tmp)} ${CLI_PATH} && chmod 755 ${CLI_PATH}`;
+    const result = await new Promise((resolve) => {
+      const child = spawn('/usr/bin/osascript', ['-e', `do shell script ${JSON.stringify(command)} with administrator privileges`], { stdio: 'ignore' });
+      child.on('exit', (code) => resolve(code === 0));
+      child.on('error', () => resolve(false));
+    });
+    return result ? { ok: true, ...cliStatus() } : { ok: false, message: '没有拿到管理员授权,命令没有装上。' };
+  } finally {
+    try { fs.unlinkSync(tmp); } catch {}
+  }
+}
+
 function installIpc() {
   ipcMain.handle('draftback:pick-markdown', async (event) => {
     if (!isTrustedRenderer(event)) throw new Error('拒绝非${DISPLAY_NAME}页面调用文件选择器。');
@@ -434,6 +482,75 @@ function installIpc() {
     shell.showItemInFolder(outputPath);
     return { ok: true, filePath: outputPath };
   });
+  // 页面报来的状态:菜单逐项启用 / 勾选(动作表里的 when / checked)
+  ipcMain.on('draftback:menu-state', (event, state) => {
+    if (!isTrustedRenderer(event) || !state || typeof state !== 'object') return;
+    menuState = state;
+    refreshMenuState();
+  });
+  // 打开过的文档进系统「打开最近」(文件 › 打开最近,Dock 右键也有)
+  const notedRecent = new Set();
+  ipcMain.on('draftback:note-recent', (event, filePath) => {
+    if (!isTrustedRenderer(event) || typeof filePath !== 'string' || !path.isAbsolute(filePath) || !/\.md$/i.test(filePath)) return;
+    if (notedRecent.has(filePath)) return;
+    notedRecent.add(filePath);
+    try { app.addRecentDocument(filePath); } catch {}
+  });
+  ipcMain.handle('draftback:get-settings', async (event) => {
+    if (!isTrustedRenderer(event)) throw new Error('拒绝非回稿页面读取设置。');
+    const settings = readSettings();
+    return {
+      appearance: APPEARANCES.includes(settings.appearance) ? settings.appearance : 'system',
+      syncEnabled: settings.syncEnabled !== false,
+      syncHelperAvailable: Boolean(syncHelperExecutable()),
+      syncHelperRunning: Boolean(syncHelper && syncHelper.exitCode === null),
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      cli: cliStatus(),
+    };
+  });
+  ipcMain.handle('draftback:set-appearance', async (event, value) => {
+    if (!isTrustedRenderer(event)) throw new Error('拒绝无效的设置请求。');
+    const appearance = applyAppearance(value);
+    writeSettings({ appearance });
+    refreshMenuState();
+    return appearance;
+  });
+  ipcMain.handle('draftback:set-sync-enabled', async (event, enabled) => {
+    if (!isTrustedRenderer(event)) throw new Error('拒绝无效的设置请求。');
+    writeSettings({ syncEnabled: Boolean(enabled) });
+    if (enabled) startSyncHelper(); else stopSyncHelper();
+    return { syncEnabled: Boolean(enabled), running: Boolean(syncHelper && syncHelper.exitCode === null) };
+  });
+  ipcMain.handle('draftback:install-cli', async (event) => {
+    if (!isTrustedRenderer(event)) throw new Error('拒绝无效的安装请求。');
+    return installCli();
+  });
+  // 另存为副本 / 另存我的版本:只负责选位置,文件由本地服务写(不覆盖正在审阅的文件)
+  ipcMain.handle('draftback:save-copy-dialog', async (event, payload) => {
+    if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的另存请求。');
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: payload && payload.title ? String(payload.title).slice(0, 60) : '另存为副本',
+      defaultPath: path.join(defaultDirectory(payload && payload.directory), `${safeFileStem(payload && payload.suggestedName, '副本')}.md`),
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
+    return { ok: true, filePath: /\.md$/i.test(result.filePath) ? result.filePath : `${result.filePath}.md` };
+  });
+  // 稿件 › 导入批注文件…:选一个批次文件,读出文字交给页面(和拖进窗口走同一条路)
+  ipcMain.handle('draftback:pick-batch-file', async (event) => {
+    if (!isTrustedRenderer(event) || !mainWindow || mainWindow.isDestroyed()) throw new Error('拒绝无效的导入请求。');
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '导入手机批注批次', buttonLabel: '导入', properties: ['openFile'],
+      filters: [{ name: '批注批次', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePaths.length) return { ok: false, cancelled: true };
+    const filePath = result.filePaths[0];
+    const stat = fs.statSync(filePath);
+    if (stat.size > 32 * 1024 * 1024) throw new Error('批次文件太大。');
+    return { ok: true, name: path.basename(filePath), text: fs.readFileSync(filePath, 'utf8') };
+  });
   ipcMain.handle('draftback:notify-review-complete', async (event, payload) => {
     if (!isTrustedRenderer(event) || !payload || typeof payload !== 'object') {
       throw new Error('拒绝无效的通知请求。');
@@ -441,9 +558,12 @@ function installIpc() {
     const reviewId = typeof payload.reviewId === 'string' ? payload.reviewId.slice(0, 200) : '';
     const title = typeof payload.title === 'string' ? payload.title.slice(0, 180) : '';
     if (!reviewId || !title || !ElectronNotification.isSupported()) return false;
+    const round = Number.isInteger(payload.round) ? payload.round : null;
+    const counts = payload.counts && typeof payload.counts === 'object' ? payload.counts : null;
+    const tail = counts && Number.isInteger(counts.applied) ? ` · 采纳 ${counts.applied} · 未采纳 ${Number(counts.wontfix) || 0}` : '';
     const notification = new ElectronNotification({
-      title: `${DISPLAY_NAME} · 修改已完成`,
-      body: `《${title}》已更新到最新版本。`,
+      title: `《${title}》${round ? `第 ${round} 轮` : ''}回稿`,
+      body: `稿子回来了${tail}。点开看改了什么。`,
       silent: false,
     });
     notification.on('click', () => {
@@ -457,133 +577,103 @@ function installIpc() {
   });
 }
 
+// ---------- 菜单栏:按动作表搭(static/desktop-actions.js,页面与菜单共用一张表) ----------
+function loadActions() {
+  const candidates = [
+    app.isPackaged ? path.join(process.resourcesPath, 'draftback-server', 'static', 'desktop-actions.js') : null,
+    path.join(__dirname, '..', 'static', 'desktop-actions.js'),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try { if (fs.existsSync(candidate)) return require(candidate); } catch (error) { console.error('[回稿] 动作表加载失败:', error && error.message); }
+  }
+  return null;
+}
+const Actions = loadActions();
+let menuState = {};
+let appMenu = null;
+
+// 主进程自己处理的命令;其余交给页面
+function runMenuCommand(command) {
+  if (command === 'open') {
+    if (sendRendererCommand('open')) return;
+    void pickMarkdownFiles().then((paths) => queueOpenFiles(paths));
+    return;
+  }
+  if (command === 'reconnect') { void connectAndLoad(); return; }
+  if (command.startsWith('appearance:')) {
+    const value = command.slice('appearance:'.length);
+    writeSettings({ appearance: applyAppearance(value) });
+    refreshMenuState();
+    return;
+  }
+  sendRendererCommand(command);
+}
+
+function menuTemplateFrom(items) {
+  const out = [];
+  for (const item of items) {
+    if (!item) continue;
+    if (item.type === 'separator') { if (out.length && out[out.length - 1].type !== 'separator') out.push({ type: 'separator' }); continue; }
+    if (item.devOnly && app.isPackaged) continue;
+    if (item.mac && process.platform !== 'darwin') continue;
+    const entry = { label: item.label };
+    if (item.id) entry.id = item.id;
+    if (item.role) entry.role = item.role;
+    if (item.accelerator && !(process.platform !== 'darwin' && /(^|\+)Ctrl\+/.test(item.accelerator) && /CmdOrCtrl/.test(item.accelerator))) entry.accelerator = item.accelerator;
+    if (item.submenu) entry.submenu = menuTemplateFrom(item.submenu);
+    if (item.radio) {
+      entry.type = 'radio';
+      entry.checked = item.command === `appearance:${readSettings().appearance || 'system'}`;
+    } else if (item.checked) {
+      entry.type = 'checkbox';
+      entry.checked = Actions.isChecked(item, menuState);
+    }
+    if (item.command && !item.role) {
+      const command = item.command;
+      entry.click = () => runMenuCommand(command);
+      entry.enabled = Actions.isEnabled(item, menuState);
+    }
+    out.push(entry);
+  }
+  while (out.length && out[out.length - 1].type === 'separator') out.pop();
+  return out;
+}
+
 function installMenu() {
-  const appearance = applyAppearance(readSettings().appearance);
-  const template = [];
-  if (process.platform === 'darwin') {
-    template.push({
-      label: DISPLAY_NAME,
-      submenu: [
-        { role: 'about', label: `关于${DISPLAY_NAME}` },
-        { type: 'separator' },
-        { role: 'services', label: '服务' },
-        { type: 'separator' },
-        { role: 'hide', label: `隐藏${DISPLAY_NAME}` },
-        { role: 'hideOthers', label: '隐藏其他' },
-        { role: 'unhide', label: '全部显示' },
-        { type: 'separator' },
-        { role: 'quit', label: `退出${DISPLAY_NAME}` },
-      ],
-    });
+  applyAppearance(readSettings().appearance);
+  if (!Actions) {
+    // 动作表缺失(开发环境路径不对等)时退回最小菜单,至少能打开文件与退出
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
+      { label: '文件', submenu: [{ label: '打开…', accelerator: 'CmdOrCtrl+O', click: () => runMenuCommand('open') }] },
+      { role: 'editMenu' }, { role: 'windowMenu' },
+    ]));
+    return;
   }
-  template.push({
-      label: '文件',
-      submenu: [
-        {
-          label: '新建 Markdown…',
-          accelerator: 'CmdOrCtrl+N',
-          click: () => { sendRendererCommand('new'); },
-        },
-        {
-          label: '打开 Markdown…',
-          accelerator: 'CmdOrCtrl+O',
-          click: async () => {
-            if (sendRendererCommand('open')) return;
-            const paths = await pickMarkdownFiles();
-            queueOpenFiles(paths);
-          },
-        },
-        {
-          label: '关闭当前标签页',
-          accelerator: 'CmdOrCtrl+W',
-          click: () => { sendRendererCommand('close-tab'); },
-        },
-        {
-          label: '保存',
-          accelerator: 'CmdOrCtrl+S',
-          click: () => { sendRendererCommand('save'); },
-        },
-        { type: 'separator' },
-        {
-          label: '导出为 PDF…',
-          accelerator: 'CmdOrCtrl+Shift+E',
-          click: () => { sendRendererCommand('export-pdf'); },
-        },
-        {
-          label: '导出为 HTML…',
-          click: () => { sendRendererCommand('export-html'); },
-        },
-        {
-          label: '导出为 Word…',
-          click: () => { sendRendererCommand('export-docx'); },
-        },
-        {
-          label: '打印…',
-          accelerator: 'CmdOrCtrl+P',
-          click: () => { sendRendererCommand('print'); },
-        },
-      ],
-    }, {
-      label: '编辑',
-      submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
-        { type: 'separator' },
-        { label: '查找…', accelerator: 'CmdOrCtrl+F', click: () => { sendRendererCommand('find'); } },
-        { label: '查找下一个', accelerator: 'CmdOrCtrl+G', click: () => { sendRendererCommand('find-next'); } },
-        { label: '查找上一个', accelerator: 'CmdOrCtrl+Shift+G', click: () => { sendRendererCommand('find-prev'); } },
-      ],
-    }, {
-      label: '显示',
-      submenu: [
-        {
-          label: '外观',
-          submenu: [
-            { label: '跟随系统', type: 'radio', checked: appearance === 'system', click: () => { writeSettings({ appearance: applyAppearance('system') }); } },
-            { label: '浅色', type: 'radio', checked: appearance === 'light', click: () => { writeSettings({ appearance: applyAppearance('light') }); } },
-            { label: '深色', type: 'radio', checked: appearance === 'dark', click: () => { writeSettings({ appearance: applyAppearance('dark') }); } },
-          ],
-        },
-        { type: 'separator' },
-        { role: 'reload' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { label: '对比视图', accelerator: 'CmdOrCtrl+Shift+D', click: () => { sendRendererCommand('compare-toggle'); } },
-        { type: 'separator' },
-        { label: '放大正文', accelerator: 'CmdOrCtrl+=', click: () => { sendRendererCommand('zoom-in'); } },
-        { label: '缩小正文', accelerator: 'CmdOrCtrl+-', click: () => { sendRendererCommand('zoom-out'); } },
-        { label: '重置正文缩放', accelerator: 'CmdOrCtrl+0', click: () => { sendRendererCommand('zoom-reset'); } },
-        { type: 'separator' }, { role: 'togglefullscreen' },
-      ],
-    }, {
-      // 回稿独有的「稿件」菜单(UI 方案 v2 第 1.3 节):先放版本记录第三段的几项,其余随第二批补
-      label: '稿件',
-      submenu: [
-        { label: '显示回稿卡', click: () => { sendRendererCommand('show-return-card'); } },
-        { label: '打开 / 关闭对比视图', accelerator: 'CmdOrCtrl+Shift+D', click: () => { sendRendererCommand('compare-toggle'); } },
-        { label: '上一处改动', accelerator: 'Alt+CmdOrCtrl+Left', click: () => { sendRendererCommand('compare-prev'); } },
-        { label: '下一处改动', accelerator: 'Alt+CmdOrCtrl+Right', click: () => { sendRendererCommand('compare-next'); } },
-        { type: 'separator' },
-        { label: '恢复到某一轮改稿前…', click: () => { sendRendererCommand('restore-round'); } },
-        { type: 'separator' },
-        { label: '轮次时间线', click: () => { sendRendererCommand('timeline'); } },
-      ],
-    }, {
-      label: '窗口',
-      submenu: [
-        {
-          label: '重新连接本地服务',
-          click: () => { void connectAndLoad(); },
-        },
-        { type: 'separator' },
-        { role: 'minimize' },
-        ...(process.platform === 'darwin' ? [{ role: 'zoom' }, { role: 'front' }] : [{ role: 'close' }]),
-      ],
+  const template = Actions.MENUS
+    .filter((menu) => !(menu.mac && process.platform !== 'darwin'))
+    .map((menu) => {
+      const entry = { label: menu.label, submenu: menuTemplateFrom(menu.items) };
+      if (menu.id === 'window') entry.role = 'window'; // 让 macOS 把打开的窗口列在这个菜单里
+      if (menu.id === 'help') entry.role = 'help';
+      return entry;
     });
-  if (process.platform === 'win32') {
-    template.push({ label: '帮助', submenu: [{ role: 'about' }] });
+  appMenu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(appMenu);
+}
+
+// 页面报来状态后,逐项改启用与勾选(菜单项是活的,不必重建)
+function refreshMenuState() {
+  if (!appMenu || !Actions) return;
+  const appearance = readSettings().appearance || 'system';
+  for (const item of Actions.flatten()) {
+    if (!item.id) continue;
+    const menuItem = appMenu.getMenuItemById(item.id);
+    if (!menuItem) continue;
+    if (item.radio) { menuItem.checked = item.command === `appearance:${appearance}`; continue; }
+    if (item.command && !item.role) menuItem.enabled = Actions.isEnabled(item, menuState);
+    if (item.checked) menuItem.checked = Actions.isChecked(item, menuState);
   }
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 app.on('open-file', (event, filePath) => {

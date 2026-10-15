@@ -11,8 +11,8 @@
   <link rel="stylesheet" href="/static/vendor/highlight-github.min.css">
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
-  <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=8">
-  <link rel="stylesheet" href="/static/desktop.css?v=18">
+  <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=9">
+  <link rel="stylesheet" href="/static/desktop.css?v=19">
 </head>
 <body>
   <div id="appShell" class="app-shell">
@@ -85,14 +85,6 @@
           <div id="timelinePopover" class="popover-menu timeline-popover" role="dialog" aria-label="轮次时间线" hidden></div>
         </div>
         <span class="toolbar-spacer"></span>
-        <div id="findBar" class="find-bar" role="search" hidden>
-          <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
-          <input id="findInput" type="search" placeholder="在正文中查找" aria-label="在正文中查找" autocomplete="off" spellcheck="false">
-          <span id="findCount" class="find-count">0 / 0</span>
-          <button id="findPrev" class="icon-button compact" type="button" title="上一个(⇧↩)" aria-label="上一个"><i class="ph ph-caret-up" aria-hidden="true"></i></button>
-          <button id="findNext" class="icon-button compact" type="button" title="下一个(↩)" aria-label="下一个"><i class="ph ph-caret-down" aria-hidden="true"></i></button>
-          <button id="findClose" class="icon-button compact" type="button" title="关闭(Esc)" aria-label="关闭查找"><i class="ph ph-x" aria-hidden="true"></i></button>
-        </div>
         <button id="findButton" class="icon-button compact" type="button" title="查找(⌘F)" aria-label="查找"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></button>
         <div id="dropOverlay" class="drop-overlay" hidden><div class="drop-card"><i class="ph ph-file-arrow-down" aria-hidden="true"></i>松开即打开 Markdown</div></div>
         <div class="export-menu-wrap">
@@ -109,6 +101,23 @@
         </div>
         <button id="secondaryAction" class="secondary-button action-button" type="button" hidden></button>
         <button id="primaryAction" class="primary-button action-button" type="button" hidden></button>
+      </div>
+      <!-- 查找条:从工具栏下方滑出;编辑模式多一行替换 -->
+      <div id="findBar" class="find-bar" role="search" hidden>
+        <div class="find-row">
+          <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+          <input id="findInput" type="search" placeholder="在正文中查找" aria-label="在正文中查找" autocomplete="off" spellcheck="false">
+          <span id="findCount" class="find-count">0 / 0</span>
+          <button id="findPrev" class="icon-button compact" type="button" title="上一个(⇧↩)" aria-label="上一个"><i class="ph ph-caret-up" aria-hidden="true"></i></button>
+          <button id="findNext" class="icon-button compact" type="button" title="下一个(↩)" aria-label="下一个"><i class="ph ph-caret-down" aria-hidden="true"></i></button>
+          <button id="findClose" class="icon-button compact" type="button" title="关闭(Esc)" aria-label="关闭查找"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </div>
+        <div id="replaceRow" class="find-row replace-row" hidden>
+          <i class="ph ph-arrows-clockwise" aria-hidden="true"></i>
+          <input id="replaceInput" type="text" placeholder="替换为" aria-label="替换为" autocomplete="off" spellcheck="false">
+          <button id="replaceOne" class="find-text-button" type="button" title="替换当前这一处(↩)">替换</button>
+          <button id="replaceAll" class="find-text-button" type="button" title="替换全部匹配(⌘Z 可撤销)">全部替换</button>
+        </div>
       </div>
       <main id="readerPane" class="reader-pane">
         <div id="welcome" class="welcome">
@@ -242,8 +251,81 @@
       <p id="confirmMessage"></p>
       <footer>
         <button id="confirmCancel" class="secondary-button" type="button">取消</button>
+        <button id="confirmAlt" class="secondary-button" type="button" hidden></button>
         <button id="confirmAccept" class="primary-button" type="button">确认</button>
       </footer>
+    </section>
+  </div>
+
+  <!-- 快速打开(⇧⌘O):只搜打开着的标签与最近文件 -->
+  <div id="quickOpen" class="modal-backdrop quick-open-backdrop" hidden>
+    <section class="quick-open" role="dialog" aria-modal="true" aria-label="快速打开">
+      <div class="quick-open-search">
+        <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+        <input id="quickOpenInput" type="search" placeholder="输入文件名…" aria-label="输入文件名" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="quickOpenList" class="quick-open-list" role="listbox" aria-label="匹配的文档"></div>
+      <footer class="quick-open-hint">↑↓ 选择 · ↩ 打开 · Esc 关闭</footer>
+    </section>
+  </div>
+
+  <!-- 设置(⌘,):一页五组 -->
+  <div id="settingsDialog" class="modal-backdrop" hidden>
+    <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <header class="settings-header">
+        <h2 id="settingsTitle">设置</h2>
+        <button id="settingsClose" class="icon-button dialog-close" type="button" aria-label="关闭设置"><i class="ph ph-x" aria-hidden="true"></i></button>
+      </header>
+      <div class="settings-body">
+        <section class="settings-group">
+          <h3>外观</h3>
+          <div id="appearanceSegment" class="segmented settings-segmented" role="radiogroup" aria-label="外观">
+            <button type="button" role="radio" data-appearance="system">跟随系统</button>
+            <button type="button" role="radio" data-appearance="light">浅色</button>
+            <button type="button" role="radio" data-appearance="dark">深色</button>
+          </div>
+        </section>
+        <section class="settings-group">
+          <h3>正文</h3>
+          <div class="settings-row">
+            <label for="zoomRange">字号</label>
+            <input id="zoomRange" type="range" min="60" max="220" step="5" value="100">
+            <span id="zoomValue" class="settings-value">100%</span>
+            <button id="zoomResetButton" class="secondary-button compact-button" type="button">恢复默认</button>
+          </div>
+        </section>
+        <section class="settings-group">
+          <h3>iCloud 同步</h3>
+          <label class="settings-switch"><input id="syncToggle" type="checkbox"> 把正在审阅的稿子同步到 iPhone</label>
+          <p id="syncStatusLine" class="settings-note"></p>
+          <button id="syncDetailsButton" class="secondary-button compact-button" type="button">查看轮次与同步…</button>
+        </section>
+        <section class="settings-group">
+          <h3>命令行工具</h3>
+          <p id="cliStatusLine" class="settings-note"></p>
+          <button id="cliInstallButton" class="secondary-button compact-button" type="button">安装 mdreview 到 /usr/local/bin</button>
+          <p class="settings-hint">AI(Claude Code、Codex 等)用 mdreview 命令接手你的批注。</p>
+        </section>
+        <section class="settings-group">
+          <h3>关于</h3>
+          <p id="aboutLine" class="settings-note"></p>
+          <div class="settings-row">
+            <button id="aboutGuideButton" class="secondary-button compact-button" type="button">回稿使用说明</button>
+            <button id="aboutFeedbackButton" class="secondary-button compact-button" type="button">反馈问题</button>
+          </div>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <!-- 说明面板:键盘快捷键一览、轮次与同步 -->
+  <div id="infoDialog" class="modal-backdrop" hidden>
+    <section class="info-panel" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+      <header class="settings-header">
+        <h2 id="infoTitle">说明</h2>
+        <button id="infoClose" class="icon-button dialog-close" type="button" aria-label="关闭"><i class="ph ph-x" aria-hidden="true"></i></button>
+      </header>
+      <div id="infoBody" class="info-body"></div>
     </section>
   </div>
 
@@ -256,13 +338,14 @@
   <script src="/static/vendor/mermaid.min.js"></script>
   <script src="/static/vendor/dompurify.min.js"></script>
   <script src="/static/vendor/diff-match-patch.js"></script>
-  <script src="/static/vendor/draftback-editor.js?v=8"></script>
+  <script src="/static/vendor/draftback-editor.js?v=9"></script>
   <script src="/static/markdown-patch.js?v=2"></script>
   <script src="/static/desktop-anchor.js?v=5"></script>
-  <script src="/static/desktop-handoff.js?v=1"></script>
+  <script src="/static/desktop-handoff.js?v=2"></script>
+  <script src="/static/desktop-actions.js?v=1"></script>
   <script src="/static/desktop-diff.js?v=1"></script>
   <script src="/static/desktop-history.js?v=1"></script>
   <script src="/static/desktop-compare.js?v=1"></script>
-  <script src="/static/desktop.js?v=29"></script>
+  <script src="/static/desktop.js?v=30"></script>
 </body>
 </html>

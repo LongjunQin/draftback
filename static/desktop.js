@@ -6,6 +6,8 @@
   const Anchor = window.DraftbackAnchor;
   const History = window.DraftbackHistory;   // 回稿卡与历史分轮的数据(规则⑤第三段)
   const Diff = window.DraftbackDiff;         // 轮次对比算法
+  const Actions = window.DraftbackActions || null; // 动作表:菜单栏与快捷键共用
+  const FEEDBACK_URL = 'https://github.com/LongjunQin/draftback/issues';
   const bridge = window.draftbackDesktop || null;
   const ACTIVE_REVIEW = new Set(['reviewing', 'ready_to_apply', 'applying', 'conflict']);
 
@@ -32,11 +34,20 @@
     confirmDialog: $('#confirmDialog'), confirmTitle: $('#confirmTitle'), confirmMessage: $('#confirmMessage'),
     confirmAccept: $('#confirmAccept'), confirmCancel: $('#confirmCancel'), toastRegion: $('#toastRegion'),
     findBar: $('#findBar'), findInput: $('#findInput'), findCount: $('#findCount'), findPrev: $('#findPrev'), findNext: $('#findNext'), findClose: $('#findClose'),
+    replaceRow: $('#replaceRow'), replaceInput: $('#replaceInput'), replaceOne: $('#replaceOne'), replaceAll: $('#replaceAll'),
     dropOverlay: $('#dropOverlay'),
     returnCard: $('#returnCard'), timelinePopover: $('#timelinePopover'),
     compareView: $('#compareView'), compareTitle: $('#compareTitle'), compareMeta: $('#compareMeta'), comparePosition: $('#comparePosition'),
     comparePrev: $('#comparePrev'), compareNext: $('#compareNext'), compareClose: $('#compareClose'), compareScroll: $('#compareScroll'),
     compareContent: $('#compareContent'), compareNote: $('#compareNote'),
+    confirmAlt: $('#confirmAlt'),
+    quickOpen: $('#quickOpen'), quickOpenInput: $('#quickOpenInput'), quickOpenList: $('#quickOpenList'),
+    settingsDialog: $('#settingsDialog'), settingsClose: $('#settingsClose'), appearanceSegment: $('#appearanceSegment'),
+    zoomRange: $('#zoomRange'), zoomValue: $('#zoomValue'), zoomResetButton: $('#zoomResetButton'),
+    syncToggle: $('#syncToggle'), syncStatusLine: $('#syncStatusLine'), syncDetailsButton: $('#syncDetailsButton'),
+    cliStatusLine: $('#cliStatusLine'), cliInstallButton: $('#cliInstallButton'), aboutLine: $('#aboutLine'),
+    aboutGuideButton: $('#aboutGuideButton'), aboutFeedbackButton: $('#aboutFeedbackButton'),
+    infoDialog: $('#infoDialog'), infoTitle: $('#infoTitle'), infoBody: $('#infoBody'), infoClose: $('#infoClose'),
   };
 
   // 改名前的本地存储键 mdturn.*(标签、未保存草稿、阅读偏好)一次性搬到 draftback.*;命名沿革见 docs/naming-history.md
@@ -136,12 +147,29 @@
     return error.message || `${action}失败。`;
   }
 
-  function toast(message, kind = '') {
+  // 提示条(UI 方案 2.4):底部居中,同时最多一条,新的替换旧的;可带一个动作按钮(如「撤销」)
+  function toast(message, kind = '', options = {}) {
+    dismissToast();
     const item = document.createElement('div');
     item.className = `toast${kind ? ` ${kind}` : ''}`;
-    item.textContent = message;
+    if (options.tag) item.dataset.tag = options.tag;
+    const text = document.createElement('span'); text.className = 'toast-text'; text.textContent = message;
+    item.appendChild(text);
+    if (options.action) {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'toast-action'; button.textContent = options.action.label;
+      button.addEventListener('click', () => { dismissToast(); void options.action.run(); });
+      item.appendChild(button);
+    }
     nodes.toastRegion.appendChild(item);
-    setTimeout(() => item.remove(), kind === 'error' ? 5200 : 2800);
+    item.__timer = setTimeout(() => item.remove(), options.duration || (kind === 'error' ? 5200 : 3000));
+    return item;
+  }
+  function dismissToast(tag = null) {
+    nodes.toastRegion.querySelectorAll('.toast').forEach((node) => {
+      if (tag && node.dataset.tag !== tag) return;
+      clearTimeout(node.__timer); node.remove();
+    });
   }
 
   function requestId(prefix = 'req') {
@@ -174,7 +202,7 @@
         file: document.file, title: document.title || document.file, directory: document.directory,
         docId: payload.docId || null, // 会话被清理后仍能按文档身份看历史、对比、恢复
       },
-      source: { content: String(source.content || ''), hash: source.hash, revision: 0 },
+      source: { content: String(source.content || ''), hash: source.hash, revision: 0, readOnly: Boolean(source.readOnly), readOnlyReason: source.readOnlyReason || '', encoding: source.encoding || 'utf-8' },
       annotations: [],
       activeReview: payload.activeReview || null,
       editing: payload.editing || null,
@@ -216,6 +244,7 @@
       kind: normalized.kind === 'document' ? 'document' : 'review',
       review,
       source: source.content || '',
+      sourceMeta: sourceMetaOf(source),
       sourceHash: source.hash || review.workingHash || review.sourceHash,
       revision: Number(source.revision || review.sourceRevision || 0),
       annotations,
@@ -241,6 +270,12 @@
     }
     return tab;
   }
+
+  // 编码与只读信息(GBK / UTF-16 只读显示):tab.source 是正文字符串,这些放在 tab.sourceMeta
+  function sourceMetaOf(source = {}) {
+    return { readOnly: Boolean(source.readOnly), readOnlyReason: source.readOnlyReason || '', encoding: source.encoding || 'utf-8' };
+  }
+  function isReadOnly(tab) { return Boolean(tab && tab.sourceMeta && tab.sourceMeta.readOnly); }
 
   function draftKey(tabId) { return `draftback.draft.${tabId}`; }
 
@@ -497,6 +532,7 @@
     tab.review = normalized.review;
     tab.annotations = normalized.annotations;
     tab.revision = Number(normalized.source.revision || normalized.review.sourceRevision || tab.revision || 0);
+    tab.sourceMeta = sourceMetaOf(normalized.source);
     if (changed || options.forceSource) {
       tab.source = normalized.source.content;
       tab.sourceHash = normalized.source.hash;
@@ -580,17 +616,25 @@
     return priorStatus === 'applying' && priorMode !== 'manual';
   }
 
+  function completionCounts(review) {
+    const tab = state.tabs.find((candidate) => candidate.id === review.id);
+    const members = tab ? tab.annotations.filter((note) => note.reviewSessionId === review.id) : [];
+    if (!members.length) return null;
+    return { applied: members.filter((note) => effectiveStatus(note) === 'applied').length, wontfix: members.filter((note) => effectiveStatus(note) === 'wontfix').length };
+  }
   async function announceAgentCompletion(review) {
     if (!review || !markCompletionAnnounced(review)) return;
     const title = review.title || review.file || '当前文档';
-    const message = `《${title}》Agent 修改完成，已刷新到最新版。`;
+    const counts = completionCounts(review);
+    const round = Number.isInteger(review.round) ? `第 ${review.round} 轮` : '';
+    const message = `《${title}》${round}回稿${counts ? ` · 采纳 ${counts.applied} · 未采纳 ${counts.wontfix}` : ''}。已换成最新版。`;
     if (document.visibilityState === 'visible' && document.hasFocus()) {
       toast(message);
       return;
     }
     if (bridge && typeof bridge.notifyReviewComplete === 'function') {
       try {
-        const shown = await bridge.notifyReviewComplete({ reviewId: review.id, title });
+        const shown = await bridge.notifyReviewComplete({ reviewId: review.id, title, round: Number.isInteger(review.round) ? review.round : null, counts });
         if (shown) return;
       } catch (_) {}
     }
@@ -849,8 +893,25 @@
     applyReaderZoom();
   }
 
+  const PLATFORM = (bridge && bridge.platform) || (/Mac/i.test(navigator.platform || '') ? 'darwin' : 'other');
+  const ACTION_ITEMS = Actions ? Actions.flatten() : [];
+  // 只在条件满足时才接管的快捷键
+  const KEY_GUARDS = {
+    'compare-prev': () => Compare.isOpen(),
+    'compare-next': () => Compare.isOpen(),
+    'note-prev': () => { const tab = activeTab(); return !!tab && tab.mode === 'read' && !Compare.isOpen(); },
+    'note-next': () => { const tab = activeTab(); return !!tab && tab.mode === 'read' && !Compare.isOpen(); },
+    primary: () => !nodes.primaryAction.hidden && !nodes.primaryAction.disabled,
+  };
+
+  // 对话框开着时仍然可以用的命令(不动正文与会话)
+  const MODAL_SAFE_COMMANDS = new Set(['zoom-in', 'zoom-out', 'zoom-reset', 'help-shortcuts', 'help-feedback']);
   function handleDesktopCommand(command) {
-    if (['open', 'close-tab'].includes(command) && commandBlocked()) return;
+    if (typeof command !== 'string' || !command) return;
+    if (modalOpen() && !MODAL_SAFE_COMMANDS.has(command)) {
+      if (!nodes.quickOpen.hidden || !nodes.settingsDialog.hidden || !nodes.infoDialog.hidden) closePanels();
+      else { commandBlocked(); return; }
+    }
     if (command === 'open') {
       void chooseMarkdown();
       return;
@@ -895,7 +956,36 @@
       toast('在右栏「历史」里选一轮,点「恢复到这轮改稿前」。'); return;
     }
     if (command === 'timeline') { toggleTimeline(); return; }
-    if (command === 'print') void printDocument();
+    if (command === 'print') { void printDocument(); return; }
+    if (command === 'find-replace') { openFind({ replace: true }); return; }
+    if (command === 'quick-open') { openQuickOpen(); return; }
+    if (command === 'save-copy') { void saveCopy(); return; }
+    if (command === 'reveal') { revealActive(); return; }
+    if (command === 'settings') { void openSettings(); return; }
+    if (command === 'toggle-mode') { void toggleMode(); return; }
+    if (command === 'toggle-left') { toggleLeft(); return; }
+    if (command === 'toggle-right') { toggleRight(); return; }
+    if (command === 'left-files') { toggleLeft(false); setLeftMode('files'); return; }
+    if (command === 'left-outline') { toggleLeft(false); setLeftMode('outline'); return; }
+    if (command === 'annotate') { annotateSelection(); return; }
+    if (command === 'doc-note') { openDocNote(); return; }
+    if (command === 'note-prev' || command === 'note-next') { stepNote(command === 'note-prev' ? -1 : 1); return; }
+    if (command === 'primary') { handlePrimaryAction(); return; }
+    if (command === 'manual-edit') { void runAction('manual-edit'); return; }
+    if (command === 'finish-manual') { void finishManualApply(); return; }
+    if (command === 'finalize') {
+      const action = nodes.primaryAction.dataset.action;
+      if (action === 'approve' || action === 'finalize') void runAction(action);
+      return;
+    }
+    if (command === 'tab-prev' || command === 'tab-next') { stepTab(command === 'tab-prev' ? -1 : 1); return; }
+    if (command === 'import-batch') { void importBatchFromMenu(); return; }
+    if (command === 'help-guide') { void openHelp('guide'); return; }
+    if (command === 'help-ai') { void openHelp('ai'); return; }
+    if (command === 'help-shortcuts') { showShortcuts(); return; }
+    if (command === 'help-feedback') { openFeedback(); return; }
+    if (command.startsWith('format:')) { runFormat(command.slice('format:'.length)); return; }
+    if (command.startsWith('appearance:') && bridge && typeof bridge.setAppearance === 'function') { void bridge.setAppearance(command.slice('appearance:'.length)); }
   }
 
   // ---------- 新建 ----------
@@ -1054,22 +1144,33 @@
   // ---------- 查找(阅读模式,正文内) ----------
   const find = { query: '', ranges: [], index: -1 };
   function findSupported() { return !!(globalThis.CSS && CSS.highlights && globalThis.Highlight); }
-  function openFind() {
+  // 编辑模式的查找替换走编辑器(ProseMirror 文档),阅读模式在渲染后的正文里找
+  function editorFindReady() {
+    return !!(state.editorView && window.DraftbackEditor && state.editorView.__draftbackFallback !== true && typeof window.DraftbackEditor.find === 'function');
+  }
+  function inEditFind() { const tab = activeTab(); return !!tab && tab.mode === 'edit' && editorFindReady(); }
+  function openFind(options = {}) {
     const tab = activeTab();
     if (!tab) return;
-    if (tab.mode === 'edit') { toast('查找目前只在阅读模式下可用;编辑模式可用编辑器自带的搜索。'); return; }
+    const editing = tab.mode === 'edit';
+    if (editing && !editorFindReady()) { toast('编辑器还没准备好,稍后再试。'); return; }
+    if (options.replace && !editing) { toast('替换只在编辑模式里可用。先点「编辑」(⌘/)。'); }
     nodes.findBar.hidden = false;
-    const selected = String(window.getSelection() || '').trim();
+    nodes.replaceRow.hidden = !editing;
+    const selected = editing ? window.DraftbackEditor.selectedText(state.editorView).trim() : String(window.getSelection() || '').trim();
     if (selected && selected.length <= 80 && !selected.includes('\n')) nodes.findInput.value = selected;
     nodes.findInput.focus(); nodes.findInput.select();
     runFind();
   }
   function closeFind() {
+    const editing = inEditFind();
     nodes.findBar.hidden = true;
     clearFind();
-    nodes.readerScroll.focus?.();
+    if (editing) window.DraftbackEditor.focus(state.editorView);
+    else nodes.readerScroll.focus?.();
   }
   function clearFind() {
+    if (editorFindReady()) window.DraftbackEditor.clearFind(state.editorView);
     find.ranges = []; find.index = -1; find.query = '';
     if (findSupported()) { CSS.highlights.delete('draftback-find'); CSS.highlights.delete('draftback-find-current'); }
     nodes.findCount.textContent = '0 / 0'; nodes.findBar.classList.remove('no-match');
@@ -1083,9 +1184,16 @@
     return nodes_;
   }
   // 跨文本节点匹配:把正文拼成一串,记录每个字符落在哪个节点的哪个偏移。
+  function showEditorFind(result) {
+    const count = result ? result.count : 0;
+    nodes.findCount.textContent = count ? `${result.index + 1} / ${count}` : '0 / 0';
+    nodes.findBar.classList.toggle('no-match', Boolean(nodes.findInput.value) && !count);
+    nodes.replaceOne.disabled = !count; nodes.replaceAll.disabled = !count;
+  }
   function runFind() {
     const query = nodes.findInput.value;
     const tab = activeTab();
+    if (inEditFind()) { showEditorFind(window.DraftbackEditor.find(state.editorView, query)); return; }
     if (!tab || tab.mode !== 'read' || !query) { clearFind(); return; }
     const textNodes = textNodesOf(nodes.content);
     const pieces = []; let whole = '';
@@ -1129,9 +1237,21 @@
   }
   function stepFind(direction) {
     if (nodes.findBar.hidden) { openFind(); return; }
+    if (inEditFind()) { showEditorFind(window.DraftbackEditor.findStep(state.editorView, direction)); return; }
     if (!find.ranges.length) { runFind(); if (!find.ranges.length) return; }
     find.index = (find.index + direction + find.ranges.length) % find.ranges.length;
     highlightCurrentFind(true);
+  }
+
+  function replaceCurrentMatch() {
+    if (!inEditFind()) return;
+    showEditorFind(window.DraftbackEditor.replaceCurrent(state.editorView, nodes.replaceInput.value));
+  }
+  function replaceAllMatches() {
+    if (!inEditFind()) return;
+    const result = window.DraftbackEditor.replaceAllMatches(state.editorView, nodes.replaceInput.value);
+    showEditorFind(result);
+    toast(result.replaced ? `已替换 ${result.replaced} 处(⌘Z 可撤销)。` : '没有可替换的地方。');
   }
 
   // ---------- 导出 PDF / 打印 ----------
@@ -1258,6 +1378,7 @@
       nodes.secondaryAction.hidden = true;
       renderOutline([]);
       renderNotes(null);
+      publishMenuState();
       return;
     }
 
@@ -1267,6 +1388,8 @@
     renderNotes(tab);
     if (tab.mode === 'edit') { if (Compare.isOpen()) Compare.close(); renderEditor(tab); }
     else renderReader(tab);
+    publishMenuState();
+    if (bridge && typeof bridge.noteRecent === 'function' && tab.review.sourceFile) { try { bridge.noteRecent(tab.review.sourceFile); } catch (_) {} }
   }
 
   function renderLayoutState() {
@@ -1278,6 +1401,7 @@
     nodes.filesMode.setAttribute('aria-selected', String(state.leftMode === 'files'));
     nodes.outlinePanel.hidden = state.leftMode !== 'outline';
     nodes.filesPanel.hidden = state.leftMode !== 'files';
+    publishMenuState();
   }
 
   function setLeftMode(mode) {
@@ -1315,17 +1439,17 @@
     const review = tab.review;
     const view = Handoff.describe({
       review, plain: isPlain(tab), mode: tab.mode, openCount: openAnnotations(tab).length,
-      readOnly: Boolean(tab.source && tab.source.readOnly), encoding: tab.source && tab.source.encoding,
+      readOnly: isReadOnly(tab), encoding: tab.sourceMeta && tab.sourceMeta.encoding,
       remotePending: Boolean(tab.remotePending),
     });
     nodes.reviewState.dataset.status = view.status;
     nodes.reviewStateText.textContent = view.text;
     nodes.reviewStateIcon.className = `ph ${view.icon}`;
     nodes.reviewState.title = (tab.remotePending ? `${view.detail}当前草稿不会被覆盖，保存或退出编辑后将立即同步。` : view.detail) +
-      (tab.source && tab.source.readOnly ? ` ${tab.source.readOnlyReason || ''}` : '');
+      (isReadOnly(tab) ? ` ${tab.sourceMeta.readOnlyReason || ''}` : '');
     nodes.readingMode.classList.toggle('active', tab.mode !== 'edit');
     nodes.editingMode.classList.toggle('active', tab.mode === 'edit');
-    nodes.editingMode.disabled = review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual') || Boolean(tab.source && tab.source.readOnly);
+    nodes.editingMode.disabled = review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual') || isReadOnly(tab);
     paintAction(nodes.primaryAction, view.primary);
     paintAction(nodes.secondaryAction, view.secondary);
   }
@@ -1362,7 +1486,7 @@
     }
   }
 
-  function statusCanAnnotate(tab) { return !!tab && tab.mode === 'read' && ANNOTATABLE.has(tab.review.status) && !(tab.source && tab.source.readOnly); }
+  function statusCanAnnotate(tab) { return !!tab && tab.mode === 'read' && ANNOTATABLE.has(tab.review.status) && !isReadOnly(tab); }
 
   // 文档里夹带的原始 HTML 只保留排版用途(<br>、<img>、<details>、带 id 的 <p> 等);
   // 脚本、事件属性、<style>、<iframe>/<object>/<form>、javascript: 链接一律剥掉。
@@ -1393,6 +1517,26 @@
       try { engine.use(texmath, { engine: window.katex, delimiters: 'dollars', katexOptions: { throwOnError: false, strict: false } }); }
       catch (_) {}
     }
+    engine.core.ruler.after('inline', 'draftback-task-list', (core) => {
+      const tokens = core.tokens;
+      for (let i = 2; i < tokens.length; i += 1) {
+        const inline = tokens[i];
+        if (inline.type !== 'inline' || tokens[i - 1].type !== 'paragraph_open' || tokens[i - 2].type !== 'list_item_open') continue;
+        const first = inline.children && inline.children[0];
+        const match = first && first.type === 'text' ? /^\[([ xX])\][ \u00a0]/.exec(first.content) : null;
+        if (!match) continue;
+        first.content = first.content.slice(match[0].length);
+        const checked = match[1] !== ' ';
+        const box = new core.Token('html_inline', '', 0);
+        box.content = `<span class="task-check${checked ? ' checked' : ''}" role="img" aria-label="${checked ? '已完成' : '未完成'}"></span>`;
+        inline.children.unshift(box);
+        tokens[i - 2].attrJoin('class', 'task-list-item');
+        for (let j = i - 3; j >= 0; j -= 1) {
+          const t = tokens[j];
+          if ((t.type === 'bullet_list_open' || t.type === 'ordered_list_open') && t.level === tokens[i - 2].level - 1) { t.attrJoin('class', 'contains-task-list'); break; }
+        }
+      }
+    });
     const htmlBlockRule = engine.renderer.rules.html_block;
     engine.renderer.rules.html_block = function htmlBlock(tokens, index, options, env, self) {
       const token = tokens[index];
@@ -1435,6 +1579,7 @@
     md, dmp: new window.diff_match_patch(), Diff, renderMarkdown,
     loadVersion: (docId, versionId, which) => requestJson(`/api/app/version?docId=${encodeURIComponent(docId)}&versionId=${encodeURIComponent(versionId)}&which=${which}`),
     onChange: ({ open }) => {
+      publishMenuState();
       nodes.readerPane.classList.toggle('compare-open', open);
       nodes.annotate.hidden = true;
       if (open) { toggleTimeline(false); window.getSelection()?.removeAllRanges(); }
@@ -1954,7 +2099,7 @@
 
   function renderNotes(tab) {
     nodes.openNotesList.replaceChildren(); nodes.historyNotesList.replaceChildren();
-    nodes.docNoteButton.hidden = !tab || tab.mode !== 'read' || !ANNOTATABLE.has(tab.review.status) || Boolean(tab.source && tab.source.readOnly);
+    nodes.docNoteButton.hidden = !tab || tab.mode !== 'read' || !ANNOTATABLE.has(tab.review.status) || isReadOnly(tab);
     const openSection = nodes.openNotesList.parentElement;
     if (!tab || isPlain(tab)) {
       nodes.returnCard.hidden = true; nodes.returnCard.replaceChildren(); openSection.hidden = false;
@@ -2376,6 +2521,41 @@
     if (!options.scrollOnly) setTimeout(() => { tab.focusedNoteId = null; renderNotes(tab); }, 2600);
   }
 
+  function orderedOpenNotes(tab) {
+    const notes = openAnnotations(tab);
+    const descriptors = blockDescriptors(mappedLeafBlocks());
+    const keyed = notes.map((note, index) => {
+      if (isDocNote(note)) return { note, block: -1, start: index };
+      const resolved = Anchor.resolveAnchor(note, descriptors);
+      return { note, block: resolved.matched ? resolved.startBlockIndex : Number.MAX_SAFE_INTEGER, start: resolved.matched ? resolved.globalStart : index };
+    });
+    keyed.sort((a, b) => a.block - b.block || a.start - b.start);
+    return keyed.map((entry) => entry.note);
+  }
+  function stepNote(direction) {
+    const tab = activeTab();
+    if (!tab || isPlain(tab) || tab.mode !== 'read') return;
+    const notes = orderedOpenNotes(tab);
+    if (!notes.length) { toast('本轮还没有批注。'); return; }
+    const current = notes.findIndex((note) => note.id === state.navNoteId);
+    const next = current < 0 ? (direction > 0 ? 0 : notes.length - 1) : (current + (direction > 0 ? 1 : -1) + notes.length) % notes.length;
+    state.navNoteId = notes[next].id;
+    focusNote(notes[next].id, { scrollOnly: true });
+  }
+  function annotateSelection() {
+    const tab = activeTab();
+    if (!tab || tab.mode !== 'read') { toast('批注在阅读模式里写。先切到「阅读与批注」(⌘/)。'); return; }
+    if (!statusCanAnnotate(tab)) { toast('现在这一轮不能批注。'); return; }
+    const anchor = captureSelectionAnchor() || state.cachedAnchor;
+    if (!anchor) { toast('先在正文里选中要批注的文字。'); return; }
+    openAnnotationDialog({ anchor });
+  }
+  function openDocNote() {
+    const tab = activeTab();
+    if (!tab || tab.mode !== 'read' || !ANNOTATABLE.has(tab.review.status) || isReadOnly(tab)) { toast('现在不能写总体意见。'); return; }
+    openAnnotationDialog({ scope: 'document' });
+  }
+
   function openAnnotationDialog({ anchor = null, note = null, scope = null }) {
     const tab = activeTab(); if (!tab || tab.mode !== 'read' || !ANNOTATABLE.has(tab.review.status)) return;
     const docScope = scope === 'document' || isDocNote(note);
@@ -2578,13 +2758,22 @@
 
   async function deleteNote(note) {
     const tab = activeTab(); if (!tab) return;
-    const accepted = await confirmAction('删除这条批注？', '删除后无法恢复，但不会改变源 Markdown。', '删除');
-    if (!accepted) return;
     try {
       await requestJson(`/api/annotations?r=${encodeURIComponent(tab.id)}&id=${encodeURIComponent(note.id)}`, { method: 'DELETE' });
       tab.annotations = tab.annotations.filter((item) => item.id !== note.id);
-      renderMarkers(tab); renderNotes(tab); renderStatus(tab); toast('批注已删除。');
+      renderMarkers(tab); renderNotes(tab); renderStatus(tab); publishMenuState();
+      toast('已删除这条批注。', '', { tag: 'undo-delete', duration: 5000, action: { label: '撤销', run: () => undoDeleteNote(tab, note) } });
     } catch (error) { toast(friendlyError(error, '删除批注'), 'error'); }
+  }
+
+  async function undoDeleteNote(tab, note) {
+    try {
+      await requestJson(`/api/app/annotation/restore?r=${encodeURIComponent(tab.id)}&id=${encodeURIComponent(note.id)}`, { method: 'POST' });
+      await refreshTab(tab, { silent: true });
+      toast('已放回这条批注。');
+    } catch (error) {
+      toast(error instanceof ApiError && error.status === 409 ? '这一轮已交出,批注不能再放回。' : friendlyError(error, '撤销删除'), 'error');
+    }
   }
 
   async function resolveNote(note, status) {
@@ -2636,7 +2825,11 @@
     nodes.codeEditor.replaceChildren();
     const doc = editorBody(tab.editorDraft != null ? tab.editorDraft : tab.source);
     if (window.DraftbackEditor) {
-      state.editorView = window.DraftbackEditor.create(nodes.codeEditor, { doc, onChange: (value) => editorChanged(tab, withFrontMatter(tab, value)) });
+      state.editorView = window.DraftbackEditor.create(nodes.codeEditor, {
+        doc, onChange: (value) => editorChanged(tab, withFrontMatter(tab, value)),
+        uploadImage: (file) => uploadImageFor(tab, file),
+        resolveImageUrl: (url) => editorImageUrl(tab, url),
+      });
     } else {
       const textarea = document.createElement('textarea');
       textarea.value = doc; textarea.className = 'fallback-editor'; textarea.__draftbackFallback = true;
@@ -2644,6 +2837,35 @@
       nodes.codeEditor.appendChild(textarea); state.editorView = textarea;
     }
     state.editorTabId = tab.id;
+  }
+
+  // 粘贴、拖入、选择的图片存到文档旁的 images/(服务端负责命名与不覆盖),正文里写相对路径
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || '').replace(/^data:[^,]*,/, ''));
+      reader.onerror = () => reject(reader.error || new Error('读取图片失败'));
+      reader.readAsDataURL(file);
+    });
+  }
+  async function uploadImageFor(tab, file) {
+    if (!file) return '';
+    if (file.size > 20 * 1024 * 1024) { toast('图片超过 20 MB,请先压缩再插入。', 'error'); return ''; }
+    try {
+      const data = await readFileAsBase64(file);
+      const result = await requestJson('/api/app/document/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: tab.review.sourceFile, name: file.name || 'image', type: file.type, data }),
+      });
+      toast(`图片已存到文档旁的 ${result.relPath}`);
+      return result.relPath;
+    } catch (error) { toast(friendlyError(error, '插入图片'), 'error'); return ''; }
+  }
+  // 编辑器里显示图片:相对路径经本地服务读(和阅读模式同一个地址),网络图片与 data: 原样
+  function editorImageUrl(tab, url) {
+    const value = String(url || '');
+    if (!value || /^(https?:|data:|blob:)/i.test(value)) return value;
+    return `/api/app/file?${assetOwnerQuery(tab)}&path=${encodeURIComponent(localAssetPath(value))}`;
   }
 
   function destroyEditor() {
@@ -2667,7 +2889,7 @@
 
   function renderEditor(tab) {
     clearMarkerOverlay();
-    if (!nodes.findBar.hidden) closeFind();
+    if (!nodes.findBar.hidden) { nodes.findBar.hidden = true; clearFind(); }
     tab.mode = 'edit';
     nodes.readerPane.hidden = true; nodes.editorPane.hidden = false;
     if (state.editorTabId !== tab.id) createEditor(tab);
@@ -2767,7 +2989,7 @@
 
   async function enterEditMode() {
     let tab = activeTab(); if (!tab) return;
-    if (tab.source && tab.source.readOnly) { toast(tab.source.readOnlyReason || '文件不是 UTF-8 编码,只读。'); return; }
+    if (isReadOnly(tab)) { toast(tab.sourceMeta.readOnlyReason || '文件不是 UTF-8 编码,只读。'); return; }
     if (isPlain(tab)) {
       await setEditing(tab, true);
       tab.mode = 'edit'; persistTabs(); renderApp();
@@ -2778,14 +3000,14 @@
     if (review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual')) return;
     if (review.status === 'reviewing') {
       const count = openAnnotations(tab).length;
-      const accepted = await confirmAction(
-        count ? '提交审阅并开始手工修改？' : '结束审阅并进入编辑？',
+      const round = Number.isInteger(review.round) ? `第 ${review.round} 轮` : '这一轮';
+      const choice = await chooseAction('原文已锁定',
         count
-          ? `本轮有 ${count} 条未处理批注。进入编辑后，你需要对照右栏逐条修改并确认。`
-          : '本轮没有批注，将记录为审核通过，然后进入自由编辑模式。',
-        count ? '提交并手工修改' : '结束审阅并编辑',
-      );
-      if (!accepted) return;
+          ? `这篇正在${round}批注中。要直接改原文,选「我自己改」:${count} 条批注交出,你对照右栏逐条处理后提交。只想另外改一份,选「另存为副本」:原稿和批注都不动。`
+          : `这篇正在${round}批注中,还没有批注。选「我自己改」:这一轮记为通过,然后进入编辑。只想另外改一份,选「另存为副本」。`,
+        { accept: '我自己改', alt: '另存为副本…' });
+      if (choice === 'alt') { await saveCopy(tab); return; }
+      if (choice !== 'accept') return;
       // The edit-entry dialog above is already the user's confirmation.  Do
       // not immediately ask the same question a second time inside
       // submitReview().
@@ -2825,6 +3047,7 @@
   }
 
   async function submitReview(tab, options = {}) {
+    dismissToast('undo-delete');
     const count = openAnnotations(tab).length;
     if (!options.skipConfirm) {
       const accepted = await confirmAction(
@@ -2896,8 +3119,347 @@
     toast(ok ? '改稿指令已复制。贴给任何智能体(Claude Code、Codex…),它就能接上这一轮。' : '没能复制到剪贴板,请检查系统权限。', ok ? 'info' : 'error');
   }
 
+  // ---------- 快速打开(⇧⌘O):只搜打开着的标签与最近文件,键盘一秒切换 ----------
+  function quickOpenItems(query) {
+    const seen = new Set();
+    const items = [];
+    for (const tab of state.tabs) {
+      const filePath = tab.review.sourceFile;
+      if (!filePath || seen.has(filePath)) continue;
+      seen.add(filePath);
+      items.push({ path: filePath, file: filePath.split('/').pop(), directory: posixDir(filePath), note: '已打开', tabId: tab.id, order: 0 });
+    }
+    state.recents.forEach((item, index) => {
+      if (!item.absPath || seen.has(item.absPath) || !item.exists) return;
+      seen.add(item.absPath);
+      const active = item.activeReview;
+      const note = active ? statusLabel(active.status, active.applyMode) : item.lastReview ? statusLabel(item.lastReview.status, item.lastReview.applyMode, item.lastReview.outcome) : '普通文档';
+      items.push({ path: item.absPath, file: item.file, directory: item.directory, note, order: 1 + index });
+    });
+    const needle = String(query || '').trim().toLowerCase();
+    if (!needle) return items.slice(0, 30);
+    return items
+      .map((item) => {
+        const name = item.file.toLowerCase();
+        const score = name.startsWith(needle) ? 0 : name.includes(needle) ? 1 : item.directory.toLowerCase().includes(needle) ? 2 : -1;
+        return { item, score };
+      })
+      .filter((entry) => entry.score >= 0)
+      .sort((a, b) => a.score - b.score || a.item.order - b.item.order)
+      .slice(0, 30)
+      .map((entry) => entry.item);
+  }
+  function renderQuickOpen() {
+    const items = quickOpenItems(nodes.quickOpenInput.value);
+    state.quickOpenItems = items;
+    state.quickOpenIndex = Math.min(Math.max(state.quickOpenIndex || 0, 0), Math.max(0, items.length - 1));
+    nodes.quickOpenList.replaceChildren();
+    if (!items.length) { nodes.quickOpenList.appendChild(emptyBlock('没有匹配的文档。快速打开只搜打开着的和最近打开过的。', 'quick-open-empty')); return; }
+    items.forEach((item, index) => {
+      const row = document.createElement('button');
+      row.type = 'button'; row.className = `quick-open-item${index === state.quickOpenIndex ? ' active' : ''}`;
+      row.setAttribute('role', 'option'); row.setAttribute('aria-selected', String(index === state.quickOpenIndex));
+      const name = document.createElement('strong'); name.textContent = item.file;
+      const meta = document.createElement('span'); meta.textContent = `${formatDirectory(item.directory)} · ${item.note}`;
+      row.append(name, meta);
+      row.addEventListener('click', () => { state.quickOpenIndex = index; void chooseQuickOpen(); });
+      nodes.quickOpenList.appendChild(row);
+    });
+    const active = nodes.quickOpenList.querySelector('.quick-open-item.active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
+  }
+  function openQuickOpen() {
+    closePanels();
+    nodes.quickOpen.hidden = false;
+    nodes.quickOpenInput.value = '';
+    state.quickOpenIndex = 0;
+    renderQuickOpen();
+    setTimeout(() => nodes.quickOpenInput.focus(), 20);
+    void refreshRecents().then(() => { if (!nodes.quickOpen.hidden) renderQuickOpen(); });
+  }
+  async function chooseQuickOpen() {
+    const item = (state.quickOpenItems || [])[state.quickOpenIndex || 0];
+    if (!item) return;
+    closePanels();
+    if (item.tabId) activateTab(item.tabId);
+    else await openDocumentPath(item.path);
+  }
+
+  // ---------- 设置(⌘,):外观、正文字号、iCloud 同步、命令行工具、关于 ----------
+  async function openSettings() {
+    closePanels();
+    nodes.settingsDialog.hidden = false;
+    renderZoomSetting();
+    let settings = null;
+    if (bridge && typeof bridge.getSettings === 'function') { try { settings = await bridge.getSettings(); } catch (_) {} }
+    state.settings = settings;
+    const appearance = settings ? settings.appearance : 'system';
+    nodes.appearanceSegment.querySelectorAll('button').forEach((button) => {
+      const on = button.dataset.appearance === appearance;
+      button.classList.toggle('active', on); button.setAttribute('aria-checked', String(on));
+      button.disabled = !settings;
+    });
+    nodes.syncToggle.checked = settings ? settings.syncEnabled : true;
+    nodes.syncToggle.disabled = !settings || !settings.syncHelperAvailable;
+    void renderSyncStatusLine();
+    renderCliStatus(settings && settings.cli);
+    nodes.aboutLine.textContent = settings ? `回稿 ${settings.version}${settings.packaged ? '' : '(开发版)'}` : '回稿(浏览器预览,部分设置不可用)';
+    setTimeout(() => nodes.settingsClose.focus(), 20);
+  }
+  function renderZoomSetting() {
+    const percent = Math.round(state.readerZoom * 100);
+    nodes.zoomRange.value = String(percent);
+    nodes.zoomValue.textContent = `${percent}%`;
+  }
+  async function renderSyncStatusLine() {
+    const settings = state.settings;
+    if (settings && !settings.syncHelperAvailable) { nodes.syncStatusLine.textContent = '这个安装包没有带同步程序,手机收不到稿子。'; return; }
+    if (settings && !settings.syncEnabled) { nodes.syncStatusLine.textContent = '同步已关闭:新的稿子不会推到手机,手机上的批注也收不到。'; return; }
+    try {
+      const status = await requestJson('/api/app/sync/status');
+      nodes.syncStatusLine.textContent = describeSyncHelper(status.helper);
+    } catch (_) { nodes.syncStatusLine.textContent = '读不到同步状态。'; }
+  }
+  function describeSyncHelper(helper) {
+    if (!helper) return '同步程序还没有运行过。';
+    const last = Date.parse(helper.lastPollAt || '');
+    const stale = !Number.isFinite(last) || Date.now() - last > 3 * 60 * 1000;
+    if (helper.accountStatus && helper.accountStatus !== 'available') return '没有登录 iCloud:手机收不到稿子。请在系统设置里登录 iCloud。';
+    if (helper.error) return `同步出错:${helper.error}`;
+    if (stale) return `同步程序没有在运行(最后一次 ${Number.isFinite(last) ? formatRelativeTime(helper.lastPollAt) : '未知'})。`;
+    return `iCloud 已登录 · 最近同步 ${formatRelativeTime(helper.lastPollAt)}`;
+  }
+  function renderCliStatus(cli) {
+    if (!cli) { nodes.cliStatusLine.textContent = '只有在回稿 App 里才能安装。'; nodes.cliInstallButton.disabled = true; return; }
+    nodes.cliInstallButton.disabled = false;
+    if (!cli.installed) { nodes.cliStatusLine.textContent = '还没有安装。'; nodes.cliInstallButton.textContent = '安装 mdreview 到 /usr/local/bin'; return; }
+    if (cli.pointsTo === 'this-app') { nodes.cliStatusLine.textContent = `已安装 · ${cli.path}`; nodes.cliInstallButton.textContent = '重新安装'; return; }
+    nodes.cliStatusLine.textContent = `已安装,但指向别处:${cli.target || cli.path}`;
+    nodes.cliInstallButton.textContent = '改为指向这个回稿';
+  }
+  async function installCliFromSettings() {
+    if (!bridge || typeof bridge.installCli !== 'function') return;
+    const cli = state.settings && state.settings.cli;
+    if (cli && cli.installed && cli.pointsTo !== 'this-app') {
+      const ok = await confirmAction('替换现有的 mdreview?', `现在的 mdreview 指向:${cli.target || cli.path}。替换后,AI 用的命令改为这个回稿自带的版本。`, '替换');
+      if (!ok) return;
+    }
+    nodes.cliInstallButton.disabled = true;
+    try {
+      const result = await bridge.installCli();
+      if (result && result.ok) { toast('mdreview 已装好。AI 现在可以用它接手你的批注。'); renderCliStatus(result); if (state.settings) state.settings.cli = result; }
+      else toast(`没有装上:${(result && result.message) || '原因未知'}`, 'error');
+    } catch (error) { toast(`没有装上:${error.message || error}`, 'error'); }
+    finally { nodes.cliInstallButton.disabled = false; }
+  }
+  async function showSyncDetails() {
+    closePanels();
+    openInfo('轮次与同步');
+    try {
+      const status = await requestJson('/api/app/sync/status');
+      const body = nodes.infoBody;
+      body.replaceChildren();
+      const head = document.createElement('p'); head.className = 'settings-note'; head.textContent = describeSyncHelper(status.helper);
+      body.appendChild(head);
+      const reviews = Array.isArray(status.reviews) ? status.reviews : [];
+      if (!reviews.length) { body.appendChild(emptyBlock('还没有推到手机的稿子。开始审阅的稿子会自动推过去。')); return; }
+      const table = document.createElement('table'); table.className = 'info-table';
+      const header = document.createElement('tr');
+      ['稿件', '轮次', '状态', '手机'].forEach((text) => { const th = document.createElement('th'); th.textContent = text; header.appendChild(th); });
+      table.appendChild(header);
+      reviews.slice(0, 60).forEach((item) => {
+        const row = document.createElement('tr');
+        const cells = [item.title || String(item.absPath || '').split('/').pop(), Number.isInteger(item.round) ? `第 ${item.round} 轮` : '—',
+          statusLabel(item.status, item.applyMode, item.outcome), describePush(item.sync)];
+        cells.forEach((text) => { const td = document.createElement('td'); td.textContent = text; row.appendChild(td); });
+        table.appendChild(row);
+      });
+      body.appendChild(table);
+    } catch (error) { nodes.infoBody.replaceChildren(emptyBlock(friendlyError(error, '读取同步状态'))); }
+  }
+  function describePush(sync) {
+    if (!sync) return '没有推送';
+    if (sync.error) return `推送出错:${sync.error}`;
+    if (sync.state === 'batch-received') return `已收到手机批注 · ${formatRelativeTime(sync.batchReceivedAt || sync.pushedAt)}`;
+    if (sync.state === 'receipt-sent') return `已回执给手机 · ${formatRelativeTime(sync.receiptSentAt || sync.pushedAt)}`;
+    if (sync.pushedAt && (!sync.pushRequestedAt || sync.pushedAt >= sync.pushRequestedAt)) return `已推到手机 · ${formatRelativeTime(sync.pushedAt)}`;
+    if (sync.pushRequestedAt) return '等待推到手机';
+    return '没有推送';
+  }
+  function showShortcuts() {
+    closePanels();
+    openInfo('键盘快捷键一览');
+    const body = nodes.infoBody;
+    body.replaceChildren();
+    if (!Actions) { body.appendChild(emptyBlock('快捷键表没有加载。')); return; }
+    for (const group of Actions.shortcutList(PLATFORM)) {
+      const heading = document.createElement('h3'); heading.className = 'info-heading'; heading.textContent = group.menu;
+      const table = document.createElement('table'); table.className = 'info-table shortcuts';
+      group.rows.forEach((row) => {
+        const tr = document.createElement('tr');
+        const name = document.createElement('td'); name.textContent = row.label;
+        const keys = document.createElement('td'); const kbd = document.createElement('kbd'); kbd.textContent = row.keys; keys.appendChild(kbd);
+        tr.append(name, keys); table.appendChild(tr);
+      });
+      body.append(heading, table);
+    }
+  }
+  function openInfo(title) {
+    nodes.infoTitle.textContent = title;
+    nodes.infoBody.replaceChildren(emptyBlock('正在读取…'));
+    nodes.infoDialog.hidden = false;
+    setTimeout(() => nodes.infoClose.focus(), 20);
+  }
+  function closePanels() {
+    const wasOpen = !nodes.quickOpen.hidden || !nodes.settingsDialog.hidden || !nodes.infoDialog.hidden;
+    nodes.quickOpen.hidden = true; nodes.settingsDialog.hidden = true; nodes.infoDialog.hidden = true;
+    if (wasOpen) publishMenuState();
+  }
+
+  // ---------- 菜单栏状态:页面把当前能做什么报给主进程,菜单逐项启用 / 勾选 ----------
+  function menuState() {
+    const tab = activeTab();
+    const versions = tab && tab.versions ? tab.versions : [];
+    const reviewTab = tab && !isPlain(tab);
+    const card = reviewTab ? History.returnCard({ review: tab.review, versions, annotations: tab.annotations }) : { show: false };
+    const rounds = tab && (reviewTab || tab.review.docId) ? History.buildRounds({ review: tab.review, versions, annotations: reviewTab ? tab.annotations : [] }).rounds : [];
+    return {
+      hasDoc: Boolean(tab), mode: tab ? tab.mode : null, plain: Boolean(tab && isPlain(tab)), dirty: Boolean(tab && tab.dirty),
+      canEdit: Boolean(tab) && !nodes.editingMode.disabled,
+      canAnnotate: statusCanAnnotate(tab) && !Compare.isOpen(),
+      canDocNote: Boolean(tab && tab.mode === 'read' && ANNOTATABLE.has(tab.review.status) && !isReadOnly(tab)),
+      openNotes: tab ? openAnnotations(tab).length : 0,
+      primary: nodes.primaryAction.hidden ? null : nodes.primaryAction.dataset.action || null,
+      secondary: nodes.secondaryAction.hidden ? null : nodes.secondaryAction.dataset.action || null,
+      returnCard: Boolean(card.show),
+      canCompare: Boolean((card.show && card.canCompare) || rounds.some((round) => round.canCompare)),
+      compareOpen: Compare.isOpen(),
+      canRestore: Boolean(tab && tab.mode === 'read' && !tab.dirty && !ACTIVE_REVIEW.has(tab.review.status) && rounds.some((round) => round.canRestore)),
+      hasRounds: Boolean(tab && (reviewTab || tab.review.docId)),
+      tabs: state.tabs.length, leftMode: state.leftMode, leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed,
+    };
+  }
+  function publishMenuState() {
+    if (!bridge || typeof bridge.setMenuState !== 'function') return;
+    if (state.menuStateFrame) cancelAnimationFrame(state.menuStateFrame);
+    state.menuStateFrame = requestAnimationFrame(() => {
+      state.menuStateFrame = 0;
+      try { bridge.setMenuState(menuState()); } catch (_) {}
+    });
+  }
+
+  // ---------- 另存为副本(⇧⌘S):新文件、新文档身份,不带原稿的批注与历史 ----------
+  async function pickCopyPath(tab, title, suggestion) {
+    const directory = posixDir(tab.review.sourceFile || '');
+    if (bridge && typeof bridge.saveCopyDialog === 'function') {
+      const picked = await bridge.saveCopyDialog({ title, suggestedName: suggestion, directory });
+      return picked && picked.ok ? picked.filePath : '';
+    }
+    const typed = window.prompt('另存为(请输入 .md 文件的绝对路径):', `${directory}/${suggestion}.md`);
+    return typed ? typed.trim() : '';
+  }
+  function copyStem(tab) { return String(tab.review.file || tab.review.title || '文档').replace(/\.(md|markdown)$/i, ''); }
+  async function saveCopy(tab = activeTab()) {
+    if (!tab) return;
+    if (tab.mode === 'edit') captureEditorValue(tab);
+    const content = tab.mode === 'edit' && tab.editorDraft != null ? tab.editorDraft : tab.source;
+    let filePath = '';
+    try { filePath = await pickCopyPath(tab, '另存为副本', `${copyStem(tab)} 副本`); }
+    catch (error) { toast(`另存失败:${error.message || error}`, 'error'); return; }
+    if (!filePath) return;
+    try {
+      const payload = await requestJson('/api/app/document/copy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: filePath, content, sourcePath: tab.review.sourceFile }),
+      });
+      upsertTab(normalizeDocument(payload), { activate: true });
+      await refreshRecents();
+      toast(`已另存为《${payload.document.file}》。原稿${isPlain(tab) ? '' : '和批注'}都没有动。`);
+    } catch (error) { toast(friendlyError(error, '另存为副本'), 'error'); }
+  }
+
+  // ---------- 冲突处理(状态区「文件在外面被改了」时主按钮「处理…」):只给两条路 ----------
+  async function resolveConflict(tab = activeTab()) {
+    if (!tab || tab.review.status !== 'conflict') return;
+    const count = openAnnotations(tab).length;
+    const choice = await chooseAction('文件在外面被改了',
+      `审阅期间有别的程序改了这个文件。\n\n「以磁盘上的版本重新开始」:这一轮${count ? `的 ${count} 条批注` : ''}作废(留在历史里),之后划词按磁盘上的正文开新一轮。\n\n「另存我的版本」:把这一轮锁定时的原稿存成新文件${count ? `,${count} 条批注一起带过去` : ''};磁盘上的文件不动,这一轮在原文件上作废。`,
+      { accept: '以磁盘上的版本重新开始', alt: '另存我的版本…' });
+    if (choice === 'accept') {
+      try {
+        await requestJson(`/api/app/review/restart-from-disk?r=${encodeURIComponent(tab.id)}`, { method: 'POST' });
+        await refreshTab(tab, { silent: true, forceSource: true });
+        toast('已按磁盘上的版本重新开始。划词批注就开始新一轮。');
+      } catch (error) { toast(friendlyError(error, '处理冲突'), 'error'); }
+    } else if (choice === 'alt') {
+      let filePath = '';
+      try { filePath = await pickCopyPath(tab, '另存我的版本', `${copyStem(tab)} 我的版本`); }
+      catch (error) { toast(`另存失败:${error.message || error}`, 'error'); return; }
+      if (!filePath) return;
+      try {
+        const result = await requestJson(`/api/app/review/fork?r=${encodeURIComponent(tab.id)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath }),
+        });
+        await refreshTab(tab, { silent: true, forceSource: true });
+        await openReviewId(result.reviewId);
+        toast(`已另存为《${result.absPath.split('/').pop()}》${result.carried ? `,带过去 ${result.carried} 条批注` : ''}。原文件这一轮已作废。`);
+      } catch (error) { toast(friendlyError(error, '另存我的版本'), 'error'); }
+    }
+  }
+
+  // ---------- 帮助、导入、访达 ----------
+  async function openHelp(name) {
+    try {
+      const result = await requestJson('/api/app/help/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      await openDocumentPath(result.path);
+    } catch (error) { toast(friendlyError(error, '打开说明'), 'error'); }
+  }
+  function openFeedback() {
+    if (bridge && typeof bridge.openExternal === 'function') void bridge.openExternal(FEEDBACK_URL);
+    else window.open(FEEDBACK_URL, '_blank', 'noopener');
+  }
+  async function importBatchFromMenu() {
+    if (bridge && typeof bridge.pickBatchFile === 'function') {
+      try {
+        const picked = await bridge.pickBatchFile();
+        if (!picked || !picked.ok) return;
+        await importBatchFile({ name: picked.name, text: async () => picked.text });
+      } catch (error) { toast(`导入失败:${error.message || error}`, 'error'); }
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.json,application/json';
+    input.addEventListener('change', () => { if (input.files && input.files[0]) void importBatchFile(input.files[0]); });
+    input.click();
+  }
+  function revealActive() {
+    const tab = activeTab();
+    if (!tab) return;
+    if (bridge && typeof bridge.revealPath === 'function') void bridge.revealPath(tab.review.sourceFile).catch((error) => toast(`没能在访达中显示:${error.message || error}`, 'error'));
+    else toast(tab.review.sourceFile);
+  }
+  function stepTab(direction) {
+    if (state.tabs.length < 2) return;
+    const index = state.tabs.findIndex((tab) => tab.id === state.activeId);
+    const next = state.tabs[(index + direction + state.tabs.length) % state.tabs.length];
+    if (next) activateTab(next.id);
+  }
+  async function toggleMode() {
+    const tab = activeTab();
+    if (!tab) return;
+    if (tab.mode === 'edit') await enterReadMode();
+    else if (!nodes.editingMode.disabled) await enterEditMode();
+    else toast('现在这一轮不能编辑。');
+  }
+  function runFormat(name) {
+    const tab = activeTab();
+    if (!tab || tab.mode !== 'edit' || !editorFindReady() || typeof window.DraftbackEditor.runFormat !== 'function') return;
+    window.DraftbackEditor.runFormat(state.editorView, name);
+  }
+
   async function runAction(action) {
     const tab = activeTab(); if (!tab || !action) return;
+    if (action === 'resolve-conflict') return resolveConflict(tab);
     if (action === 'submit') return submitReview(tab, { skipConfirm: true });
     if (action === 'approve') return approveAndFinalize(tab);
     if (action === 'finalize') return finalizeReviewTab(tab);
@@ -2915,19 +3477,35 @@
     void runAction(nodes.secondaryAction.dataset.action);
   }
 
-  function confirmAction(title, message, acceptText = '确认') {
-    nodes.confirmTitle.textContent = title; nodes.confirmMessage.textContent = message; nodes.confirmAccept.textContent = acceptText;
+  // 确认框:主按钮、可选的第二个选择、取消。返回 'accept' | 'alt' | null(取消或 Esc)
+  function chooseAction(title, message, { accept = '确认', alt = null, cancel = '取消' } = {}) {
+    if (state.confirmFinish) state.confirmFinish(null);
+    nodes.confirmTitle.textContent = title; nodes.confirmMessage.textContent = message;
+    nodes.confirmAccept.textContent = accept; nodes.confirmCancel.textContent = cancel;
+    nodes.confirmAlt.hidden = !alt; nodes.confirmAlt.textContent = alt || '';
     nodes.confirmDialog.hidden = false;
     return new Promise((resolve) => {
       const finish = (value) => {
         nodes.confirmDialog.hidden = true;
-        nodes.confirmAccept.removeEventListener('click', accept); nodes.confirmCancel.removeEventListener('click', cancel);
+        nodes.confirmAccept.removeEventListener('click', onAccept); nodes.confirmCancel.removeEventListener('click', onCancel);
+        nodes.confirmAlt.removeEventListener('click', onAlt);
+        state.confirmFinish = null;
+        publishMenuState();
         resolve(value);
       };
-      const accept = () => finish(true), cancel = () => finish(false);
-      nodes.confirmAccept.addEventListener('click', accept); nodes.confirmCancel.addEventListener('click', cancel);
+      const onAccept = () => finish('accept'), onCancel = () => finish(null), onAlt = () => finish('alt');
+      nodes.confirmAccept.addEventListener('click', onAccept); nodes.confirmCancel.addEventListener('click', onCancel);
+      nodes.confirmAlt.addEventListener('click', onAlt);
+      state.confirmFinish = finish;
       setTimeout(() => nodes.confirmAccept.focus(), 20);
     });
+  }
+  async function confirmAction(title, message, acceptText = '确认') {
+    return (await chooseAction(title, message, { accept: acceptText })) === 'accept';
+  }
+  // 有对话框或面板挡在前面时,菜单命令与快捷键不动它背后的东西
+  function modalOpen() {
+    return !nodes.annotationDialog.hidden || !nodes.confirmDialog.hidden || !nodes.quickOpen.hidden || !nodes.settingsDialog.hidden || !nodes.infoDialog.hidden;
   }
 
   function installEvents() {
@@ -3014,29 +3592,82 @@
     if (document.fonts && document.fonts.ready) {
       void document.fonts.ready.then(() => scheduleMarkerPositions()).catch(() => {});
     }
+    // 快捷键按动作表匹配(菜单栏显示同一张表);菜单项点击与快捷键走同一个命令。
+    // 页面先拿到按键:这里处理了(preventDefault)菜单就不会再触发一次。
     document.addEventListener('keydown', (event) => {
-      if ((event.metaKey || event.ctrlKey) && ['o', 'w'].includes(event.key.toLowerCase()) && commandBlocked()) {
-        event.preventDefault(); return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') { event.preventDefault(); handleDesktopCommand('open'); }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n' && !event.shiftKey && !event.altKey) { event.preventDefault(); handleDesktopCommand('new'); }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); handleDesktopCommand('save'); }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w') { event.preventDefault(); handleDesktopCommand('close-tab'); }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); handleDesktopCommand('find'); }
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && nodes.annotationDialog.hidden && nodes.confirmDialog.hidden && !nodes.primaryAction.hidden) { event.preventDefault(); handlePrimaryAction(); }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g') { event.preventDefault(); handleDesktopCommand(event.shiftKey ? 'find-prev' : 'find-next'); }
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'd' && nodes.annotationDialog.hidden && nodes.confirmDialog.hidden) { event.preventDefault(); handleDesktopCommand('compare-toggle'); }
-      if ((event.metaKey || event.ctrlKey) && event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && Compare.isOpen()) { event.preventDefault(); Compare.step(event.key === 'ArrowLeft' ? -1 : 1); }
+      if (!Actions || modalOpen()) return;
+      const tab = activeTab();
+      if (!tab || tab.mode !== 'edit' || !event.target || !event.target.closest || !event.target.closest('#codeEditor')) return;
+      const item = Actions.actionForEvent(event, PLATFORM, ACTION_ITEMS);
+      if (!item || item.keys !== 'capture-edit') return;
+      // 编辑模式下的格式键(⇧⌘X、⌥⌘Q、⌥⌘U、⌥⌘O、⌥⌘X、⌥⌘T、⌥⌘-、⌃`)先于编辑器默认键位
+      event.preventDefault(); event.stopPropagation();
+      handleDesktopCommand(item.command);
+    }, true);
+    document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         if (event.isComposing || event.keyCode === 229) return; // 输入法在取消候选词,不是要关东西
         if (!nodes.annotationDialog.hidden) dismissAnnotationDialog();
-        else if (!nodes.confirmDialog.hidden) { /* 确认框在最上层:Esc 不碰它背后的东西 */ }
+        else if (!nodes.confirmDialog.hidden) { if (state.confirmFinish) state.confirmFinish(null); }
+        else if (!nodes.quickOpen.hidden || !nodes.settingsDialog.hidden || !nodes.infoDialog.hidden) closePanels();
         else if (!nodes.timelinePopover.hidden) toggleTimeline(false);
         else if (Compare.isOpen()) Compare.close();
         else if (!nodes.findBar.hidden) closeFind();
         else if (activeTab() && activeTab().mode === 'edit') { /* 交给编辑器:这里清空选区会让光标消失 */ }
         else { nodes.annotate.hidden = true; window.getSelection()?.removeAllRanges(); }
+        return;
       }
+      if (!Actions) return;
+      const item = Actions.actionForEvent(event, PLATFORM, ACTION_ITEMS);
+      if (!item || (item.keys && item.keys !== 'app')) return;
+      if (event.defaultPrevented) return; // 编辑器或输入框已经处理(比如代码块里的 ⌘↩)
+      if (modalOpen()) {
+        // 对话框里的按键交给对话框;⌘O、⌘W 给一句提示,别让菜单在背后打开或关掉东西
+        if (item.command === 'open' || item.command === 'close-tab') { event.preventDefault(); commandBlocked(); }
+        else if (MODAL_SAFE_COMMANDS.has(item.command)) { event.preventDefault(); handleDesktopCommand(item.command); }
+        else event.preventDefault();
+        return;
+      }
+      const guard = KEY_GUARDS[item.command];
+      if (guard && !guard()) return; // 不该响应时让按键照常(比如对比视图没开时的 ⌥⌘←)
+      event.preventDefault();
+      handleDesktopCommand(item.command);
+    });
+    nodes.quickOpenInput.addEventListener('input', () => { state.quickOpenIndex = 0; renderQuickOpen(); });
+    nodes.quickOpenInput.addEventListener('keydown', (event) => {
+      const count = (state.quickOpenItems || []).length;
+      if (event.key === 'ArrowDown') { event.preventDefault(); if (count) { state.quickOpenIndex = (state.quickOpenIndex + 1) % count; renderQuickOpen(); } }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); if (count) { state.quickOpenIndex = (state.quickOpenIndex - 1 + count) % count; renderQuickOpen(); } }
+      else if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void chooseQuickOpen(); }
+    });
+    [nodes.quickOpen, nodes.settingsDialog, nodes.infoDialog].forEach((backdrop) => {
+      backdrop.addEventListener('pointerdown', (event) => { if (event.target === backdrop) closePanels(); });
+    });
+    nodes.settingsClose.addEventListener('click', closePanels);
+    nodes.infoClose.addEventListener('click', closePanels);
+    nodes.appearanceSegment.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-appearance]');
+      if (!button || !bridge || typeof bridge.setAppearance !== 'function') return;
+      try { await bridge.setAppearance(button.dataset.appearance); } catch (_) {}
+      nodes.appearanceSegment.querySelectorAll('button').forEach((node) => {
+        const on = node === button; node.classList.toggle('active', on); node.setAttribute('aria-checked', String(on));
+      });
+      if (state.settings) state.settings.appearance = button.dataset.appearance;
+    });
+    nodes.zoomRange.addEventListener('input', () => { setReaderZoom(Number(nodes.zoomRange.value) / 100); nodes.zoomValue.textContent = `${nodes.zoomRange.value}%`; });
+    nodes.zoomResetButton.addEventListener('click', () => { setReaderZoom(1); renderZoomSetting(); });
+    nodes.syncToggle.addEventListener('change', async () => {
+      if (!bridge || typeof bridge.setSyncEnabled !== 'function') return;
+      try { await bridge.setSyncEnabled(nodes.syncToggle.checked); if (state.settings) state.settings.syncEnabled = nodes.syncToggle.checked; }
+      catch (error) { toast(`没能更改同步设置:${error.message || error}`, 'error'); }
+      void renderSyncStatusLine();
+    });
+    nodes.syncDetailsButton.addEventListener('click', () => { void showSyncDetails(); });
+    nodes.cliInstallButton.addEventListener('click', () => { void installCliFromSettings(); });
+    nodes.aboutGuideButton.addEventListener('click', () => { closePanels(); void openHelp('guide'); });
+    nodes.aboutFeedbackButton.addEventListener('click', openFeedback);
+    nodes.annotationText.addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void saveAnnotation(); }
     });
     nodes.findInput.addEventListener('input', runFind);
     nodes.findInput.addEventListener('keydown', (event) => {
@@ -3046,6 +3677,12 @@
     nodes.findNext.addEventListener('click', () => stepFind(1));
     nodes.findPrev.addEventListener('click', () => stepFind(-1));
     nodes.findClose.addEventListener('click', closeFind);
+    nodes.replaceOne.addEventListener('click', replaceCurrentMatch);
+    nodes.replaceAll.addEventListener('click', replaceAllMatches);
+    nodes.replaceInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); if (event.metaKey || event.ctrlKey) replaceAllMatches(); else replaceCurrentMatch(); }
+      else if (event.key === 'Escape') { event.preventDefault(); closeFind(); }
+    });
     installDragAndDrop();
     window.addEventListener('beforeunload', (event) => {
       if (state.eventSource) state.eventSource.close();

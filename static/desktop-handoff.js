@@ -89,7 +89,11 @@
         view = { status: 'complete', text: '稿子回来了 · 已是最新版', detail: '看一遍改得对不对:再划词批注就开始下一轮;没问题就「通过 · 定稿」。', icon: 'ph-arrow-u-down-left', primary: button('通过 · 定稿', 'finalize', { title: '这版就是终稿,告诉 AI 这篇结束了' }), secondary: HIDDEN };
       }
     } else if (review.status === 'conflict') {
-      view = { status: 'conflict', text: '文件在外面被改了', detail: '已停止写入,需要先处理冲突。', icon: 'ph-warning-circle', primary: HIDDEN, secondary: HIDDEN };
+      view = {
+        status: 'conflict', text: '文件在外面被改了', icon: 'ph-warning-circle',
+        detail: '审阅期间有别的程序改了这个文件,已停止写入。点「处理…」:以磁盘上的版本重新开始,或另存你的版本。',
+        primary: button('处理…', 'resolve-conflict', { title: '以磁盘上的版本重新开始,或另存锁定时的版本' }), secondary: HIDDEN,
+      };
     } else if (review.status === 'cancelled') {
       view = { status: 'cancelled', text: '本轮已作废', detail: '本轮已人工结束。再划词批注会开始新一轮。', icon: 'ph-x-circle', primary: HIDDEN, secondary: HIDDEN };
     } else {

@@ -52,6 +52,9 @@ test('状态表:稿子在谁手里只有这几种,主按钮随之变化', () => 
   assert.equal(Handoff.describe({ review: { status: 'complete', outcome: 'finalized' } }).text, '已定稿');
   assert.equal(Handoff.describe({ review: { status: 'complete', outcome: 'approved' } }).primary.action, 'finalize');
   assert.match(Handoff.describe({ review: { status: 'conflict' } }).text, /外面被改/);
+  const conflict = Handoff.describe({ review: { status: 'conflict' } });
+  assert.equal(conflict.primary.label, '处理…', '冲突时主按钮给两条路的入口');
+  assert.equal(conflict.primary.action, 'resolve-conflict');
   assert.equal(Handoff.describe({ review: { status: 'cancelled' } }).text, '本轮已作废');
 
   const readOnly = Handoff.describe({ plain: true, mode: 'read', review: {}, readOnly: true, encoding: 'gbk' });

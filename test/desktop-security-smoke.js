@@ -112,7 +112,7 @@ async function main() {
     await waitUntil('进入编辑的确认框', () => chrome.cdp.evaluate(`(() => {
       const dialog = document.querySelector('#confirmDialog');
       const title = document.querySelector('#confirmTitle').textContent;
-      return !dialog.hidden && (title.includes('手工修改') || title.includes('编辑'));
+      return !dialog.hidden && (title.includes('原文已锁定') || title.includes('手工修改') || title.includes('编辑'));
     })()`));
     await chrome.cdp.evaluate(`document.querySelector('#confirmAccept').click()`);
     await waitUntil('进入编辑模式', () => chrome.cdp.evaluate(`(() => {

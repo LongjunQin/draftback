@@ -39,6 +39,17 @@ contextBridge.exposeInMainWorld('draftbackDesktop', Object.freeze({
   newDocument: (payload) => ipcRenderer.invoke('draftback:new-document', payload),
   exportHtml: (payload) => ipcRenderer.invoke('draftback:export-html', payload),
   exportDocx: (payload) => ipcRenderer.invoke('draftback:export-docx', payload),
+  // 菜单栏(动作表)按页面状态启用 / 勾选;文档进系统「打开最近」
+  setMenuState: (state) => ipcRenderer.send('draftback:menu-state', state),
+  noteRecent: (filePath) => ipcRenderer.send('draftback:note-recent', filePath),
+  // 设置窗口
+  getSettings: () => ipcRenderer.invoke('draftback:get-settings'),
+  setAppearance: (value) => ipcRenderer.invoke('draftback:set-appearance', value),
+  setSyncEnabled: (enabled) => ipcRenderer.invoke('draftback:set-sync-enabled', Boolean(enabled)),
+  installCli: () => ipcRenderer.invoke('draftback:install-cli'),
+  // 另存为副本、导入批注文件
+  saveCopyDialog: (payload) => ipcRenderer.invoke('draftback:save-copy-dialog', payload),
+  pickBatchFile: () => ipcRenderer.invoke('draftback:pick-batch-file'),
   // 拖放:沙盒渲染进程拿不到 File.path,由预加载脚本换算成绝对路径
   pathsForFiles(files) {
     const list = Array.from(files || []);

@@ -1139,7 +1139,7 @@ async function main() {
       const firstState = first && first.querySelector('.tab-state');
       if (!active || !active.textContent.includes('MDTurn第二文档.md') ||
           !status.includes('稿子回来了') || !content.includes(${JSON.stringify(pushedPhrase)}) || count !== '0' ||
-          !toasts.some((text) => text.includes('Agent 修改完成'))) return null;
+          !toasts.some((text) => text.includes('已换成最新版'))) return null;
       return {
         status,
         toasts,
@@ -1152,7 +1152,7 @@ async function main() {
       `Agent 主动推送应在 5 秒内更新，而不是等待 60 秒轮询；实际 ${activePushElapsedMs}ms`);
     assert.match(pushedUi.firstStateClass, /reviewing/, '第二标签主动刷新不得污染第一标签状态');
 
-    const completionToastCount = pushedUi.toasts.filter((text) => text.includes('Agent 修改完成')).length;
+    const completionToastCount = pushedUi.toasts.filter((text) => text.includes('已换成最新版')).length;
     await Promise.all([
       notifyReview(server.port, secondOpened.review.id, 'agent-complete'),
       notifyReview(server.port, secondOpened.review.id, 'agent-complete'),
@@ -1160,7 +1160,7 @@ async function main() {
     await chrome.cdp.evaluate('window.dispatchEvent(new Event("focus"))');
     await sleep(250);
     const duplicateToastCount = await chrome.cdp.evaluate(`Array.from(document.querySelectorAll(
-      '#toastRegion .toast')).filter((item) => item.textContent.includes('Agent 修改完成')).length`);
+      '#toastRegion .toast')).filter((item) => item.textContent.includes('已换成最新版')).length`);
     assert.equal(duplicateToastCount, completionToastCount,
       '重复 complete 事件与focus 补偿并发时，同一轮只能通知一次');
 
@@ -1208,7 +1208,7 @@ async function main() {
     await notifyReview(server.port, detachedOpened.review.id, 'agent-complete');
     await waitUntil('未打开标签的 Agent 完成通知', () => chrome.cdp.evaluate(`(() => {
       const toasts = Array.from(document.querySelectorAll('#toastRegion .toast')).map((item) => item.textContent);
-      return toasts.some((text) => text.includes('MDTurn已关闭标签通知.md') && text.includes('Agent 修改完成'));
+      return toasts.some((text) => text.includes('MDTurn已关闭标签通知.md') && text.includes('已换成最新版'));
     })()`), 5_000);
     assert.equal(await chrome.cdp.evaluate(`document.querySelectorAll('#tabList .tab').length`),
       tabCountBeforeDetachedNotice, '已关闭/未打开标签收到完成事件时不得自动重开');
@@ -1240,7 +1240,9 @@ async function main() {
     await chrome.cdp.click('#editingModeButton');
     await waitUntil('手工修改确认框', () => chrome.cdp.evaluate(`(() => {
       const dialog = document.querySelector('#confirmDialog');
-      return !dialog.hidden && document.querySelector('#confirmTitle').textContent.includes('手工修改');
+      // 第二批起:审阅中点「编辑」提示「原文已锁定」,主按钮「我自己改」,另一个选择是「另存为副本…」
+      return !dialog.hidden && document.querySelector('#confirmTitle').textContent.includes('原文已锁定') &&
+        document.querySelector('#confirmAccept').textContent === '我自己改' && !document.querySelector('#confirmAlt').hidden;
     })()`));
     await chrome.cdp.click('#confirmAccept');
     await waitUntil('进入 manual applying 编辑器', async () => {

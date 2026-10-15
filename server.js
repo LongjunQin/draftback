@@ -284,6 +284,87 @@ async function requireReview(ref) {
   }
   return review;
 }
+// 删除批注可撤销(UI 方案 3.4):删掉的批注在这里留一会儿,撤销时原样放回(同一个 id、同一个位置)。
+// 只在这一轮仍是「批注中」时能放回;交出之后本轮成员已固定,不再改动。服务重启后撤销失效。
+const DELETED_NOTE_TTL_MS = 60_000;
+const deletedNotes = new Map(); // `${reviewId}:${noteId}` → { note, index, at }
+function rememberDeletedNote(reviewId, note, index) {
+  const now = Date.now();
+  for (const [key, entry] of deletedNotes) if (now - entry.at > DELETED_NOTE_TTL_MS) deletedNotes.delete(key);
+  if (deletedNotes.size > 200) deletedNotes.delete(deletedNotes.keys().next().value);
+  deletedNotes.set(`${reviewId}:${note.id}`, { note: JSON.parse(JSON.stringify(note)), index, at: now });
+}
+async function restoreDeletedNote(review, noteId) {
+  const key = `${review.id}:${noteId}`;
+  const entry = deletedNotes.get(key);
+  if (!entry || Date.now() - entry.at > DELETED_NOTE_TTL_MS) {
+    deletedNotes.delete(key);
+    throw new store.ReviewStoreError('UNDO_EXPIRED', '撤销已过期,这条批注没有放回。', { httpStatus: 410 });
+  }
+  return store.withReviewTransaction(review.absPath, async () => {
+    const writable = await requireWritableReview(review.id);
+    const restored = await mutateReviewAnnotations(writable, (data) => {
+      if (data.annotations.some((item) => item.id === noteId)) return data.annotations.find((item) => item.id === noteId);
+      const at = Math.max(0, Math.min(entry.index, data.annotations.length));
+      data.annotations.splice(at, 0, entry.note);
+      return entry.note;
+    });
+    deletedNotes.delete(key);
+    return restored;
+  });
+}
+
+// ---------- 冲突处理(UI 方案 3.3):「文件在外面被改了」只给两条路 ----------
+
+// 一、以磁盘上的版本重新开始:这一轮作废(批注留在历史里),之后划词按磁盘上的正文开新一轮
+async function restartFromDisk(ref) {
+  const review = await documents.requireReview(ref);
+  if (review.status !== 'conflict') {
+    throw new store.ReviewStoreError('NOT_CONFLICT', '只有「文件在外面被改了」时才需要这样处理。', { httpStatus: 409 });
+  }
+  return store.unlockReview(review.absPath, '原文在别处被改过:以磁盘上的版本重新开始');
+}
+
+// 二、另存我的版本:把这一轮冻结时的原稿存成新文件(新文档身份),本轮未处理的批注跟着带过去,原文件这一轮作废
+async function forkConflictRound(ref, targetPath) {
+  const review = await documents.requireReview(ref);
+  if (review.status !== 'conflict') {
+    throw new store.ReviewStoreError('NOT_CONFLICT', '只有「文件在外面被改了」时才能另存当时的版本。', { httpStatus: 409 });
+  }
+  if (!review.docId || !review.versionId) {
+    throw new store.ReviewStoreError('VERSION_MISSING', '这一轮没有留底,没法另存冻结时的版本。', { httpStatus: 409 });
+  }
+  const original = versionStore.readVersion(review.docId, review.versionId, 'original');
+  if (!original.available) {
+    throw new store.ReviewStoreError('VERSION_UNAVAILABLE', '这一轮的原稿留底不可用,没法另存。', { httpStatus: 409 });
+  }
+  const { decodeText } = require('./lib/text-encoding');
+  const content = decodeText(original.buffer).content;
+  const copy = await plainDocuments.saveDocumentCopy(targetPath, { content, sourcePath: review.absPath });
+  const copyPath = copy.document.absPath;
+  const notes = store.readAnnotations(review.absPath).annotations
+    .filter((note) => (note.status || 'open') === 'open' && (!note.reviewSessionId || note.reviewSessionId === review.id));
+  const opened = await store.openReview(copyPath);
+  const carried = [];
+  if (notes.length) {
+    await store.mutateAnnotations(copyPath, (data) => {
+      for (const note of notes) {
+        const next = {};
+        for (const field of NOTE_FIELDS) if (note[field] !== undefined && field !== 'clientRequestId') next[field] = note[field];
+        const created = {
+          ...next, id: newNoteId(), createdAt: note.createdAt || new Date().toISOString(), author: note.author || '我(本机)', status: 'open',
+          reviewSessionId: opened.review.id, sourceHash: opened.review.sourceHash,
+          forkedFrom: { path: review.absPath, reviewId: review.id, noteId: note.id },
+        };
+        data.annotations.push(created);
+        carried.push(created.id);
+      }
+    });
+  }
+  await store.unlockReview(review.absPath, `已另存为副本「${path.basename(copyPath)}」,这一轮在原文件上作废`);
+  return { ok: true, reviewId: opened.review.id, absPath: copyPath, carried: carried.length };
+}
+
 async function requireWritableReview(ref) {
   let review = await requireReview(ref);
   if (review.status !== 'reviewing') throw reviewReadOnly(review);
@@ -437,13 +518,15 @@ async function handleReviewAnnotations(req, res, q, review) {
         const annotation = data.annotations.find((item) => item.id === id);
         if (!annotation) return;
         if (annotation.status !== 'open') { immutable = true; return; }
+        const index = data.annotations.indexOf(annotation);
         data.annotations = data.annotations.filter((item) => item.id !== id);
+        rememberDeletedNote(writable.id, annotation, index);
         found = true;
       });
     });
     if (immutable) return sendJson(res, 409, { error: 'annotation_read_only', message: '已处理批注不能由审阅页删除。' });
     if (!found) return sendJson(res, 404, { error: 'annotation_not_found', message: '找不到批注。' });
-    return sendJson(res, 200, { ok: true });
+    return sendJson(res, 200, { ok: true, undoable: true, undoSeconds: DELETED_NOTE_TTL_MS / 1000 });
   }
   return sendJson(res, 405, { error: 'method_not_allowed', message: 'Method not allowed' });
 }
@@ -701,6 +784,43 @@ async function handleAppApi(req, res, pathname, q) {
     }
     return sendJson(res, 200, await plainDocuments.readDocument(body.path));
   }
+  // 帮助(帮助 › 回稿使用说明 / 给 AI 的说明):随包的说明复制到数据目录再按普通文档打开,批注不会写进 App 包里
+  if (pathname === '/api/app/help/open') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    const names = { guide: '回稿使用说明.md', ai: '给 AI 的说明.md' };
+    const name = body && names[body.name];
+    if (!name) return sendJson(res, 400, { error: 'bad_request', message: '没有这份说明。' });
+    const source = path.join(STATIC_DIR, 'help', name);
+    const dir = path.join(store.getDataDir(), 'help');
+    fs.mkdirSync(dir, { recursive: true });
+    const target = path.join(dir, name);
+    const fresh = fs.readFileSync(source);
+    // 随版本更新说明;用户在这份上的批注(旁注)不受影响
+    if (!fs.existsSync(target) || !fs.readFileSync(target).equals(fresh)) {
+      const active = await store.getReviewByPath(target, { activeOnly: true }).catch(() => null);
+      if (!active) fs.writeFileSync(target, fresh);
+    }
+    return sendJson(res, 200, { ok: true, path: fs.realpathSync(target) });
+  }
+  // 图片落盘:编辑器里粘贴、拖入、上传的图片存到文档旁的 images/,返回相对路径
+  if (pathname === '/api/app/document/image') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim()) {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供 Markdown 文档路径。' });
+    }
+    return sendJson(res, 200, await plainDocuments.saveDocumentImage(body.path, body));
+  }
+  // 另存为副本:新文件、新文档身份;不复制旁注
+  if (pathname === '/api/app/document/copy') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim()) {
+      return sendJson(res, 400, { error: 'bad_request', message: '请提供副本的保存路径。' });
+    }
+    return sendJson(res, 200, await plainDocuments.saveDocumentCopy(body.path, body));
+  }
   if (pathname === '/api/app/document/create') {
     if (!allowMethods(req, res, ['POST'])) return;
     const body = await readBody(req);
@@ -803,6 +923,29 @@ async function handleAppApi(req, res, pathname, q) {
     const body = await readBody(req);
     const result = await documents.writeSource(ref, body);
     return sendJson(res, 200, { ok: true, ...result });
+  }
+  if (pathname === '/api/app/review/restart-from-disk') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const review = await restartFromDisk(ref);
+    await publishReviewChangedSafe(review.id, 'conflict-restarted');
+    return sendJson(res, 200, { ok: true, review });
+  }
+  if (pathname === '/api/app/review/fork') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const body = await readBody(req);
+    if (!body || typeof body.path !== 'string' || !body.path.trim()) return sendJson(res, 400, { error: 'bad_request', message: '请提供副本的保存路径。' });
+    const result = await forkConflictRound(ref, body.path);
+    await publishReviewChangedSafe(ref, 'conflict-forked');
+    return sendJson(res, 200, result);
+  }
+  if (pathname === '/api/app/annotation/restore') {
+    if (!allowMethods(req, res, ['POST'])) return;
+    const noteId = q.get('id');
+    if (!noteId) return sendJson(res, 400, { error: 'bad_request', message: '缺少批注 id。' });
+    const review = await documents.requireReview(ref);
+    const note = await restoreDeletedNote(review, noteId);
+    await publishReviewChangedSafe(review.id, 'annotation-restored');
+    return sendJson(res, 200, { ok: true, note });
   }
   if (pathname === '/api/app/annotation') {
     if (!allowMethods(req, res, ['PATCH'])) return;

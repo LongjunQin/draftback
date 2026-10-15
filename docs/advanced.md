@@ -129,6 +129,17 @@ Agent 的节奏固定为：`open` → 挂 `wait` → 改稿 → `complete` → �
 
 手机批次(跨端规则 v2.3 第 6 节):协议 `version: 2`,外层与每条批注都带 `{ docId, reviewId, baseVersion }`;接收顺序是 已有回执 → 缺身份(`missing-identity`)→ 按 docId 定位 → 最新轮次(`round-advanced`,正文相同也拒)→ 状态(`session-advanced`)→ 实际文件指纹(`version-mismatch`)→ 同一事务写旁注、固定成员、交出、定稿回执(导入记录在 `imports/`,崩溃后重放补齐)。没有身份的旧批次(手机独立文件导出、拖进窗口)只能转为当前轮的新批注:`mdreview import-batch <文件> --as-new-notes --document <路径>`。
 
+## 菜单栏、快捷键与常用操作(第二批,beta.9 起)
+
+- **动作表**:菜单栏与快捷键共用 `static/desktop-actions.js`。主进程按它搭菜单;页面按它匹配快捷键,并把当前状态(有没有文档、阅读还是编辑、主按钮是什么……)报给主进程,菜单逐项启用或勾选。页面先拿到按键,处理了就不会再触发一次菜单。格式键在编辑模式下由页面在捕获阶段先拦住(覆盖编辑器的默认键位)。
+- **图片**:编辑时粘贴、拖入或「选择图片」,存到文档旁 `images/`,正文写相对路径。接口 `POST /api/app/document/image { path, name, type, data(base64) }`。
+- **另存为副本**:`POST /api/app/document/copy { path, content, sourcePath }`,新文档身份,不带旁注。
+- **删除批注可撤销**:删除后服务端留 60 秒;`POST /api/app/annotation/restore?r=&id=` 原样放回,只在这一轮仍是「批注中」时可以。
+- **冲突**:`POST /api/app/review/restart-from-disk?r=`(本轮作废,以磁盘版本重新开始);`POST /api/app/review/fork?r= { path }`(锁定时的原稿另存为新文件,未处理批注带过去,原文件这一轮作废)。
+- **帮助**:`POST /api/app/help/open { name: guide | ai }` 把随包说明复制到 `~/.draftback/help/` 再打开。
+- **命令行工具**:设置里「安装 mdreview」写 `/usr/local/bin/mdreview`,用 App 自带运行时跑 `Contents/Resources/draftback-server/mdreview.js`(`ELECTRON_RUN_AS_NODE=1`)。
+- **同步开关**:设置里关掉后主进程停掉同步辅助程序,重新打开再启动(`settings.json` 的 `syncEnabled`)。
+
 ## 内置服务
 
 本地服务由回稿桌面壳用 Electron 自带的 Node 运行时拉起（`ELECTRON_RUN_AS_NODE`），
