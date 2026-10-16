@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 手机:首页</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board"></div>
+<script>
+const head = () => `<div class="lt-ink">${statusBar()}</div>
+  <div class="h-title"><h1 class="lt-ink">回稿</h1>
+    <button class="p-btn big lt-press press" aria-label="从「文件」打开">${icon('folder', 19, 2.1)}</button>
+    <button class="p-btn big lt-press press" aria-label="设置">${icon('gear', 19, 2)}</button></div>`;
+const row = (dot, title, sub, tail = '', subCls = '') => `<div class="g-row"><i class="dot tone-${dot}"></i><div class="rm"><b>${title}</b><small class="${subCls}">${sub}</small></div>${tail}</div>`;
+const tog = (open, off = false) => `<span class="g-tog ${off ? 'off' : ''}">${open ? '收起' : '展开'}${icon(open ? 'up' : 'down', 13, 2.6)}</span>`;
+const group = ({ name, band, tab, count, note = '', noteHand = false, open = true, rows = '', foot = '', off = false }) => `
+  <section class="grp ${open ? '' : 'closed'} ${band} paper-c">
+    ${count ? `<div class="tabx sticker ${tab}">${count}</div>` : ''}
+    <div class="g-head"><span class="nm">${name}</span><span class="gn ${noteHand ? 'hand' : ''}" style="${noteHand ? 'color: #b0644e' : ''}">${note}</span>${tog(open, off)}</div>
+    ${open ? `<div class="g-rows">${rows}</div>${foot ? `<div class="g-foot">${foot}</div>` : ''}` : ''}
+  </section>`;
+const spin = '<span class="spin"></span>';
+const unread = '<i class="dot tone-unread" style="width: 9px; height: 9px"></i>';
+const fresh = '<span class="sticker coral" style="width: 24px; height: 24px; font-size: 11px">新</span>';
+const search = (text = '搜索稿件和本机文件', extra = '') => `<div class="press-pill h-search">${icon('search', 18, 2.2)}<span class="${text === '搜索稿件和本机文件' ? 'lt-ink-soft' : 'lt-ink'}" style="flex: 1">${text}</span>${extra}</div>`;
+const screen = (inner) => phone(`<div style="display: flex; flex-direction: column; gap: 13px; height: 100%; padding: 56px 18px 0">${inner}</div><div class="home-ind lt-ink"></div>`, { screenClass: 'lt-deep', screenStyle: 'box-shadow: inset 0 0 40px rgba(var(--shade),.22)' });
+
+const home = screen(head()
+  + group({ name: '轮到你', band: 'coral-band', tab: 'coral', count: 3, note: '有 1 篇稿子回来了', noteHand: true, rows:
+      row('back', '产品方案.md', '第 3 轮回稿 · 采纳 2 · 未采纳 1', unread)
+    + row('turn', '跨端规则.md', '第 2 轮 · 2 条未交 · 10 分钟前', fresh)
+    + row('conflict', '定价页.md', '文件被别的程序改了 · 要在 Mac 上处理', '', 'red') })
+  + group({ name: '已交出', band: 'lav-band', tab: 'lav', count: 2, rows:
+      row('ai', '发布说明.md', 'AI 正在修改 · 12 分钟', spin)
+    + row('wait', '访谈记录.md', '已交出 · AI 在线,等待领取') })
+  + group({ name: '已结束', band: 'mint-band', tab: 'mint', count: 7, note: '年度总结.md · 已定稿', open: false })
+  + group({ name: '本机文件', band: 'sand-band', tab: 'sand', count: 2, note: '示例文档.md', open: false })
+  + `<div class="h-foot lt-ink-soft">${icon('cloud', 13, 2)} iCloud 已同步 · 13:07</div>` + search());
+
+const first = screen(head()
+  + `<section class="card-c" style="position: relative; margin-right: 10px; padding: 14px 16px; border-radius: 5px">
+      <span class="washi" style="--tape: rgba(150,205,180,.75); width: 70px; left: 50%; margin-left: -35px; top: -10px; transform: rotate(2deg)"></span>
+      <div style="display: flex; gap: 10px; align-items: flex-start"><span style="color: var(--warn); margin-top: 1px">${icon('cloud', 20, 2)}</span>
+      <div style="flex: 1"><div style="font-size: 15px; font-weight: 600; line-height: 1.45">登录与 Mac 相同的 Apple ID,手机才能收到稿子</div>
+      <div style="margin-top: 4px; font-size: 13px; color: var(--muted)">本机文件照常能用。</div>
+      <button class="lt lt-raised" style="margin-top: 10px; height: 32px; padding: 0 14px; border-radius: 16px; font-size: 13px">打开设置</button></div></div></section>`
+  + group({ name: '轮到你', band: 'coral-band', tab: 'coral', count: 0, rows: `<div style="padding: 12px 0 10px; font-size: 13.5px; line-height: 1.6; color: var(--muted)">Mac 上开始审阅的文档会自动出现在这里。</div>` })
+  + group({ name: '本机文件', band: 'sand-band', tab: 'sand', count: 1, rows: row('idle', '示例文档.md', '随 App 自带,随便批'),
+      foot: '只在这台手机上,不会同步到 Mac。「文件」App → 我的 iPhone → 回稿 里的 Markdown 也列在这里。' })
+  + `<div class="h-foot lt-ink-soft">${icon('cloud', 13, 2)} 未登录 iCloud</div>` + search());
+
+const found = screen(head()
+  + group({ name: '轮到你', band: 'coral-band', tab: 'coral', count: 1, off: true, rows: row('back', '产品<span class="hl-soft">方案</span>.md', '第 3 轮回稿 · 采纳 2 · 未采纳 1', unread) })
+  + group({ name: '已结束', band: 'mint-band', tab: 'mint', count: 2, off: true, rows:
+      row('done', '<span class="hl-soft">方案</span>评审记录.md', '已定稿 · 10 月 12 日')
+    + row('idle', '旧版定价<span class="hl-soft">方案</span>.md', '已作废 · 9 月 30 日') })
+  + group({ name: '本机文件', band: 'sand-band', tab: 'sand', count: 1, off: true, rows: row('idle', '<span class="hl-soft">方案</span>草稿.md', '回稿') })
+  + search('方案', `<span class="lt-ink-soft">${icon('close', 16, 2.4)}</span>`));
+
+document.getElementById('board').innerHTML = [
+  shot('首页:每个大类是一张分隔页。标题在浅色带上,和稿子分开;右边有「收起」「展开」。右上新增「设置」', home),
+  shot('第一次用、还没登录 iCloud:先提示登录;本机文件照常能用,自带一篇示例', first),
+  shot('搜索:所有大类都打开,命中的字用荧光笔标出;搜索时不能收起', found),
+].join('');
+</script>
+</body>
+</html>

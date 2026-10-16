@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C Mac:批注</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board" style="flex-direction: column; gap: 0"></div>
+<script>
+const macSeal = `<span class="lt-ink" style="flex: none; font-size: 14px; font-weight: 600">通过 · 定稿</span>${seal(46)}`;
+const gh = (tone, name, n) => `<div class="m-gh"><i class="dot tone-${tone}" style="box-shadow: none"></i><span class="nm">${name}</span><span class="n">${n}</span></div>`;
+const side = macSide({ body: gh('turn', '轮到你', 3) + macRow('turn', '产品方案', '第 4 轮 · 2 条未交 · 刚刚', { cur: true }) + macRow('turn', '跨端规则', '第 2 轮 · 2 条未交 · 10 分钟前')
+  + macRow('conflict', '定价页', '文件在外面被改了 · 要处理', { red: true }) + gh('ai', '已交出', 1) + macRow('ai', '发布说明', 'AI 正在修改 · 12 分钟', { tail: '<span class="spin" style="margin-top: 4px"></span>' })
+  + gh('idle', '最近打开', 2) + macRow('done', '年度总结', '已定稿 · 10 月 12 日') + macRow('idle', '会议纪要', '普通文档 · 昨天') });
+const paper = `<div class="m-paper paper-c"><article class="doc"><h1>产品方案</h1><p>${DOC.intro}</p>
+  <h3>谁说了算</h3><p>Mac 管原文、轮次和最终状态。手机管自己还没交出去的批注,强退也不会丢。<span class="mark">云端只是邮筒,不做裁判。</span></p>
+  <h3>批注怎么走</h3><p><span class="sel">手机上写的每一条先存在手机里。</span>点「交给 AI」才打包上传。<span class="mark">Mac 收到后回一张回执。</span></p><h3>出了岔子怎么办</h3><p>${DOC.oops}</p></article>
+  <span class="sticker coral pin" style="right: 18px; top: 262px">1</span><span class="sticker coral pin" style="right: 18px; top: 346px">1</span>
+  <div class="m-modal card-c" style="left: 70px; top: 398px; width: 440px"><span class="washi" style="--tape: rgba(255,214,120,.85); width: 80px; left: 50%; margin-left: -40px; top: -11px; transform: rotate(-2deg)"></span>
+    <div class="lbl">本轮批注</div><h2>添加批注</h2><div class="composer-q" style="margin-top: 0">“手机上写的每一条先存在手机里。”</div>
+    <div class="lbl" style="margin: 2px 0 6px">你的意见</div><div class="m-field">“先存在手机里”要说清楚存多久<span class="caret"></span></div>
+    <div class="m-actions"><span class="plain">取消</span><button class="lt lt-raised" style="height: 34px; padding: 0 16px; border-radius: 17px; font-size: 13.5px">保存批注 ⌘↩</button></div></div></div>`;
+const right = macRight(`<div class="lt-ink" style="display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 700">未交 · 2<span class="lt-ink-soft" style="font-weight: 400; font-size: 12px">交出前都能改、能删</span></div>`
+  + macNote('“云端只是邮筒,不做裁判。”', '这个比喻换掉', '我 · 谁说了算 · 13:02', '修改 删除', -.8)
+  + macNote('“Mac 收到后回一张回执。”', '回执是什么?说清楚是谁回给谁', '我 · 批注怎么走 · 13:04', '修改 删除', 1)
+  + macDash(), '⌥⌘M 批注 · ⌘↩ 交给 AI · ⌥⌘↓ 下一条批注', '本轮', 2);
+document.getElementById('board').innerHTML = shotW('Mac 窗口·批注中:选中文字写批注,批注框像一张贴着纸胶带的卡片;右栏每条是一张便签,交出前能改能删',
+  mac(macTop({ pill: macPill('批注中 · 2 条', 'turn', 'pen'), right: tagBtn('交给 AI', { ic: 'send', count: 2 }) }) + `<div class="m-work">${side}<main class="m-main">${paper}</main>${right}</div>`));
+</script>
+</body>
+</html>

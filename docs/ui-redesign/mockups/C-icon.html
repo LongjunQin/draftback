@@ -2,16 +2,25 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>方案 C 软皮手账:App 图标</title>
+<title>方案 C 软皮手账:App 图标终版</title>
 <link rel="stylesheet" href="mockup.css">
 <style>
 .mac-icon { filter: drop-shadow(0 .03em .05em rgba(0,0,0,.35)); }
 .col { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.home-row { display: flex; gap: 26px; padding: 22px 26px; border-radius: 22px; background: linear-gradient(160deg, #304a64, #1d2b3c); }
-.home-app { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #fff; font-size: 12px; }
-.other-app { width: 60px; height: 60px; border-radius: 14px; background: linear-gradient(160deg, #8fa3b8, #5d6f83); opacity: .7; }
-.arrow { font-size: 40px; color: #8a8478; margin: 0 4px 60px; }
+.col small { font-size: 13px; color: #8a8478; margin-top: -6px; }
+.home-row { display: flex; gap: 26px; padding: 22px 26px; border-radius: 22px; }
+.home-row.light { background: linear-gradient(160deg, #a9bdd3, #7f97b3); }
+.home-row.dark { background: linear-gradient(160deg, #1d2633, #0c1016); }
+.home-app { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #fff; font-size: 12px; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.other-app { width: 60px; height: 60px; border-radius: 14px; background: linear-gradient(160deg, #f4f4f4, #d9d9d9); }
+.dark .other-app { background: linear-gradient(160deg, #3a3a3e, #262629); }
+/* iOS 着色模式:系统把图标变灰,再按用户选的颜色染色。这里用固定的琥珀色示意 */
+.tinted { position: relative; isolation: isolate; filter: grayscale(1) contrast(1.05); }
+.tint-wrap { position: relative; isolation: isolate; border-radius: .2267em; }
+.tint-wrap::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: #e0a24a; mix-blend-mode: color; }
+.row6 { display: flex; gap: 30px; }
 </style>
+<script src="themes.js"></script>
 </head>
 <body>
 <svg width="0" height="0" style="position: absolute" aria-hidden="true">
@@ -57,15 +66,15 @@
     </symbol>
   </defs>
 </svg>
-<div class="board" style="flex-direction: column; gap: 34px">
-  <p class="caption" style="margin: 0">App 图标:火漆印放大,占满图标的八成多;印面「回」字的两个方框也放大</p>
-  <div style="display: flex; gap: 40px; align-items: flex-end">
-    <div class="col"><div class="icon-c old" style="font-size: 230px"><svg><use href="#seal"/></svg></div><span class="caption" style="margin: 0">原来</span></div>
-    <div class="arrow">→</div>
-    <div class="col"><div class="icon-c" style="font-size: 300px"><svg><use href="#seal-l"/></svg></div><span class="caption" style="margin: 0">放大后:iPhone</span></div>
-    <div class="col" style="margin-left: 16px"><div class="icon-c mac-icon" style="font-size: 230px; margin: 20px"><svg><use href="#seal-l"/></svg></div><span class="caption" style="margin: 0">放大后:Mac</span></div>
+<div class="board" style="flex-direction: column; gap: 36px">
+  <p class="caption" style="margin: 0">App 图标终版:默认是青雾蓝软皮,上面压一枚红色火漆印,印面是「回」字的两个方框</p>
+  <div style="display: flex; gap: 46px; align-items: flex-end">
+    <div class="col"><div class="icon-c" style="font-size: 300px"><svg><use href="#seal-l"/></svg></div><span class="caption" style="margin: 0">iPhone</span></div>
+    <div class="col"><div class="icon-c mac-icon" style="font-size: 220px; margin: 18px"><svg><use href="#seal-l"/></svg></div><span class="caption" style="margin: 0">Mac</span></div>
+    <div class="col"><div class="icon-c" id="dark-icon" style="font-size: 170px"><svg><use href="#seal-l"/></svg></div><span class="caption" style="margin: 0">iPhone 深色模式</span><small>用深空黑皮面</small></div>
+    <div class="col"><div class="tint-wrap" style="font-size: 170px"><div class="icon-c tinted" id="tint-icon"><svg><use href="#seal-l"/></svg></div></div><span class="caption" style="margin: 0">iPhone 着色模式</span><small>系统按用户选的颜色染色</small></div>
   </div>
-  <div style="display: flex; gap: 48px; align-items: flex-end">
+  <div style="display: flex; gap: 40px; align-items: flex-end">
     <div class="col">
       <div style="display: flex; gap: 22px; align-items: flex-end">
         <div class="icon-c" style="font-size: 120px"><svg><use href="#seal-l"/></svg></div>
@@ -75,15 +84,33 @@
       <span class="caption" style="margin: 0">小尺寸</span>
     </div>
     <div class="col">
-      <div class="home-row">
+      <div class="home-row light">
         <div class="home-app"><div class="other-app"></div>备忘录</div>
-        <div class="home-app"><div class="icon-c old" style="font-size: 60px"><svg><use href="#seal"/></svg></div>原来</div>
-        <div class="home-app"><div class="icon-c" style="font-size: 60px"><svg><use href="#seal-l"/></svg></div>放大后</div>
+        <div class="home-app"><div class="icon-c" style="font-size: 60px"><svg><use href="#seal-l"/></svg></div>回稿</div>
         <div class="home-app"><div class="other-app"></div>文件</div>
       </div>
-      <span class="caption" style="margin: 0">主屏幕上的样子</span>
+      <span class="caption" style="margin: 0">浅色主屏幕</span>
+    </div>
+    <div class="col">
+      <div class="home-row dark">
+        <div class="home-app"><div class="other-app"></div>备忘录</div>
+        <div class="home-app"><div class="icon-c" id="dark-small" style="font-size: 60px"><svg><use href="#seal-l"/></svg></div>回稿</div>
+        <div class="home-app"><div class="other-app"></div>文件</div>
+      </div>
+      <span class="caption" style="margin: 0">深色主屏幕</span>
     </div>
   </div>
+  <div class="col" style="align-items: flex-start; gap: 16px">
+    <span class="caption" style="margin: 0">换封面颜色时,图标可以跟着换(设置里打开「图标跟着封面换」)</span>
+    <div class="row6" id="six"></div>
+  </div>
 </div>
+<script>
+const black = themeById('black');
+for (const id of ['dark-icon', 'dark-small']) document.getElementById(id).setAttribute('style', document.getElementById(id).getAttribute('style') + '; ' + themeVars(black));
+document.getElementById('tint-icon').setAttribute('style', themeVars({ ...black, c1: '#232325', c2: '#171719' }));
+document.getElementById('six').innerHTML = THEMES.map((t) =>
+  `<div class="col"><div class="icon-c" style="font-size: 130px; ${themeVars(t)}"><svg><use href="#seal-l"/></svg></div><span class="caption" style="margin: 0">${t.name}${t.id === 'mist' ? '(默认)' : ''}</span></div>`).join('');
+</script>
 </body>
 </html>

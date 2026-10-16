@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C Mac:显示改动</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board" style="flex-direction: column; gap: 0"></div>
+<script>
+const macSeal = `<span class="lt-ink" style="flex: none; font-size: 14px; font-weight: 600">通过 · 定稿</span>${seal(46)}`;
+const gh = (tone, name, n) => `<div class="m-gh"><i class="dot tone-${tone}" style="box-shadow: none"></i><span class="nm">${name}</span><span class="n">${n}</span></div>`;
+const paper = `<div class="m-paper paper-c"><div class="m-cmp"><b>第 3 轮改动</b><span style="color: var(--muted)">原稿 → 完成稿 · 4 处(改 2、增 1、删 1)</span>
+  <span class="nav">1 / 4<span>‹</span><span>›</span><span>关闭</span></span></div>
+  <div style="display: flex; gap: 14px; align-items: center; margin: -8px 0 16px; font-size: 12px; color: var(--muted)"><ins style="padding: 0 4px; text-decoration: none; color: var(--ins); background: rgba(80,180,120,.16)">新增</ins><del style="color: var(--del)">删除</del><span style="border-left: 2.5px solid #74c19c; padding-left: 6px">改过</span><span>只读 · 要继续批注请关闭视图</span></div>
+  ${macDoc('diff')}</div>`;
+document.getElementById('board').innerHTML = shotW('Mac 窗口·显示改动:按钮按下去变成「隐藏改动」;纸面顶上一条绿纸条写改了几处,能一处一处跳;右栏回稿卡展开看逐条结果',
+  mac(macTop({ pill: macPill('稿子回来了 · 已是最新版', 'back', 'history'), toggle: 'hide', right: macSeal })
+  + `<div class="m-work">${macSide({ body: macDocs('产品方案') })}<main class="m-main">${paper}</main>${macRight(macRound(true), '')}</div>`));
+</script>
+</body>
+</html>

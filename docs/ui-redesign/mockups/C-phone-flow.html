@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 手机:交出与定稿</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board"></div>
+<script>
+const aiWorking = pTop({ sub: 'AI 正在修改', tone: 'ai', badge: 2 })
+  + `<div class="strip lav"><span class="spin"></span>AI 正在修改,改完会自动换成新版</div>`
+  + `<main class="p-body paper-c">${docMarked()}</main>`
+  + pBottom({ line: 'Mac 已收到 2 条', right: tagBtn('改稿中…', { kind: 'off' }) });
+const confirm = pTop({ sub: '第 3 轮回稿', tone: 'back' })
+  + `<main class="p-body paper-c">${roundCard()}${docClean()}</main>`
+  + pBottom({ line: '确认定稿?', detail: 'AI 会收到「审阅结束」', right: tagBtn('取消', { kind: 'plain' }) + sealBtn('盖章', 66) });
+const sealed = pTop({ sub: '已定稿', tone: 'done' })
+  + `<main class="p-body paper-c"><article class="doc" style="position: relative"><span class="stamp-seal">${seal(92)}</span>
+      <div class="hand ink" style="position: absolute; right: 8px; top: 108px; font-size: 14px; transform: rotate(-4deg)">10 月 16 日 定稿</div>
+      <h1>产品方案</h1><p style="margin-right: 96px">${DOC.intro}</p><h3>谁说了算</h3><p>${DOC.who}</p><h3>批注怎么走</h3><p>${DOC.how}</p><h3>出了岔子怎么办</h3><p>${DOC.oops}</p></article></main>`
+  + pBottom({ line: '这篇已定稿', detail: '要再改,在 Mac 上划词批注,会开始新的一轮' });
+document.getElementById('board').innerHTML = [
+  shot('交出以后:上栏下面一条淡紫色纸条,写着 AI 正在修改;正文只能看,不能批注', phone(aiWorking, { screenClass: 'paper-c' })),
+  shot('点火漆印定稿:就在下栏原地确认,不从别处弹框。再按一次印章才算定稿', phone(confirm, { screenClass: 'paper-c' })),
+  shot('定稿以后:标题旁边压上一枚火漆印,写上日期。回稿卡收起来,这篇只能看', phone(sealed, { screenClass: 'paper-c' })),
+].join('');
+</script>
+</body>
+</html>

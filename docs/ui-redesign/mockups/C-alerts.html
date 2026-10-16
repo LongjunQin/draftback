@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C:提示与弹框</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+<style>
+.slip { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-radius: 3px; font-size: 14px; }
+.slip .act { margin-left: 8px; font-weight: 700; color: var(--pen); }
+.stage { position: relative; padding: 34px 30px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; }
+.dlg { position: relative; width: 520px; padding: 22px 24px 18px; border-radius: 6px; }
+.dlg h2 { margin: 0 0 8px; font-family: "Songti SC", serif; font-size: 19px; font-weight: 700; color: var(--text); }
+.dlg button, .dlg .plain { white-space: nowrap; }
+.dlg p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--text-2); }
+.sheetx { position: absolute; z-index: 30; left: 10px; right: 10px; bottom: 30px; display: flex; flex-direction: column; gap: 8px; font-family: -apple-system, "PingFang SC", sans-serif; }
+.sheetx .grp { border-radius: 16px; overflow: hidden; background: rgba(246,246,248,.97); text-align: center; }
+.sheetx .grp div { padding: 14px; border-top: .5px solid rgba(0,0,0,.15); font-size: 18px; color: #3c82f0; }
+.sheetx .grp div:first-child { border-top: 0; }
+.sheetx .hd { padding: 14px 16px !important; font-size: 13px !important; color: #6b6b70 !important; line-height: 1.45; }
+.sheetx .hd b { display: block; font-size: 14px; color: #555; margin-bottom: 2px; }
+</style>
+</head>
+<body>
+<div class="board" id="board" style="flex-direction: column; gap: 40px"></div>
+<script>
+const macBox = `<div style="display: flex; gap: 30px; align-items: stretch">
+  <div class="stage lt-deep" style="width: 430px">
+    <div class="slip card-c"><span class="washi" style="--tape: rgba(178,222,198,.9); width: 56px; left: -14px; top: 6px; transform: rotate(-40deg); height: 18px"></span>${icon('check', 16, 2.6, 'style="color: var(--ins)"')}已交给 AI · 2 条批注。</div>
+    <div class="slip card-c"><span class="washi" style="--tape: rgba(255,214,120,.9); width: 56px; left: -14px; top: 6px; transform: rotate(-40deg); height: 18px"></span>已删除这条批注。<span class="act">撤销</span></div>
+    <div class="slip card-c" style="color: var(--warn)"><span class="washi" style="--tape: rgba(240,170,160,.9); width: 56px; left: -14px; top: 6px; transform: rotate(-40deg); height: 18px"></span>${icon('warn', 16, 2.2)}保存失败:磁盘空间不够。</div>
+  </div>
+  <div class="stage lt-deep" style="flex: 1">
+    <div class="dlg card-c"><span class="washi" style="--tape: rgba(244,178,160,.82); width: 80px; left: 50%; margin-left: -40px; top: -11px; transform: rotate(-2deg)"></span>
+      <h2>恢复到第 3 轮改稿前?</h2><p>正文回到第 3 轮 AI 改稿之前的样子。恢复前的稿子留在历史里,随时能再换回来。</p>
+      <div class="m-actions"><span class="plain">取消</span><button class="lt lt-raised" style="height: 34px; padding: 0 18px; border-radius: 17px; font-size: 13.5px">恢复</button></div></div>
+    <div class="dlg card-c"><span class="washi" style="--tape: rgba(240,170,160,.85); width: 80px; left: 50%; margin-left: -40px; top: -11px; transform: rotate(1.5deg)"></span>
+      <h2>文件在外面被改了</h2><p>别的程序改了《定价页.md》。这一轮的批注对不上新的原文。</p>
+      <div class="m-actions"><span class="plain">取消</span><button class="tag-btn" style="height: 34px; font-size: 13.5px">另存我的版本…</button><button class="lt lt-raised" style="height: 34px; padding: 0 16px; border-radius: 17px; font-size: 13.5px">以磁盘上的版本重新开始</button></div></div>
+  </div></div>`;
+const notice = pTop({ sub: '第 4 轮 · 可批注', tone: 'turn' }) + `<div class="strip mint">${icon('check', 15, 2.6, 'style="color: var(--ins)"')}已进入第 4 轮<span class="act" style="color: var(--muted); font-weight: 400">6 秒后消失</span></div>`
+  + `<main class="p-body paper-c">${docClean()}</main>` + pBottom({ line: '第 4 轮 · 可批注', detail: '选中文字就能批注', right: tagBtn('交给 AI', { ic: 'send', kind: 'off' }) });
+const newer = pTop({ sub: '第 3 轮 · 可批注', tone: 'turn', badge: 2 }) + `<div class="strip grey">Mac 推来了第 4 轮新版<span class="act">换成新版</span></div>`
+  + `<main class="p-body paper-c">${docMarked()}</main>` + pBottom({ line: '本地已保存 2 条', detail: '选中文字就能批注', right: tagBtn('交给 AI', { ic: 'send', count: 2 }) })
+  + `<div class="dim"></div><div class="sheetx"><div class="grp"><div class="hd"><b>换成新版?</b>手头 2 条没交的批注会留在旧版上,不会再交出。</div><div>换成新版</div></div><div class="grp"><div style="font-weight: 600">取消</div></div></div>`;
+const error = pTop({ sub: '第 3 轮回稿', tone: 'back' }) + `<main class="p-body paper-c">${roundCard()}${docClean()}</main>` + pBottom({ line: '稿子回来了', detail: '划词就开始第 4 轮', right: sealBtn() })
+  + alertBox('出错了', '这篇的云端记录已经清理,手机上只能看。要定稿,在 Mac 上打开。');
+document.getElementById('board').innerHTML = shotW('Mac:提示是一张贴着纸胶带的纸条(左),要确认的事是一张卡片(右)。文字和现在一样', macBox)
+  + `<div style="display: flex; gap: 56px">` + [
+    shot('手机:进了新一轮,上栏下面一条浅绿纸条,6 秒后消失', phone(notice, { screenClass: 'paper-c' })),
+    shot('手机:Mac 推来新版时先用纸条提示;点「换成新版」再用系统弹框确认', phone(newer, { screenClass: 'paper-c' })),
+    shot('手机:出错时用系统提示框,只有一个「好」', phone(error, { screenClass: 'paper-c' })),
+  ].join('') + `</div>`;
+</script>
+</body>
+</html>

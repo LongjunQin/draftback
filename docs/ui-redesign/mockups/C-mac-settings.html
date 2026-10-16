@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C Mac:欢迎页与设置</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board" style="flex-direction: column; gap: 0"></div>
+<script>
+const macSeal = `<span class="lt-ink" style="flex: none; font-size: 14px; font-weight: 600">通过 · 定稿</span>${seal(46)}`;
+const gh = (tone, name, n) => `<div class="m-gh"><i class="dot tone-${tone}" style="box-shadow: none"></i><span class="nm">${name}</span><span class="n">${n}</span></div>`;
+const welcome = mac(`<header class="m-top lt"><div class="lights"><i></i><i></i><i></i></div></header>
+  <div class="m-work">${macSide({ body: gh('idle', '最近打开', 3) + macRow('back', '产品方案', '第 3 轮回稿 · 采纳 2 · 未采纳 1') + macRow('turn', '跨端规则', '第 2 轮 · 2 条未交 · 10 分钟前') + macRow('idle', '会议纪要', '普通文档 · 昨天') })}
+  <main class="m-main"><div class="m-paper paper-c" style="width: 820px; display: flex; flex-direction: column; align-items: center; padding-top: 90px">
+    <div class="icon-c" style="font-size: 96px"><svg><use href="#seal-l"/></svg></div>
+    <h1 class="serif" style="margin: 26px 0 10px; font-size: 28px">打开一篇 Markdown</h1>
+    <p style="margin: 0; font-size: 15px; color: var(--muted)">直接读、直接改;选中文字写批注,交给 AI,稿子会自己回来。</p>
+    <div style="display: flex; gap: 12px; margin-top: 24px"><button class="lt lt-raised" style="height: 38px; padding: 0 22px; border-radius: 19px; font-size: 14px">打开… ⌘O</button><button class="tag-btn" style="height: 38px">新建… ⌘N</button></div>
+    <div style="width: 440px; margin-top: 34px">${macRow('back', '产品方案', '第 3 轮回稿 · 采纳 2 · 未采纳 1')}${macRow('turn', '跨端规则', '第 2 轮 · 2 条未交 · 10 分钟前')}${macRow('idle', '会议纪要', '普通文档 · 昨天')}</div>
+  </div></main></div>`);
+const grp = (title, body) => `<div style="padding: 14px 0; border-top: 1.5px dotted var(--rule)"><div style="margin-bottom: 10px; font-family: 'Songti SC', serif; font-size: 16px; font-weight: 700">${title}</div>${body}</div>`;
+const line = (l, r, small = '') => `<div style="display: flex; align-items: center; gap: 12px; min-height: 34px"><div style="flex: 1; font-size: 14px">${l}${small ? `<div style="font-size: 12px; color: var(--muted)">${small}</div>` : ''}</div>${r}</div>`;
+const modal = `<div class="dim" style="background: rgba(10,15,25,.3)"></div><div class="m-modal card-c" style="left: 50%; top: 40px; width: 620px; margin-left: -310px; padding-top: 18px">
+  <span class="washi" style="--tape: rgba(244,178,160,.8); width: 90px; left: 50%; margin-left: -45px; top: -11px; transform: rotate(-1.5deg)"></span>
+  <div style="display: flex; align-items: center; margin-bottom: 4px"><h2 style="margin: 0; flex: 1">设置</h2><span style="color: var(--muted)">${icon('close', 18, 2.2)}</span></div>
+  ${grp('外观', `<div class="swatches" style="grid-template-columns: repeat(6, 76px); justify-content: start">${THEMES.map((t) => `<div class="swatch ${t.id === 'mist' ? 'on' : ''}" style="${themeVars(t)}"><i class="lt">${t.id === 'mist' ? icon('check', 18, 3) : ''}</i>${t.name}</div>`).join('')}</div>`
+    + line('程序坞图标跟着封面换', '<span class="toggle on"></span>', '只在回稿开着时换')
+    + line('外观', '<span class="seg"><span class="on">跟随系统</span><span>日间</span><span>夜读</span></span>'))}
+  ${grp('正文', line('字号', `<div style="display: flex; align-items: center; gap: 10px"><span style="position: relative; width: 200px; height: 4px; border-radius: 2px; background: rgba(120,110,95,.3)"><i style="position: absolute; left: 25%; top: -8px; width: 20px; height: 20px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.35)"></i></span><span style="font-size: 13px; color: var(--muted)">100%</span><span class="link">恢复默认</span></div>`))}
+  ${grp('iCloud 同步', line('<span style="color: var(--ins)">☑</span> 把正在审阅的稿子同步到 iPhone', '<span class="link">查看轮次与同步…</span>', 'iCloud 已同步 · 13:07'))}
+  ${grp('命令行工具', line('已安装 · /usr/local/bin/mdreview', '<button class="tag-btn" style="height: 30px; font-size: 13px">重新安装</button>', 'AI(Claude Code、Codex 等)用 mdreview 命令接手你的批注'))}
+  ${grp('关于', line('回稿 1.0.0', '<span class="link">回稿使用说明</span><span class="link" style="margin-left: 14px">反馈问题</span>'))}</div>`;
+const behind = mac(macTop({ pill: macPill('稿子回来了 · 已是最新版', 'back', 'history'), toggle: 'show', right: macSeal })
+  + `<div class="m-work">${macSide({ body: macDocs('产品方案') })}<main class="m-main"><div class="m-paper paper-c">${macDoc('clean')}</div></main>${macRight(macRound(false) + macDash(), '')}</div>` + modal);
+document.getElementById('board').innerHTML = shotW('Mac 欢迎页(还没打开文档):中间一张纸,打开或新建;下面是最近的稿子', welcome)
+  + `<div style="height: 36px"></div>` + shotW('Mac 设置(⌘,):封面颜色放在「外观」第一项,和手机一样 6 种;程序坞图标可以跟着换', behind);
+</script>
+</body>
+</html>

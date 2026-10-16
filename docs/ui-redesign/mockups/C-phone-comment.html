@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 手机:批注</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board"></div>
+<script>
+const top2 = (badge) => pTop({ sub: '第 2 轮 · 可批注', tone: 'turn', badge });
+const docSel = `<article class="doc"><h1>产品方案</h1><p>${DOC.intro}</p>
+  <h3>谁说了算</h3><p>Mac 管原文、轮次和最终状态。手机管自己还没交出去的批注,强退也不会丢。<span class="mark">云端只是邮筒,不做裁判。</span></p>
+  <h3>批注怎么走</h3><p style="position: relative">手机上写的每一条先存在手机里。点「交给 AI」才打包上传。<span class="handle s"></span><span class="sel">Mac 收到后回一张回执。</span><span class="handle e"></span>
+  <span class="editmenu" style="left: 30px; top: -46px"><span>批注</span><span>拷贝</span><span>查询</span><span>翻译</span><span>›</span></span></p>
+  <h3>出了岔子怎么办</h3><p>${DOC.oops}</p></article>`;
+const selecting = top2(1) + `<main class="p-body paper-c">${docSel}</main>`
+  + pBottom({ left: tagBtn('批注这段', { ic: 'pen', kind: 'hl' }), right: tagBtn('交给 AI', { ic: 'send', count: 1 }) });
+const composer = `<div class="ios-head"><span class="c">取消</span><b>写批注</b><button class="lt lt-raised" style="height: 32px; padding: 0 16px; border-radius: 16px; font-size: 14px">保存</button></div>
+  <div class="composer-q">Mac 收到后回一张回执。</div>
+  <div class="composer-t">回执是什么?说清楚是谁回给谁<span class="caret"></span></div>`;
+const writing = top2(1) + `<main class="p-body paper-c">${docMarked()}</main>` + pBottom({ line: '本地已保存 1 条', detail: '选中文字就能批注', right: tagBtn('交给 AI', { ic: 'send', count: 1 }) })
+  + sheet(composer, { top: 300 }) + keyboard();
+const notes = `<div class="s-head"><h2>批注</h2><span class="x">${icon('close', 18, 2.2)}</span></div>
+  <div class="list-h">未交 2</div>
+  <div class="note" style="margin-bottom: 12px; transform: rotate(-.6deg)"><div class="q">“云端只是邮筒,不做裁判。”</div><div class="c hand">这个比喻换掉</div></div>
+  <div class="swipe"><div class="note" style="flex: 1; margin-left: -128px"><div class="q">“Mac 收到后回一张回执。”</div><div class="c hand">回执是什么?说清楚是谁回给谁</div></div>
+    <div class="acts"><span style="background: #6f8fb8">修改</span><span style="background: #d4554b; border-radius: 0 4px 4px 0">删除</span></div></div>
+  <p style="margin: 2px 0 16px; font-size: 12.5px; color: var(--muted)">交出前都能改、能删:往左滑一条。点一条,正文会跳到那一句。</p>
+  <div class="list-h">Mac 已收到 0</div>`;
+const listing = top2(2) + `<main class="p-body paper-c">${docMarked()}</main>` + pBottom({ line: '本地已保存 2 条', detail: '选中文字就能批注', right: tagBtn('交给 AI', { ic: 'send', count: 2 }) })
+  + sheet(notes, { top: 330 });
+document.getElementById('board').innerHTML = [
+  shot('选中文字:菜单第一项是「批注」;下栏左边也出现荧光笔样的「批注这段」', phone(selecting, { screenClass: 'paper-c' })),
+  shot('写批注:引用的原文贴在上面,下面直接写。存好后正文这句标成浅黄色', phone(writing, { screenClass: 'paper-c' })),
+  shot('批注列表(右上角的批注按钮):每条是一张便签;往左滑能修改、删除。点「交给 AI」就交出', phone(listing, { screenClass: 'paper-c' })),
+].join('');
+</script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 手机:菜单、大纲、出错</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board"></div>
+<script>
+const base = pTop({ sub: '第 3 轮回稿', tone: 'back' }) + `<main class="p-body paper-c">${roundCard()}${docClean()}</main>` + pBottom({ line: '稿子回来了', detail: '划词就开始第 4 轮', right: sealBtn() });
+const item = (ic, label, right = '') => `<div>${icon(ic, 17, 2)}<span>${label}</span>${right ? `<span class="r">${right}</span>` : ''}</div>`;
+const menu = `<div class="dim" style="background: rgba(10,15,25,.12)"></div><div class="menu card-c" style="right: 12px; top: 100px">
+  ${item('comment', '写总体意见')}${item('history', '回稿卡')}${item('check', '逐条结果')}${item('diff', '显示改动')}${item('send', '导出 PDF')}${item('outline', '字号', '默认 ›')}</div>`;
+const outline = `<div class="s-head"><h2>大纲</h2><span class="x">${icon('close', 18, 2.2)}</span></div>
+  <div style="font-family: 'Songti SC', serif">
+    <div style="padding: 11px 0; border-bottom: 1.5px dotted var(--rule); font-size: 17px; font-weight: 700">产品方案</div>
+    <div style="padding: 11px 0 11px 16px; border-bottom: 1.5px dotted var(--rule); font-size: 16px"><span class="hl-soft">谁说了算</span><span style="float: right; font-family: 'PingFang SC'; font-size: 12px; color: var(--muted)">读到这里</span></div>
+    <div style="padding: 11px 0 11px 16px; border-bottom: 1.5px dotted var(--rule); font-size: 16px">批注怎么走</div>
+    <div style="padding: 11px 0 11px 16px; font-size: 16px">出了岔子怎么办</div></div>`;
+const conflict = pTop({ title: '定价页.md', sub: '文件被改了', tone: 'conflict' })
+  + `<div class="strip coral"><span style="color: var(--warn)">${icon('warn', 15, 2.2)}</span>文件在 Mac 上被别的程序改了,要在 Mac 上处理</div>`
+  + `<main class="p-body paper-c"><article class="doc"><h1>定价页</h1><p>免费版能打开任意 Markdown,批注和交给 AI 不限次数。</p><h3>付费版</h3><p>多台设备同步、历史版本保留一年、导出 Word。</p><h3>团队版</h3><p>共享稿件夹,批注能指定给某位同事。</p></article></main>`
+  + pBottom({ line: '等你在 Mac 上处理', detail: '处理完这里会自动更新' });
+document.getElementById('board').innerHTML = [
+  shot('右上角「…」:写总体意见、回稿卡、逐条结果、显示改动、导出 PDF、字号', phone(base + menu, { screenClass: 'paper-c' })),
+  shot('大纲:按标题跳转,读到哪一节用荧光笔标出', phone(base + sheet(outline, { top: 470 }), { screenClass: 'paper-c' })),
+  shot('出了问题:上栏下面一条浅红纸条说明原因和去哪里处理;这时不能批注', phone(conflict, { screenClass: 'paper-c' })),
+].join('');
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 手机:读稿页</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+<style>
+.res { position: relative; padding: 12px 14px 12px 50px; border-radius: 4px; margin-bottom: 12px; }
+.res .st { position: absolute; left: 12px; top: 13px; width: 28px; height: 28px; font-size: 14px; }
+.res .q { font-family: "Songti SC", serif; font-size: 14px; font-weight: 700; color: var(--text); }
+.res .you { margin-top: 5px; font-size: 15px; }
+.res .ai { margin-top: 5px; font-size: 13.5px; line-height: 1.55; color: var(--text-2); }
+.res .ai b { color: var(--ins); }
+</style>
+</head>
+<body>
+<div class="board" id="board"></div>
+<script>
+const returned = (showing) => pTop({ sub: '第 3 轮回稿', tone: 'back' })
+  + `<main class="p-body">${roundCard({ showing })}${showing ? docDiff() : docClean()}</main>`
+  + pBottom({ line: '稿子回来了', detail: '划词就开始第 4 轮', right: sealBtn() });
+const results = `<div class="s-head"><h2>第 3 轮 · 逐条结果</h2><span class="x">${icon('close', 18, 2.2)}</span></div>
+  <div style="display: flex; gap: 10px; margin: -2px 0 14px"><span class="sticker mint chip">采纳 2</span><span class="sticker coral chip">未采纳 1</span></div>
+  <div class="res card-c"><span class="sticker mint st">${icon('check', 15, 3)}</span><div class="q">“手机管自己还没交出去的批注”</div>
+    <div class="you hand ink">你:这句再说清楚,强退也不会丢</div><div class="ai"><b>AI:</b>在这句后面补了「强退也不会丢」。</div></div>
+  <div class="res card-c"><span class="sticker mint st">${icon('check', 15, 3)}</span><div class="q" style="color: #b07a1e">总体意见</div>
+    <div class="you hand ink">你:「批注怎么走」写得太简单</div><div class="ai"><b>AI:</b>改成三句:先存手机、交出才上传、Mac 回执。</div></div>
+  <div class="res card-c"><span class="sticker coral st">${icon('close', 14, 3)}</span><div class="q">“云端只是邮筒”</div>
+    <div class="you hand ink">你:这个比喻换掉</div><div class="ai"><b style="color: var(--del)">AI:</b>没改。前文已经用过这个比喻,换掉会前后对不上。</div></div>
+  <p style="margin: 4px 0 0; font-size: 12.5px; color: var(--muted)">点一条,正文会跳到那一句并闪一下。</p>`;
+document.getElementById('board').innerHTML = [
+  shot('稿子回来了:先看干净稿。回稿卡用纸胶带贴在最上面,采纳、未采纳是圆贴纸', phone(returned(false), { screenClass: 'paper-c' })),
+  shot('点「显示改动」:同一个按钮变成「隐藏改动」;删掉的划红线,新加的标绿,改过的段落左边一条绿线', phone(returned(true), { screenClass: 'paper-c' })),
+  shot('点「逐条结果」:每条批注一张卡;你写的是蓝色手写,AI 的回答跟在下面', phone(returned(false) + sheet(results, { top: 236 }), { screenClass: 'paper-c' })),
+].join('');
+</script>
+</body>
+</html>

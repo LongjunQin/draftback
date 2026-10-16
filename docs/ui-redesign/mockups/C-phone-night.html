@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 手机:夜读</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board"></div>
+<script>
+const row = (dot, title, sub, tail = '', subCls = '') => `<div class="g-row"><i class="dot tone-${dot}"></i><div class="rm"><b>${title}</b><small class="${subCls}">${sub}</small></div>${tail}</div>`;
+const tog = (open) => `<span class="g-tog">${open ? '收起' : '展开'}${icon(open ? 'up' : 'down', 13, 2.6)}</span>`;
+const group = ({ name, band, tab, count, note = '', open = true, rows = '' }) => `
+  <section class="grp ${open ? '' : 'closed'} ${band} paper-c"><div class="tabx sticker ${tab}">${count}</div>
+    <div class="g-head"><span class="nm">${name}</span><span class="gn">${note}</span>${tog(open)}</div>${open ? `<div class="g-rows">${rows}</div>` : ''}</section>`;
+const home = `<div class="lt-ink">${statusBar()}</div><div style="display: flex; flex-direction: column; gap: 13px; height: 100%; padding: 56px 18px 0">
+  <div class="h-title"><h1 class="lt-ink">回稿</h1><button class="p-btn big lt-press press">${icon('folder', 19, 2.1)}</button><button class="p-btn big lt-press press">${icon('gear', 19, 2)}</button></div>
+  ${group({ name: '轮到你', band: 'coral-band', tab: 'coral', count: 3, rows:
+      row('back', '产品方案.md', '第 3 轮回稿 · 采纳 2 · 未采纳 1', '<i class="dot tone-unread" style="width: 9px; height: 9px"></i>')
+    + row('turn', '跨端规则.md', '第 2 轮 · 2 条未交 · 10 分钟前', '<span class="sticker coral" style="width: 24px; height: 24px; font-size: 11px">新</span>')
+    + row('conflict', '定价页.md', '文件被别的程序改了 · 要在 Mac 上处理', '', 'red') })}
+  ${group({ name: '已交出', band: 'lav-band', tab: 'lav', count: 2, rows: row('ai', '发布说明.md', 'AI 正在修改 · 12 分钟', '<span class="spin"></span>') + row('wait', '访谈记录.md', '已交出 · AI 在线,等待领取') })}
+  ${group({ name: '已结束', band: 'mint-band', tab: 'mint', count: 7, note: '年度总结.md · 已定稿', open: false })}
+  <div class="h-foot lt-ink-soft">${icon('cloud', 13, 2)} iCloud 已同步 · 13:07</div>
+  <div class="press-pill h-search">${icon('search', 18, 2.2)}<span class="lt-ink-soft">搜索稿件和本机文件</span></div>
+</div><div class="home-ind lt-ink"></div>`;
+const reading = pTop({ sub: '第 3 轮回稿', tone: 'back' }) + `<main class="p-body paper-c">${roundCard()}${docClean()}</main>`
+  + pBottom({ line: '稿子回来了', detail: '划词就开始第 4 轮', right: sealBtn() });
+const composer = `<div class="ios-head"><span class="c">取消</span><b>写批注</b><button class="lt lt-raised" style="height: 32px; padding: 0 16px; border-radius: 16px; font-size: 14px">保存</button></div>
+  <div class="composer-q">Mac 收到后回一张回执。</div><div class="composer-t">回执是什么?说清楚是谁回给谁<span class="caret"></span></div>`;
+const writing = pTop({ sub: '第 2 轮 · 可批注', tone: 'turn', badge: 1 }) + `<main class="p-body paper-c">${docMarked()}</main>`
+  + pBottom({ line: '本地已保存 1 条', right: tagBtn('交给 AI', { ic: 'send', count: 1 }) }) + sheet(composer, { top: 300 }) + keyboard();
+document.getElementById('board').innerHTML = [
+  shot('夜读·首页:皮面压暗,纸变成深色,彩色标签也调暗一些', phone(home, { night: true, screenClass: 'lt-deep' })),
+  shot('夜读·读稿页:正文是浅色字配深色纸,火漆印保持原样', phone(reading, { night: true, screenClass: 'paper-c' })),
+  shot('夜读·写批注:键盘也是深色', phone(writing, { night: true, screenClass: 'paper-c' })),
+].join('');
+</script>
+</body>
+</html>

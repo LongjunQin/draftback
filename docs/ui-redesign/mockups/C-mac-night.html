@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C Mac:夜读</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board" style="flex-direction: column; gap: 0"></div>
+<script>
+const macSeal = `<span class="lt-ink" style="flex: none; font-size: 14px; font-weight: 600">通过 · 定稿</span>${seal(46)}`;
+const gh = (tone, name, n) => `<div class="m-gh"><i class="dot tone-${tone}" style="box-shadow: none"></i><span class="nm">${name}</span><span class="n">${n}</span></div>`;
+const side = macSide({ body: gh('turn', '轮到你', 2) + macRow('turn', '跨端规则', '第 2 轮 · 2 条未交 · 10 分钟前') + macRow('conflict', '定价页', '文件在外面被改了 · 要处理', { red: true })
+  + gh('ai', '已交出', 2) + macRow('ai', '产品方案', 'AI 正在修改 · 3 分钟', { cur: true, tail: '<span class="spin" style="margin-top: 4px"></span>' }) + macRow('ai', '发布说明', 'AI 正在修改 · 12 分钟', { tail: '<span class="spin" style="margin-top: 4px"></span>' })
+  + gh('idle', '最近打开', 2) + macRow('done', '年度总结', '已定稿 · 10 月 12 日') + macRow('idle', '会议纪要', '普通文档 · 昨天') });
+const paper = `<div class="m-paper paper-c"><div class="strip lav" style="margin: -40px -54px 26px; padding: 10px 20px"><span class="spin"></span>AI 正在按批注修改。原文只读,改完会自动换成新版。</div>${macDoc('marked')}</div>`;
+const right = macRight(`<div class="lt-ink" style="font-size: 13px; font-weight: 700">已交出 · 2</div>`
+  + macNote('“云端只是邮筒,不做裁判。”', '这个比喻换掉', '我 · 谁说了算 · 13:02', '已交出', -.8)
+  + macNote('“Mac 收到后回一张回执。”', '回执是什么?说清楚是谁回给谁', '我 · 批注怎么走 · 13:04', '已交出', 1), 'AI 改完稿子会自己回来;这期间不能批注。', '本轮', 2);
+document.getElementById('board').innerHTML = shotW('Mac 夜读·AI 正在修改:皮面压暗,纸变深色;纸面顶上一条淡紫纸条说明正在改,这时不能批注',
+  mac(macTop({ pill: macPill('AI 正在修改…', 'ai'), right: tagBtn('改稿中…', { kind: 'off' }) }) + `<div class="m-work">${side}<main class="m-main">${paper}</main>${right}</div>`, { night: true }));
+</script>
+</body>
+</html>

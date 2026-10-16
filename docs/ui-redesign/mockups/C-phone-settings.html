@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 手机:设置与封面颜色</title>
+<link rel="stylesheet" href="mockup.css">
+<script src="themes.js"></script>
+<script src="seal.js"></script>
+<script src="kit.js"></script>
+</head>
+<body>
+<div class="board" id="board"></div>
+<script>
+const settings = (sel) => `<div class="lt-ink">${statusBar()}</div>
+<div style="display: flex; flex-direction: column; gap: 13px; height: 100%; padding: 56px 16px 0">
+  <div class="h-title"><button class="p-btn lt-press press">${icon('back', 18, 2.4)}</button><h1 class="lt-ink" style="letter-spacing: 3px">设置</h1></div>
+  <section class="set-card card-c"><span class="washi" style="--tape: rgba(244,178,160,.8); width: 74px; right: 24px; top: -10px; transform: rotate(3deg)"></span>
+    <h3>封面颜色</h3>
+    <div class="swatches">${THEMES.map((t) => `<div class="swatch ${t.id === sel ? 'on' : ''}" style="${themeVars(t)}"><i class="lt">${t.id === sel ? icon('check', 18, 3) : ''}</i>${t.name}</div>`).join('')}</div>
+    <div class="set-row" style="border-top: 1.5px dotted var(--rule)"><div class="t">图标跟着封面换<small>换的时候 iPhone 会弹出一句提示</small></div><span class="toggle on lt"></span></div>
+  </section>
+  <section class="set-card card-c"><h3>阅读</h3>
+    <div class="set-row"><div class="t">外观</div><span class="seg"><span class="on">跟随系统</span><span>日间</span><span>夜读</span></span></div>
+    <div class="set-row"><div class="t">正文字号</div><span class="seg"><span class="on">默认</span><span>大</span><span>特大</span></span></div>
+  </section>
+  <section class="set-card card-c"><h3>同步</h3>
+    <div class="set-row"><span style="color: var(--muted)">${icon('cloud', 20, 2)}</span><div class="t">iCloud 已同步 · 13:07<small>Apple ID 要和 Mac 上的一样</small></div><span style="color: var(--muted)">${icon('right', 16, 2.2)}</span></div>
+  </section>
+  <section class="set-card card-c"><h3>关于</h3>
+    <div class="set-row"><div class="t">版本</div><span style="font-size: 14px; color: var(--muted)">1.0(8)</span></div>
+    <div class="set-row"><div class="t">使用说明</div><span style="color: var(--muted)">${icon('right', 16, 2.2)}</span></div>
+  </section>
+</div><div class="home-ind lt-ink"></div>`;
+const shell = (inner, t) => phone(inner, { screenClass: 'lt-deep', screenStyle: 'box-shadow: inset 0 0 40px rgba(var(--shade),.22)', wrapStyle: themeVars(t) });
+const gold = themeById('gold');
+const goldRead = pTop({ sub: '第 3 轮回稿', tone: 'back' }) + `<main class="p-body paper-c">${roundCard()}${docClean()}</main>`
+  + pBottom({ line: '稿子回来了', detail: '划词就开始第 4 轮', right: sealBtn() });
+document.getElementById('board').innerHTML = [
+  shot('设置(新加的页面,首页右上角进入):点一种封面颜色,这一页的皮面马上跟着换', shell(settings('mist'), themeById('mist'))),
+  shot('换成星宇橙:图标也跟着换,iPhone 会弹出这句系统提示,这是苹果的规定', shell(settings('orange') + alertBox('你已更改“回稿”的图标。', ''), themeById('orange'))),
+  shot('浅金这类浅色封面:皮面上的字改成深棕色,看得清', phone(goldRead, { screenClass: 'paper-c', wrapStyle: themeVars(gold) })),
+].join('');
+</script>
+</body>
+</html>
