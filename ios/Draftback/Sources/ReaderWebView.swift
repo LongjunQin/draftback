@@ -62,7 +62,7 @@ struct ReaderWebView: UIViewRepresentable {
         webView.annotationEnabled = annotationEnabled
         webView.isOpaque = false
         // 网页控件与滚动视图的底色也用纸面颜色(与 reader.css 的 --paper 一致):滚到顶、拉过头时露出的那块不是白 / 黑一条
-        let paper = UIColor { $0.userInterfaceStyle == .dark ? UIColor(rgb: 0x1F2126) : UIColor(rgb: 0xFFFDF8) }
+        let paper = UIColor { $0.userInterfaceStyle == .dark ? UIColor(rgb: 0xDDCFB3) : UIColor(rgb: 0xFBF8F1) }
         webView.backgroundColor = paper
         webView.scrollView.backgroundColor = paper
         webView.scrollView.contentInsetAdjustmentBehavior = .always
@@ -247,6 +247,7 @@ final class ReaderBridge {
             "fontScale": fontScale,
             "returnCard": document.returnCard ?? NSNull(),
             "previousMarkdown": document.changesBase ?? NSNull(),
+            "stamp": document.finalStamp ?? NSNull(),
         ]
         call("window.DraftbackReader.load(\(json(payload)))")
     }

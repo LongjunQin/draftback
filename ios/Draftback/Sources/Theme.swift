@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// 与 Mac 同一套语义色(static/desktop.css):批注琥珀、轮到你青绿、等待灰蓝、AI 紫、回稿绿、冲突红、结束灰、未读蓝。
-/// 琥珀只给批注;状态色只表示"走到哪了"。浅色、深色各一套。
+/// 稿子走到哪了(语义);颜色按红绿灯(2026-10-17 用户定,与 Mac 一致,见 Skin.swift 的 Light):
+/// 轮到你 / 回稿了 = 绿灯;等着(已交出、AI 在改)= 黄灯;出了问题 = 红灯;结束了 / 本机文件 = 灯灭。
 enum Tone: Equatable {
     case turn       // 轮到你 / 可批注 / 自己改
     case waiting    // 已交出,等 Mac / 等 AI
@@ -12,48 +12,36 @@ enum Tone: Equatable {
     case conflict   // 原文被改过
     case idle       // 已作废 / 本机文件
 
-    var color: Color {
+    var light: Light {
         switch self {
-        case .turn: return Palette.dynamic(0x0D8077, 0x3FC1B2)
-        case .waiting: return Palette.dynamic(0x64748B, 0x94A3B8)
-        case .ai: return Palette.dynamic(0x6E56CF, 0x9E8CFC)
-        case .back: return Palette.dynamic(0x229453, 0x3FBF72)
-        case .done: return Palette.dynamic(0x6B8F78, 0x5E8A6E)
-        case .conflict: return Palette.dynamic(0xCC3E3E, 0xE46B6B)
-        case .idle: return Palette.dynamic(0x8D96A6, 0x7C8594)
+        case .turn, .back: return .go
+        case .waiting, .ai: return .wait
+        case .conflict: return .stop
+        case .done, .idle: return .off
         }
     }
-    /// 横幅底色
+    /// 指示灯的颜色
+    var color: Color { light.color }
+    /// 横幅纸条的底色(纸上淡淡带一点灯的颜色)
     var soft: Color {
-        switch self {
-        case .turn: return Palette.dynamic(0xECF7F5, 0x16302C)
-        case .waiting: return Palette.dynamic(0xEEF1F5, 0x2A2F38)
-        case .ai: return Palette.dynamic(0xEFEBFB, 0x2A2547)
-        case .back, .done: return Palette.dynamic(0xEAF8EF, 0x17301F)
-        case .conflict: return Palette.dynamic(0xFFF0EF, 0x3A1F1F)
-        case .idle: return Palette.dynamic(0xF1F3F6, 0x2A2E36)
+        switch light {
+        case .go: return Skin.dynamic(0xEAF2E2, 0xCCCB9F)
+        case .wait: return Skin.dynamic(0xFBF1D4, 0xDDC68F)
+        case .stop: return Skin.dynamic(0xFBE6DD, 0xDAB49B)
+        case .off: return Skin.dynamic(0xF0EBE1, 0xD0C2A4)
         }
     }
-    /// 横幅与副标题上的文字色(在浅底上过 4.5:1)
-    var text: Color {
-        switch self {
-        case .turn: return Palette.dynamic(0x0A665E, 0x7FD8CC)
-        case .waiting: return Palette.dynamic(0x475569, 0xC1CAD6)
-        case .ai: return Palette.dynamic(0x5B44B8, 0xC4B8FF)
-        case .back, .done: return Palette.dynamic(0x237445, 0x8FDCAC)
-        case .conflict: return Palette.dynamic(0x9B302D, 0xF1A0A0)
-        case .idle: return Palette.dynamic(0x5B6575, 0xAEB6C2)
-        }
-    }
+    /// 横幅与副标题上的字:出问题用红墨,其余用纸上的墨
+    var text: Color { light == .stop ? Skin.warn : Skin.ink }
 }
 
 enum Palette {
     static let amber = dynamic(0xF59A23, 0xF0A43A)
     static let amberText = dynamic(0xC56D00, 0xF2B45A)
     static let amberSoft = dynamic(0xFFF8E8, 0x332A16)
-    static let unread = dynamic(0x2F6FDE, 0x6C9CFF)
-    /// 阅读页纸面底色(与 Web/reader.css 的 --paper 一致):状态栏、底部横条那两块也铺这个颜色,不留黑边
-    static let paper = dynamic(0xFFFDF8, 0x1F2126)
+    static let unread = Light.unread
+    /// 阅读页纸面底色(与 Web/reader.css 的 --paper 一致):日间太阳光下的纸,夜读台灯下的纸
+    static let paper = Skin.paper
 
     static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(UIColor { trait in UIColor(rgb: trait.userInterfaceStyle == .dark ? dark : light) })

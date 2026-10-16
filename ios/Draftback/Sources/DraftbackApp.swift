@@ -10,11 +10,17 @@ struct DraftbackApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = DocumentStore()
     @Environment(\.scenePhase) private var scenePhase
+    /// 方案 C:封面颜色与外观(设置页里改,整个 App 跟着换)
+    @AppStorage(Cover.storageKey) private var coverRaw = Cover.green.rawValue
+    @AppStorage(Appearance.storageKey) private var appearanceRaw = Appearance.system.rawValue
 
     var body: some Scene {
         WindowGroup {
             LibraryView()
                 .environmentObject(store)
+                .environment(\.cover, Cover.stored(coverRaw))
+                .preferredColorScheme((Appearance(rawValue: appearanceRaw) ?? .system).colorScheme)
+                .tint(Skin.pen)
                 .onOpenURL { url in store.open(url: url, fromExternal: true) }
                 // 调试/截图用:--open-sample 直接进入示例文档;--open-local <文件名> 打开 App 文件夹里的文档;
                 // 仅调试版:--demo-drafts 填入各种状态的演示稿件,--demo-open <文档标识> 直接打开其中一篇

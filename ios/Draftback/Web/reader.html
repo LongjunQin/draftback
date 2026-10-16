@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="light">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'none'; media-src data: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Draftback</title>
   <link rel="stylesheet" href="vendor/highlight-github.min.css">
@@ -12,6 +12,8 @@
 </head>
 <body>
   <section id="returnCard" class="return-card" hidden></section>
+  <!-- 定稿以后标题旁边压一枚火漆印(浮在右边,不在正文里:不影响批注的文字定位) -->
+  <div id="stamp" class="final-stamp" hidden><img src="skin/seal.svg" alt=""><span></span></div>
   <div id="changes" class="markdown-body diff-view" hidden></div>
   <article id="content" class="markdown-body"></article>
   <div id="empty" class="empty">正在加载…</div>

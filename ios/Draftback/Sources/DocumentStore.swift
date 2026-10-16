@@ -108,6 +108,14 @@ final class OpenedDocument: ObservableObject, Identifiable {
         if let previous, previous.info.reviewId != sync.reviewId { card["note"] = "手机上没有这一轮的原稿,对比的是手机上的上一版。" }
         return card
     }
+    /// 定稿以后标题旁边压的火漆印与日期(方案 C):用 Mac 推来「已定稿」的时间
+    var finalStamp: [String: Any]? {
+        guard let sync, sync.phoneState == "finalized" else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M 月 d 日"
+        return ["date": formatter.string(from: sync.pushedAt ?? sync.updatedAt)]
+    }
     /// 有回稿卡、又有上一版,才能「显示改动」
     var changesBase: String? { returnCard == nil ? nil : previous?.markdown }
     /// 回稿卡相关状态一变就要重画网页(如回稿后定稿:卡片收起)

@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "8"
+    CURRENT_PROJECT_VERSION: "9"
     CODE_SIGN_STYLE: Automatic
     # 开发者账户激活后把 Team ID 填到这里,或 xcodebuild DEVELOPMENT_TEAM=XXXX
     DEVELOPMENT_TEAM: ""
@@ -39,6 +39,9 @@ targets:
         # 下面的脚本要往 .app 里写本地化文件
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # 方案 C:主图标淡绿,另外 5 种封面各一个备用图标(设置 →「图标跟着封面换」)
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIcon-mist AppIcon-lavender AppIcon-gold AppIcon-orange AppIcon-black"
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         TARGETED_DEVICE_FAMILY: "1,2"
     # iCloud(CloudKit)同步 + 静默推送(跨端规则第 12 节)。容器 iCloud.app.draftback(2026-10-14 随改名从 iCloud.org.mdturn 换过来,
@@ -72,6 +75,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        # 随 App 带的思源宋体子集(SIL OFL,许可证在 Web/fonts/OFL.txt):界面标题和网页正文共用
+        UIAppFonts: [Web/fonts/NotoSerifSC-Regular.otf, Web/fonts/NotoSerifSC-Bold.otf]
         UIBackgroundModes: [remote-notification]
         # 用自己的 Info.plist 时 INFOPLIST_KEY_* 构建设置不生效,方向必须写在这里
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]

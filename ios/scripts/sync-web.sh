@@ -14,4 +14,9 @@ cp "$SRC/desktop-anchor.js" "$DEST/desktop-anchor.js"
 # 回稿卡「显示改动」:与 Mac 对比视图同一套对比算法(纯函数)与字级差异库
 cp "$SRC/desktop-diff.js" "$DEST/desktop-diff.js"
 cp "$SRC/vendor/diff-match-patch.js" "$DEST/diff-match-patch.js"
+# 方案 C 的纸纹、火漆印、回形针、图钉:与 Mac 同一份(static/skin)
+mkdir -p "$ROOT/ios/Draftback/Web/skin"
+for f in seal.svg clip.svg pin.svg paper-fiber.svg paper-fiber-night.svg; do
+  cp "$SRC/skin/$f" "$ROOT/ios/Draftback/Web/skin/$f"
+done
 echo "已同步渲染内核到 $DEST"

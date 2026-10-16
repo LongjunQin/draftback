@@ -67,8 +67,8 @@
     return md;
   }
   const md = engine();
-  const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-  if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: prefersDark ? 'dark' : 'default' });
+  // 夜读是台灯下的纸(纸还是浅色):图表一律用浅色主题
+  if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
 
   const state = { annotations: [], assets: {}, rendered: false };
 
@@ -268,6 +268,13 @@
   // 原生给:returnCard { title, meta, summary, note } 与 previousMarkdown(手机换新版前留的上一版)。
   // 对比用与 Mac 对比视图同一套算法(desktop-diff.js);对比视图只读,在正文之外单独画,批注锚点不受影响。
   const cardEl = document.getElementById('returnCard');
+  // 定稿以后标题旁边的火漆印与日期:原生给 stamp { date } 才显示
+  const stampEl = document.getElementById('stamp');
+  function renderStamp(stamp) {
+    const date = stamp && typeof stamp.date === 'string' ? stamp.date : '';
+    stampEl.hidden = !date;
+    stampEl.querySelector('span').textContent = date ? `${date} 定稿` : '';
+  }
   const changesEl = document.getElementById('changes');
   const Diff = window.DraftbackDiff;
   const dmp = window.diff_match_patch ? new window.diff_match_patch() : null;
@@ -511,6 +518,7 @@
       changes.showing = false; changes.painted = false; changes.result = null; changes.count = null; changes.summary = null; changes.more = null;
       changesEl.hidden = true; changesEl.replaceChildren(); content.hidden = false;
       renderReturnCard(payload.returnCard || null);
+      renderStamp(payload.stamp || null);
       state.annotations = Array.isArray(payload.annotations) ? payload.annotations : [];
       state.assets = payload.assets && typeof payload.assets === 'object' ? payload.assets : {};
       return render(String(payload.markdown || ''));

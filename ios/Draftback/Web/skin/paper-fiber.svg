@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <!-- 纸的细纤维:很淡的深浅细颗粒,略微柔化,无条纹,可无缝平铺 -->
+  <filter id="f" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="3" seed="7" stitchTiles="stitch" result="n0"/>
+    <feGaussianBlur in="n0" stdDeviation=".45" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0 0 0 0 .36  0 0 0 0 .28  0 0 0 0 .17  -.6 0 0 0 .285" result="dark"/>
+    <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 .97  0 .7 0 0 -.37" result="light"/>
+    <feMerge><feMergeNode in="dark"/><feMergeNode in="light"/></feMerge>
+  </filter>
+  <rect width="300" height="300" filter="url(#f)"/>
+</svg>
