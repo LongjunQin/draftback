@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('draftbackDesktop', Object.freeze({
   // 设置窗口
   getSettings: () => ipcRenderer.invoke('draftback:get-settings'),
   setAppearance: (value) => ipcRenderer.invoke('draftback:set-appearance', value),
+  // 封面颜色(方案 C 的 6 种皮面颜色)与「程序坞图标跟着封面换」
+  setCover: (value) => ipcRenderer.invoke('draftback:set-cover', value),
+  setDockIconFollowsCover: (enabled) => ipcRenderer.invoke('draftback:set-dock-icon-follows-cover', Boolean(enabled)),
   setSyncEnabled: (enabled) => ipcRenderer.invoke('draftback:set-sync-enabled', Boolean(enabled)),
   installCli: () => ipcRenderer.invoke('draftback:install-cli'),
   // 另存为副本、导入批注文件

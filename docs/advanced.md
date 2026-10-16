@@ -266,11 +266,15 @@ xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContai
 - Word 由 pandoc 转换,公式成为 Word 原生可编辑公式,图片与表格按 Word 结构落地。电脑上要先装 pandoc(`brew install pandoc`);
   没装时导出会给出安装提示。公开版再决定随 App 附带 pandoc 还是改纯 JS 转换器。
 
-图标:源文件在 `branding/icon.svg`(候选与对比图在 `branding/candidates/`),改完渲染成 1024×1024 PNG 后一条命令生成三端图标:
+图标:方案 C 的软皮 + 火漆印(2026-10-16 起,见 `docs/ui-redesign/回稿拟物界面方案.md`)。出图页是 `branding/skin-icon.html`,
+皮纹和火漆印直接用 `docs/ui-redesign/mockups/` 里同一份文件;一条命令出 Mac 与 Windows 的全部图标:
 
 ```bash
-python3 scripts/make-icons.py branding/icon-1024.png   # iOS 资源目录、macOS icon.png(打包时转 icns)、Windows icon.ico
+node branding/export-icons.js   # icon.icns、icon.png、程序坞图标(含 6 种封面色)、欢迎页图标、Windows icon.ico、全出血的 branding/icon-1024.png
 ```
+
+iOS 的图标还没换(手机界面改造时再做):到时用全出血的 `branding/icon-1024.png` 出 iOS 资源目录。
+`scripts/make-icons.py` 是旧的三端出图脚本,会覆盖上面 Mac 的图标文件,换手机图标时只取它的 iOS 部分。旧图标源 `branding/icon.svg` 留作历史。
 
 生成 macOS arm64 App：
 

@@ -245,10 +245,30 @@ async function main() {
     await key(cdp, 'Escape', 'Escape', 27);
     await waitUntil('Esc 关闭,按钮变回', () => cdp.evaluate(`document.querySelector('#compareView').hidden && ${cardButton}.textContent === '显示改动'`));
 
+    // 6. 定稿原地确认(方案 C,2026-10-16 用户批准):定稿按钮是一枚火漆印;点它,工具栏右边原地换成「确认定稿?」,不弹框;
+    //    Esc 取消;再点一次,按「盖章」才定稿
+    const primary = `document.querySelector('#primaryAction')`;
+    assert.equal(await cdp.evaluate(`${primary}.dataset.action`), 'finalize');
+    assert.equal(await cdp.evaluate(`${primary}.textContent`), '通过 · 定稿');
+    assert.equal(await cdp.evaluate(`Boolean(${primary}.querySelector('.seal-mark'))`), true, '定稿按钮是一枚火漆印');
+    await cdp.evaluate(`${primary}.click()`);
+    await waitUntil('原地确认', () => cdp.evaluate(`!document.querySelector('#finalizeConfirm').hidden && document.querySelector('#documentToolbar').classList.contains('confirming')`));
+    assert.equal(await cdp.evaluate(`document.querySelector('#confirmDialog').hidden`), true, '定稿不弹框');
+    assert.equal(await cdp.evaluate(`getComputedStyle(${primary}).display`), 'none', '确认时工具栏右边只剩确认这一组');
+    assert.equal(await cdp.evaluate(`document.querySelector('#finalizeConfirm').textContent.replace(/\\s+/g, ' ').trim()`), '确认定稿? AI 会收到「审阅结束」 取消 盖章');
+    await key(cdp, 'Escape', 'Escape', 27);
+    await waitUntil('Esc 取消', () => cdp.evaluate(`document.querySelector('#finalizeConfirm').hidden && !document.querySelector('#documentToolbar').classList.contains('confirming') && getComputedStyle(${primary}).display !== 'none'`));
+    assert.notEqual((await store.getReviewById(second.id, options)).outcome, 'finalized', '取消后没有定稿');
+    await cdp.evaluate(`${primary}.click()`);
+    await waitUntil('再次确认', () => cdp.evaluate(`!document.querySelector('#finalizeConfirm').hidden`));
+    await cdp.evaluate(`document.querySelector('#finalizeStamp').click()`);
+    await waitUntil('已定稿', () => cdp.evaluate(`document.querySelector('#reviewStateText').textContent.startsWith('已定稿') && document.querySelector('#finalizeConfirm').hidden && !document.querySelector('#documentToolbar').classList.contains('confirming')`));
+    assert.equal((await store.getReviewById(second.id, options)).outcome, 'finalized');
+
     // 页面没有 <link rel=icon>,Chrome 自动请求 /favicon.ico 得到 404,这条资源错误不算脚本问题
     const errors = cdp.exceptions.concat(cdp.consoleMessages.filter((m) => m.type === 'error').map((m) => m.text)).filter((text) => !/favicon|ERR_|net::|Failed to load resource.*404/.test(text));
     assert.deepEqual(errors, [], `页面不应有脚本异常或 console.error: ${errors.join(' | ')}`);
-    console.log('PASS: 回稿卡(默认收起、一行计数与改动处数、展开后事件数据与逐条结果)、工具栏「显示改动 / 隐藏改动」开关、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、展开 / 收起按轮记住。');
+    console.log('PASS: 回稿卡(默认收起、一行计数与改动处数、展开后事件数据与逐条结果)、工具栏「显示改动 / 隐藏改动」开关、对比视图(含删除、上一处/下一处、Esc 回到完成稿、⇧⌘D)、历史按轮折叠、时间线、恢复与反悔、稿子回来默认干净稿、展开 / 收起按轮记住、定稿原地确认(火漆印,Esc 取消,盖章才定稿)。');
   } finally {
     if (chrome) await stopChild(chrome.child);
     if (server) await stopChild(server.child);

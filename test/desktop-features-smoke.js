@@ -18,7 +18,7 @@ const { sleep, waitUntil, stopChild, startServer, startChrome } = require('./hel
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 const FAKE_BRIDGE = `
-  window.__db = { commands: [], menuState: null, recents: [], copyPath: null, batch: null, appearance: 'system', sync: true, revealed: null, external: null };
+  window.__db = { commands: [], menuState: null, recents: [], copyPath: null, batch: null, appearance: 'system', cover: 'mist', dockFollows: false, sync: true, revealed: null, external: null };
   window.draftbackDesktop = {
     platform: 'darwin',
     pickMarkdown: async () => [],
@@ -29,9 +29,11 @@ const FAKE_BRIDGE = `
     newDocument: async () => ({ ok: false, cancelled: true }), exportHtml: async () => ({ ok: false, cancelled: true }), exportDocx: async () => ({ ok: false, cancelled: true }),
     setMenuState: (s) => { window.__db.menuState = s; },
     noteRecent: (p) => { window.__db.recents.push(p); },
-    getSettings: async () => ({ appearance: window.__db.appearance, syncEnabled: window.__db.sync, syncHelperAvailable: true, syncHelperRunning: true, version: '9.9.9', packaged: true,
+    getSettings: async () => ({ appearance: window.__db.appearance, cover: window.__db.cover, dockIconFollowsCover: window.__db.dockFollows, syncEnabled: window.__db.sync, syncHelperAvailable: true, syncHelperRunning: true, version: '9.9.9', packaged: true,
       cli: { installed: true, path: '/usr/local/bin/mdreview', pointsTo: 'elsewhere', target: '/somewhere/mdreview.js' } }),
     setAppearance: async (v) => { window.__db.appearance = v; return v; },
+    setCover: async (v) => { window.__db.cover = v; return v; },
+    setDockIconFollowsCover: async (v) => { window.__db.dockFollows = v; return v; },
     setSyncEnabled: async (v) => { window.__db.sync = v; return { syncEnabled: v }; },
     installCli: async () => ({ ok: true, installed: true, path: '/usr/local/bin/mdreview', pointsTo: 'this-app' }),
     saveCopyDialog: async () => (window.__db.copyPath ? { ok: true, filePath: window.__db.copyPath } : { ok: false, cancelled: true }),
@@ -261,6 +263,17 @@ async function main() {
     await waitUntil('设置打开', () => cdp.evaluate(`!document.querySelector('#settingsDialog').hidden && document.querySelector('#aboutLine').textContent.includes('9.9.9')`));
     assert.match(await cdp.evaluate(`document.querySelector('#cliStatusLine').textContent`), /指向别处/);
     assert.equal(await cdp.evaluate(`document.querySelector('#cliInstallButton').textContent`), '改为指向这个回稿');
+    // 封面颜色(方案 C,2026-10-16 用户定 6 种,默认青雾蓝):点色块,窗口跟着换色并存进设置;程序坞图标可以跟着换
+    assert.equal(await cdp.evaluate(`document.querySelectorAll('#coverSwatches [data-cover]').length`), 6);
+    assert.equal(await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="mist"]').getAttribute('aria-checked')`), 'true', '默认青雾蓝');
+    await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="sage"]').click()`);
+    await waitUntil('封面换成鼠尾草绿', async () => (await cdp.evaluate(`window.__db.cover`)) === 'sage' && (await cdp.evaluate(`document.documentElement.dataset.cover`)) === 'sage');
+    assert.equal(await cdp.evaluate(`localStorage.getItem('draftback.cover')`), 'sage', '本地留一份,下次第一次绘制前就用它');
+    assert.equal(await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="sage"]').getAttribute('aria-checked')`), 'true');
+    assert.equal(await cdp.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--c1').trim()`), '#9fb099', '皮面颜色跟着换');
+    await cdp.evaluate(`document.querySelector('#dockIconToggle').click()`);
+    await waitUntil('程序坞图标跟着封面换', async () => (await cdp.evaluate(`window.__db.dockFollows`)) === true && (await cdp.evaluate(`document.querySelector('#dockIconToggle').getAttribute('aria-checked')`)) === 'true');
+    assert.deepEqual(await cdp.evaluate(`Array.from(document.querySelectorAll('#appearanceSegment button')).map((b) => b.textContent)`), ['跟随系统', '日间', '夜读'], '外观改叫日间 / 夜读');
     await cdp.evaluate(`document.querySelector('#appearanceSegment [data-appearance="dark"]').click()`);
     await waitUntil('外观设为深色', async () => (await cdp.evaluate(`window.__db.appearance`)) === 'dark');
     await cdp.evaluate(`(() => { const r = document.querySelector('#zoomRange'); r.value = '150'; r.dispatchEvent(new Event('input', { bubbles: true })); })()`);

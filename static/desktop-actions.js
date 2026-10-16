@@ -127,8 +127,8 @@
         {
           id: 'appearance', label: '外观', submenu: [
             { id: 'appearance-system', label: '跟随系统', command: 'appearance:system', keys: 'menu', radio: true },
-            { id: 'appearance-light', label: '浅色', command: 'appearance:light', keys: 'menu', radio: true },
-            { id: 'appearance-dark', label: '深色', command: 'appearance:dark', keys: 'menu', radio: true },
+            { id: 'appearance-light', label: '日间', command: 'appearance:light', keys: 'menu', radio: true },
+            { id: 'appearance-dark', label: '夜读', command: 'appearance:dark', keys: 'menu', radio: true },
           ],
         },
         SEP,

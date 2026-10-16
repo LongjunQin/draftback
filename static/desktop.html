@@ -13,6 +13,9 @@
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=9">
   <link rel="stylesheet" href="/static/desktop.css?v=20">
+  <link rel="stylesheet" href="/static/desktop-skin.css?v=1">
+  <!-- 封面颜色要在第一次绘制前就位(否则先闪一下默认的青雾蓝),所以这一小段放在 head 里同步执行 -->
+  <script src="/static/desktop-cover.js?v=1"></script>
 </head>
 <body>
   <div id="appShell" class="app-shell">
@@ -23,6 +26,7 @@
           <i class="ph ph-sidebar-simple" aria-hidden="true"></i>
         </button>
       </div>
+      <div class="sidebar-card">
       <div class="side-switch-row">
         <div class="segmented" role="tablist" aria-label="左栏内容">
           <button id="filesModeButton" type="button" role="tab" aria-selected="false">稿件</button>
@@ -40,6 +44,7 @@
       <button id="syncFooter" class="sync-footer" type="button" title="点开同步设置">
         <i id="syncFooterIcon" class="ph ph-cloud" aria-hidden="true"></i><span id="syncFooterText">iCloud</span>
       </button>
+      </div>
     </aside>
 
     <!-- 一条工具栏:左边文档名,正中状态区,右边六样 -->
@@ -102,6 +107,13 @@
           <i class="ph ph-sidebar-simple flip" aria-hidden="true"></i>
         </button>
         <button id="primaryAction" class="primary-button action-button" type="button" hidden></button>
+        <!-- 定稿的原地确认(2026-10-16 用户批准方案 C):点「通过 · 定稿」后工具栏右边换成这一组,再按一次火漆印才算定稿 -->
+        <div id="finalizeConfirm" class="finalize-confirm" role="group" aria-label="确认定稿" hidden>
+          <strong id="finalizeTitle">确认定稿?</strong>
+          <span id="finalizeDetail" class="finalize-detail">AI 会收到「审阅结束」</span>
+          <button id="finalizeCancel" class="finalize-cancel" type="button" title="不定稿(Esc)">取消</button>
+          <button id="finalizeStamp" class="finalize-stamp" type="button" title="盖章定稿">盖章<span class="seal-mark" aria-hidden="true"></span></button>
+        </div>
       </div>
     </header>
 
@@ -290,10 +302,25 @@
       <div class="settings-body">
         <section class="settings-group">
           <h3>外观</h3>
-          <div id="appearanceSegment" class="segmented settings-segmented" role="radiogroup" aria-label="外观">
-            <button type="button" role="radio" data-appearance="system">跟随系统</button>
-            <button type="button" role="radio" data-appearance="light">浅色</button>
-            <button type="button" role="radio" data-appearance="dark">深色</button>
+          <div id="coverSwatches" class="cover-swatches" role="radiogroup" aria-label="封面颜色">
+            <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="mist"><i aria-hidden="true"></i>青雾蓝</button>
+            <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="sage"><i aria-hidden="true"></i>鼠尾草绿</button>
+            <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="lavender"><i aria-hidden="true"></i>薰衣草紫</button>
+            <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="gold"><i aria-hidden="true"></i>浅金</button>
+            <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="orange"><i aria-hidden="true"></i>星宇橙</button>
+            <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="black"><i aria-hidden="true"></i>深空黑</button>
+          </div>
+          <div class="settings-toggle-row">
+            <span class="t">程序坞图标跟着封面换<small>只在回稿开着时换</small></span>
+            <button id="dockIconToggle" class="skin-toggle" type="button" role="switch" aria-checked="false" aria-label="程序坞图标跟着封面换"></button>
+          </div>
+          <div class="settings-appearance-row">
+            <span>外观</span>
+            <div id="appearanceSegment" class="segmented settings-segmented" role="radiogroup" aria-label="外观">
+              <button type="button" role="radio" data-appearance="system">跟随系统</button>
+              <button type="button" role="radio" data-appearance="light">日间</button>
+              <button type="button" role="radio" data-appearance="dark">夜读</button>
+            </div>
           </div>
         </section>
         <section class="settings-group">
@@ -353,11 +380,11 @@
   <script src="/static/markdown-patch.js?v=2"></script>
   <script src="/static/desktop-anchor.js?v=5"></script>
   <script src="/static/desktop-handoff.js?v=3"></script>
-  <script src="/static/desktop-actions.js?v=1"></script>
+  <script src="/static/desktop-actions.js?v=2"></script>
   <script src="/static/desktop-drafts.js?v=1"></script>
   <script src="/static/desktop-diff.js?v=1"></script>
   <script src="/static/desktop-history.js?v=1"></script>
   <script src="/static/desktop-compare.js?v=1"></script>
-  <script src="/static/desktop.js?v=31"></script>
+  <script src="/static/desktop.js?v=32"></script>
 </body>
 </html>

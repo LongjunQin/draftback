@@ -52,6 +52,8 @@
     cliStatusLine: $('#cliStatusLine'), cliInstallButton: $('#cliInstallButton'), aboutLine: $('#aboutLine'),
     aboutGuideButton: $('#aboutGuideButton'), aboutFeedbackButton: $('#aboutFeedbackButton'),
     infoDialog: $('#infoDialog'), infoTitle: $('#infoTitle'), infoBody: $('#infoBody'), infoClose: $('#infoClose'),
+    finalizeConfirm: $('#finalizeConfirm'), finalizeDetail: $('#finalizeDetail'), finalizeCancel: $('#finalizeCancel'), finalizeStamp: $('#finalizeStamp'),
+    coverSwatches: $('#coverSwatches'), dockIconToggle: $('#dockIconToggle'),
   };
 
   // 改名前的本地存储键 mdturn.*(标签、未保存草稿、阅读偏好)一次性搬到 draftback.*;命名沿革见 docs/naming-history.md
@@ -409,6 +411,11 @@
     button.disabled = !item.exists;
     button.addEventListener('click', () => (item.activeReview ? openReviewId(item.activeReview.id) : openDocumentPath(item.absPath)));
     return button;
+  }
+  // 左栏里正在看的那篇用荧光笔标出;切换稿子时就地改,不用等最近列表重新拉取
+  function markCurrentDraft(tab) {
+    const current = tab && tab.review ? tab.review.sourceFile : null;
+    nodes.recentList.querySelectorAll('.draft-row').forEach((row) => row.classList.toggle('current', Boolean(current) && row.title === current));
   }
   function renderRecents() {
     const now = Date.now();
@@ -903,6 +910,7 @@
       captureEditorValue(current);
     }
     if (!state.tabs.some((tab) => tab.id === id)) return;
+    if (state.finalizeConfirm && state.finalizeConfirm.tabId !== id) state.finalizeConfirm = null;
     state.activeId = id;
     state.cachedAnchor = null;
     nodes.annotate.hidden = true;
@@ -1451,6 +1459,7 @@
     renderTabs();
     const tab = activeTab();
     nodes.shell.classList.toggle('no-doc', !tab);
+    markCurrentDraft(tab);
     renderDocTitle(tab);
     if (!tab) {
       destroyEditor();
@@ -1462,6 +1471,7 @@
       nodes.editorPane.hidden = true;
       nodes.primaryAction.hidden = true;
       nodes.secondaryAction.hidden = true;
+      state.finalizeConfirm = null; renderFinalizeConfirm();
       renderOutline([]);
       renderNotes(null);
       publishMenuState();
@@ -1529,11 +1539,23 @@
 
   function paintAction(node, spec) {
     node.hidden = !spec || spec.hidden;
+    node.classList.remove('seal-action');
     if (node.hidden) { node.dataset.action = ''; return; }
     node.disabled = Boolean(spec.disabled);
     node.replaceChildren();
-    if (spec.icon) { const icon = document.createElement('i'); icon.className = `ph ${spec.icon}`; icon.setAttribute('aria-hidden', 'true'); node.appendChild(icon); }
-    node.appendChild(document.createTextNode(spec.label));
+    // 定稿按钮是一枚火漆印,左边写「通过 · 定稿」(方案 C,2026-10-16 用户批准)
+    const sealed = spec.action === 'approve' || spec.action === 'finalize';
+    node.classList.toggle('seal-action', sealed);
+    if (spec.icon && !sealed) { const icon = document.createElement('i'); icon.className = `ph ${spec.icon}`; icon.setAttribute('aria-hidden', 'true'); node.appendChild(icon); }
+    const counted = spec.action === 'submit' ? /^(.*) · (\d+)$/.exec(spec.label) : null;
+    if (counted) {
+      // 「交给 AI · 2」:条数画成红色小圆贴;文字内容不变(读屏和测试照旧读到「交给 AI · 2」)
+      const badge = document.createElement('span'); badge.className = 'action-count';
+      const sep = document.createElement('span'); sep.className = 'sep'; sep.textContent = ' · ';
+      badge.append(sep, document.createTextNode(counted[2]));
+      node.append(document.createTextNode(counted[1]), badge);
+    } else node.appendChild(document.createTextNode(spec.label));
+    if (sealed) { const mark = document.createElement('span'); mark.className = 'seal-mark'; mark.setAttribute('aria-hidden', 'true'); node.appendChild(mark); }
     node.title = spec.title || '';
     node.dataset.action = spec.action;
   }
@@ -1556,6 +1578,7 @@
     nodes.editingMode.disabled = review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual') || isReadOnly(tab);
     paintAction(nodes.primaryAction, view.primary);
     paintAction(nodes.secondaryAction, view.secondary);
+    renderFinalizeConfirm();
     publishMenuState();
   }
 
@@ -2478,11 +2501,17 @@
     if (collapsed) {
       // 收起:一行里写采纳 / 未采纳与改动处数,点「展开」回来;「显示改动」在工具栏和 ⇧⌘D
       if (card.counts) {
-        const line = el('p', 'return-card-sub return-collapsed-line', [`采纳 ${card.counts.applied}`, `未采纳 ${card.counts.wontfix}`].join(' · '));
+        // 采纳 / 未采纳画成圆贴纸;中间的「 · 」只给读屏和复制用,不显示
+        const line = el('p', 'return-card-sub return-collapsed-line');
+        line.append(el('span', 'sticker mint', `采纳 ${card.counts.applied}`), el('span', 'sep', ' · '), el('span', 'sticker coral', `未采纳 ${card.counts.wontfix}`));
         if (card.canCompare && version) {
           const changes = el('span', 'return-collapsed-changes', '');
           line.appendChild(changes);
-          fillChangeCount(changes, tab, version, (count) => (count ? ` · 改了 ${count} 处` : ' · 正文没有改动'));
+          void Compare.changeCount(tab.review.docId, version.versionId).then((count) => {
+            if (!changes.isConnected) return;
+            if (count === null) { changes.remove(); return; }
+            changes.replaceChildren(el('span', 'sep', ' · '), document.createTextNode(count ? `改了 ${count} 处` : '正文没有改动'));
+          });
         }
         root.appendChild(line);
       }
@@ -3387,15 +3416,57 @@
   }
 
   // 零批注时的「通过 · 定稿」:确认一次,然后记为通过并直接定稿(它告诉 AI 这篇结束了)
-  async function approveAndFinalize(tab) {
-    const accepted = await confirmAction('通过并定稿？',
-      '全文没有任何批注:记为通过并定稿,AI 会收到"审阅结束"。若想让 AI 重写或先讨论，请取消，写一条总体意见再交出。',
-      '通过 · 定稿');
-    if (!accepted) return;
+  async function approveAndFinalize(tab, options = {}) {
+    if (!options.skipConfirm) {
+      const accepted = await confirmAction('通过并定稿？',
+        '全文没有任何批注:记为通过并定稿,AI 会收到"审阅结束"。若想让 AI 重写或先讨论，请取消，写一条总体意见再交出。',
+        '通过 · 定稿');
+      if (!accepted) return;
+    }
     const submitted = await submitReview(tab, { skipConfirm: true, silentSuccess: true });
     if (!submitted) return;
     const current = activeTab();
     if (current && current.review.status === 'complete') await finalizeReviewTab(current, { skipConfirm: true });
+  }
+
+  // ---------- 定稿的原地确认(方案 C,2026-10-16 用户批准):不弹框,工具栏右边换成「确认定稿?」,再按一次火漆印才算定稿 ----------
+  function openFinalizeConfirm(tab, action) {
+    if (!tab) return;
+    state.finalizeConfirm = { tabId: tab.id, action };
+    nodes.finalizeDetail.textContent = action === 'approve' ? '全文没有批注 · AI 会收到「审阅结束」' : 'AI 会收到「审阅结束」';
+    nodes.finalizeStamp.disabled = false;
+    renderFinalizeConfirm();
+    setTimeout(() => { if (!nodes.finalizeConfirm.hidden) nodes.finalizeStamp.focus(); }, 20);
+  }
+  function closeFinalizeConfirm({ focus = true } = {}) {
+    if (!state.finalizeConfirm) return;
+    state.finalizeConfirm = null;
+    renderFinalizeConfirm();
+    if (focus && !nodes.primaryAction.hidden) nodes.primaryAction.focus();
+  }
+  function renderFinalizeConfirm() {
+    const pending = state.finalizeConfirm;
+    const tab = activeTab();
+    const on = Boolean(pending && tab && pending.tabId === tab.id && !nodes.primaryAction.hidden && ['approve', 'finalize'].includes(nodes.primaryAction.dataset.action));
+    if (!on && pending && !state.finalizing) state.finalizeConfirm = null;
+    nodes.finalizeConfirm.hidden = !on;
+    nodes.toolbar.classList.toggle('confirming', on);
+  }
+  async function confirmFinalize() {
+    const pending = state.finalizeConfirm;
+    const tab = activeTab();
+    if (!pending || !tab || pending.tabId !== tab.id || state.finalizing) { if (!state.finalizing) closeFinalizeConfirm({ focus: false }); return; }
+    state.finalizing = true;
+    nodes.finalizeStamp.disabled = true;
+    try {
+      if (pending.action === 'approve') await approveAndFinalize(tab, { skipConfirm: true });
+      else await finalizeReviewTab(tab, { skipConfirm: true });
+    } finally {
+      state.finalizing = false;
+      state.finalizeConfirm = null;
+      nodes.finalizeStamp.disabled = false;
+      renderFinalizeConfirm();
+    }
   }
 
   async function copyInstruction(tab) {
@@ -3564,6 +3635,43 @@
     else await openDocumentPath(item.path);
   }
 
+  // ---------- 封面颜色(方案 C 的 6 种皮面颜色,2026-10-16 用户定;默认青雾蓝) ----------
+  // 设置存在 Electron 的 settings.json;本地存储里留一份,给 desktop-cover.js 在第一次绘制前用
+  const COVERS = ['mist', 'sage', 'lavender', 'gold', 'orange', 'black'];
+  function applyCover(cover) {
+    const id = COVERS.includes(cover) ? cover : 'mist';
+    document.documentElement.dataset.cover = id;
+    storeLocal('draftback.cover', id);
+    nodes.coverSwatches.querySelectorAll('button[data-cover]').forEach((button) => button.setAttribute('aria-checked', String(button.dataset.cover === id)));
+    return id;
+  }
+  async function loadCover() {
+    if (!bridge || typeof bridge.getSettings !== 'function') { applyCover(document.documentElement.dataset.cover); return; }
+    try {
+      const settings = await bridge.getSettings();
+      if (settings) { state.settings = settings; applyCover(settings.cover); }
+    } catch (_) { applyCover(document.documentElement.dataset.cover); }
+  }
+  async function chooseCover(cover) {
+    const id = applyCover(cover);
+    if (state.settings) state.settings.cover = id;
+    if (bridge && typeof bridge.setCover === 'function') {
+      try { await bridge.setCover(id); } catch (error) { toast(`没能保存封面颜色:${error.message || error}`, 'error'); }
+    }
+  }
+  async function toggleDockIconFollowsCover() {
+    if (!bridge || typeof bridge.setDockIconFollowsCover !== 'function' || nodes.dockIconToggle.disabled) return;
+    const next = nodes.dockIconToggle.getAttribute('aria-checked') !== 'true';
+    nodes.dockIconToggle.setAttribute('aria-checked', String(next));
+    try {
+      await bridge.setDockIconFollowsCover(next);
+      if (state.settings) state.settings.dockIconFollowsCover = next;
+    } catch (error) {
+      nodes.dockIconToggle.setAttribute('aria-checked', String(!next));
+      toast(`没能更改程序坞图标:${error.message || error}`, 'error');
+    }
+  }
+
   // ---------- 设置(⌘,):外观、正文字号、iCloud 同步、命令行工具、关于 ----------
   async function openSettings() {
     closePanels();
@@ -3572,6 +3680,9 @@
     let settings = null;
     if (bridge && typeof bridge.getSettings === 'function') { try { settings = await bridge.getSettings(); } catch (_) {} }
     state.settings = settings;
+    applyCover(settings && settings.cover ? settings.cover : document.documentElement.dataset.cover);
+    nodes.dockIconToggle.setAttribute('aria-checked', String(Boolean(settings && settings.dockIconFollowsCover)));
+    nodes.dockIconToggle.disabled = !settings || !bridge || typeof bridge.setDockIconFollowsCover !== 'function';
     const appearance = settings ? settings.appearance : 'system';
     nodes.appearanceSegment.querySelectorAll('button').forEach((button) => {
       const on = button.dataset.appearance === appearance;
@@ -3954,8 +4065,7 @@
     if (action === 'resolve-conflict') return resolveConflict(tab);
     if (action === 'busy') return undefined;
     if (action === 'submit') return submitReview(tab, { skipConfirm: true });
-    if (action === 'approve') return approveAndFinalize(tab);
-    if (action === 'finalize') return finalizeReviewTab(tab);
+    if (action === 'approve' || action === 'finalize') return openFinalizeConfirm(tab, action);
     if (action === 'copy-instruction') return copyInstruction(tab);
     if (action === 'manual-edit') return enterEditMode();
     if (action === 'finish-manual') return finishManualApply();
@@ -4042,6 +4152,8 @@
     nodes.readingMode.addEventListener('click', () => { void enterReadMode(); });
     nodes.editingMode.addEventListener('click', enterEditMode);
     nodes.primaryAction.addEventListener('click', handlePrimaryAction);
+    nodes.finalizeCancel.addEventListener('click', () => closeFinalizeConfirm());
+    nodes.finalizeStamp.addEventListener('click', () => { void confirmFinalize(); });
     nodes.secondaryAction.addEventListener('click', handleSecondaryAction);
     nodes.findButton.addEventListener('click', () => openFind());
     nodes.reviewState.addEventListener('click', (event) => { event.stopPropagation(); toggleTimeline(); });
@@ -4123,6 +4235,7 @@
         if (!nodes.annotationDialog.hidden) dismissAnnotationDialog();
         else if (!nodes.confirmDialog.hidden) { if (state.confirmFinish) state.confirmFinish(null); }
         else if (!nodes.quickOpen.hidden || !nodes.settingsDialog.hidden || !nodes.infoDialog.hidden) closePanels();
+        else if (state.finalizeConfirm && !nodes.finalizeConfirm.hidden) closeFinalizeConfirm();
         else if (!nodes.exportMenu.hidden) { toggleExportMenu(false); nodes.exportMenuButton.focus(); }
         else if (!nodes.toolbarMoreMenu.hidden) { toggleToolbarMore(false); nodes.toolbarMoreButton.focus(); }
         else if (!nodes.docInfoPopover.hidden) { toggleDocInfo(false); nodes.docTitleButton.focus(); }
@@ -4170,6 +4283,11 @@
       });
       if (state.settings) state.settings.appearance = button.dataset.appearance;
     });
+    nodes.coverSwatches.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-cover]');
+      if (button) void chooseCover(button.dataset.cover);
+    });
+    nodes.dockIconToggle.addEventListener('click', () => { void toggleDockIconFollowsCover(); });
     nodes.zoomRange.addEventListener('input', () => { setReaderZoom(Number(nodes.zoomRange.value) / 100); nodes.zoomValue.textContent = `${nodes.zoomRange.value}%`; });
     nodes.zoomResetButton.addEventListener('click', () => { setReaderZoom(1); renderZoomSetting(); });
     nodes.syncToggle.addEventListener('change', async () => {
@@ -4235,6 +4353,7 @@
 
   async function init() {
     installEvents();
+    void loadCover();
     applyNarrowLayout();
     void renderSyncFooter();
     setInterval(() => { void renderSyncFooter(); }, 60_000);

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>回稿图标(方案 C)</title>
+<!-- 方案 C 的 App 图标出图页:青雾蓝等 6 种软皮 + 红色火漆印。export-icons.js 打开它,按 ?theme=&size= 出透明底 PNG;
+     ?full=1 出全出血方块(不切圆角、不留边,给 iOS 和 Windows 用,由系统或脚本自己切圆角)。
+     皮纹与火漆印直接用效果图里的同一份文件(docs/ui-redesign/mockups),改图标只改那边。 -->
+<link rel="stylesheet" href="../docs/ui-redesign/mockups/mockup.css">
+<script src="../docs/ui-redesign/mockups/themes.js"></script>
+<script src="../docs/ui-redesign/mockups/seal.js"></script>
+<style>
+html, body { margin: 0; background: transparent; }
+/* macOS 图标版式:1024 画布里 824 的圆角方块,四周留白放投影 */
+.canvas { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.full .icon-c { border-radius: 0; box-shadow: none; }
+.canvas .icon-c { box-shadow: inset 0 .006em 0 rgba(255,255,255,.4), inset 0 -.02em .04em rgba(var(--shade),.32), 0 .012em .03em rgba(0,0,0,.28), 0 .03em .06em rgba(0,0,0,.18); }
+</style>
+</head>
+<body>
+<div class="canvas" id="canvas"><div class="icon-c" id="icon"><svg><use href="#seal"/></svg></div></div>
+<script>
+const params = new URLSearchParams(location.search);
+const size = Number(params.get('size')) || 1024;
+const theme = themeById(params.get('theme') || 'mist') || THEMES[0];
+const canvas = document.getElementById('canvas');
+canvas.style.width = canvas.style.height = `${size}px`;
+const icon = document.getElementById('icon');
+const full = params.get('full') === '1';
+document.body.classList.toggle('full', full);
+icon.setAttribute('style', `font-size: ${full ? size : Math.round(size * 824 / 1024)}px; ${themeVars(theme)}`);
+document.body.dataset.ready = '1';
+</script>
+</body>
+</html>

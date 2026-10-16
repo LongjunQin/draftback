@@ -76,24 +76,31 @@ async function main() {
     await chrome.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
     await sleep(200);
     const dark = await chrome.cdp.evaluate(`(() => {
-      const lum = (color) => { const m = color.match(/\\d+/g).map(Number); return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255; };
+      // 颜色可能是 rgb(…) 也可能是 color(srgb …)(color-mix 算出来的就是后者)
+      const lum = (color) => {
+        const srgb = color.match(/color\\(srgb ([\\d.]+) ([\\d.]+) ([\\d.]+)/);
+        const m = srgb ? srgb.slice(1, 4).map((v) => Number(v) * 255) : color.match(/[\\d.]+/g).map(Number);
+        return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+      };
       return {
         shell: lum(getComputedStyle(document.body).backgroundColor),
         paper: lum(getComputedStyle(document.querySelector('#readerScroll')).backgroundColor),
         text: lum(getComputedStyle(document.querySelector('#documentContent p')).color),
         code: lum(getComputedStyle(document.querySelector('#documentContent pre')).backgroundColor),
         card: lum(getComputedStyle(document.querySelector('#openNotesList')).backgroundColor),
-        titlebar: lum(getComputedStyle(document.querySelector('#leftSidebar')).backgroundColor),
-        toolbar: lum(getComputedStyle(document.querySelector('#documentToolbar')).backgroundColor),
+        titlebar: lum(getComputedStyle(document.querySelector('#leftSidebar .sidebar-card')).backgroundColor),
+        toolbar: lum(getComputedStyle(document.querySelector('#appShell'), '::before').backgroundColor),
         outlineFont: parseFloat(getComputedStyle(document.querySelector('#outlinePanel .outline-link')).fontSize),
       };
     })()`);
-    assert.ok(dark.shell < 0.25, `深色下外壳背景应很暗,实际亮度 ${dark.shell}`);
+    // 方案 C:夜读时皮面保留颜色、只压暗一半(用户批准的效果图),比纸面亮一点;仍远暗于日间(约 0.55)
+    assert.ok(dark.shell < 0.32, `深色下外壳背景应很暗,实际亮度 ${dark.shell}`);
     assert.ok(dark.paper < 0.25, `深色下正文背景应很暗,实际亮度 ${dark.paper}`);
     assert.ok(dark.text > 0.7, `深色下正文文字应很亮,实际亮度 ${dark.text}`);
     assert.ok(dark.code < 0.3, `深色下代码块背景应很暗,实际亮度 ${dark.code}`);
     assert.ok(dark.titlebar < 0.25, `深色下侧栏不得仍是浅色,实际亮度 ${dark.titlebar}`);
-    assert.ok(dark.toolbar < 0.25, `深色下工具栏不得仍是浅色,实际亮度 ${dark.toolbar}`);
+    // 工具栏那条皮面在夜读时压暗 42%(效果图 C-mac-night),比窗口四周的皮面略亮;日间约 0.6
+    assert.ok(dark.toolbar < 0.4, `深色下工具栏不得仍是浅色,实际亮度 ${dark.toolbar}`);
     assert.ok(dark.outlineFont >= 13, `大纲字号应不小于 13px,实际 ${dark.outlineFont}`);
     await screenshot(chrome.cdp, 'dark-reading.png');
     await chrome.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });

@@ -46,6 +46,25 @@ function writeSettings(patch) {
   try { fs.mkdirSync(path.dirname(settingsPath()), { recursive: true }); fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2)); } catch {}
   return next;
 }
+// 封面颜色(方案 C,2026-10-16 用户定 6 种,默认青雾蓝);打开「程序坞图标跟着封面换」时,程序坞图标用同色的那一张。
+// macOS 只让正在运行的程序换程序坞图标:退出后程序坞和访达里仍是安装包里的青雾蓝图标。
+const COVERS = ['mist', 'sage', 'lavender', 'gold', 'orange', 'black'];
+function coverOf(settings) { return COVERS.includes(settings.cover) ? settings.cover : 'mist'; }
+// 窗口打底色:页面画出来之前先露出的颜色,用封面皮面的颜色(日间压暗 7%,夜读压暗一半),免得先闪一下灰
+const COVER_WINDOW_COLORS = {
+  mist: ['#70879a', '#3e4b56'], sage: ['#7e8e7a', '#465044'], lavender: ['#8b80a3', '#4d485b'],
+  gold: ['#c4b28d', '#5f5644'], orange: ['#bf632f', '#6b371b'], black: ['#29292d', '#171719'],
+};
+function windowBackgroundColor() {
+  const colors = COVER_WINDOW_COLORS[coverOf(readSettings())];
+  return nativeTheme.shouldUseDarkColors ? colors[1] : colors[0];
+}
+function applyDockIcon(settings = readSettings()) {
+  if (process.platform !== 'darwin' || !app.dock) return;
+  const cover = settings.dockIconFollowsCover === true ? coverOf(settings) : 'mist';
+  const file = cover === 'mist' ? path.join(__dirname, 'dock-icon.png') : path.join(__dirname, 'dock-icons', `${cover}.png`);
+  try { app.dock.setIcon(file); } catch {}
+}
 function applyAppearance(value) {
   const appearance = APPEARANCES.includes(value) ? value : 'system';
   // themeSource 会同时改变渲染进程的 prefers-color-scheme,页面样式随之切换,不必重载
@@ -280,7 +299,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     show: false,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1d22' : '#f5f5f7',
+    backgroundColor: windowBackgroundColor(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -306,7 +325,7 @@ function createWindow() {
       defaultId: 0,
       cancelId: 0,
       message: '有尚未保存的 Markdown 修改',
-      detail: '关闭后这些修改会丢失(下次启动可能从草稿恢复)。先回到${DISPLAY_NAME}按 ⌘S 保存,或放弃修改。',
+      detail: `关闭后这些修改会丢失(下次启动可能从草稿恢复)。先回到${DISPLAY_NAME}按 ⌘S 保存,或放弃修改。`,
     });
     if (choice === 1) event.preventDefault();
   });
@@ -505,6 +524,8 @@ function installIpc() {
     const settings = readSettings();
     return {
       appearance: APPEARANCES.includes(settings.appearance) ? settings.appearance : 'system',
+      cover: coverOf(settings),
+      dockIconFollowsCover: settings.dockIconFollowsCover === true,
       syncEnabled: settings.syncEnabled !== false,
       syncHelperAvailable: Boolean(syncHelperExecutable()),
       syncHelperRunning: Boolean(syncHelper && syncHelper.exitCode === null),
@@ -519,6 +540,16 @@ function installIpc() {
     writeSettings({ appearance });
     refreshMenuState();
     return appearance;
+  });
+  ipcMain.handle('draftback:set-cover', async (event, value) => {
+    if (!isTrustedRenderer(event) || !COVERS.includes(value)) throw new Error('拒绝无效的设置请求。');
+    applyDockIcon(writeSettings({ cover: value }));
+    return value;
+  });
+  ipcMain.handle('draftback:set-dock-icon-follows-cover', async (event, enabled) => {
+    if (!isTrustedRenderer(event)) throw new Error('拒绝无效的设置请求。');
+    applyDockIcon(writeSettings({ dockIconFollowsCover: Boolean(enabled) }));
+    return Boolean(enabled);
   });
   ipcMain.handle('draftback:set-sync-enabled', async (event, enabled) => {
     if (!isTrustedRenderer(event)) throw new Error('拒绝无效的设置请求。');
@@ -697,10 +728,9 @@ if (!hasSingleInstanceLock) {
   });
   app.whenReady().then(() => {
     applyAppearance(readSettings().appearance);
-    // Dock 图标在运行时显式设置:macOS 会缓存旧图标,换图标后光靠包里的 icns 不一定立刻生效
-    if (process.platform === 'darwin' && app.dock) {
-      try { app.dock.setIcon(path.join(__dirname, 'dock-icon.png')); } catch {}
-    }
+    // Dock 图标在运行时显式设置:macOS 会缓存旧图标,换图标后光靠包里的 icns 不一定立刻生效;
+    // 打开了「程序坞图标跟着封面换」就用封面颜色那一张
+    applyDockIcon();
     installIpc();
     installMenu();
     createWindow();
