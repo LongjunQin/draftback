@@ -27,7 +27,7 @@ const ICON = {
 };
 const icon = (name, size = 18, width = 2.2, extra = '') =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" ${extra}>${ICON[name]}</svg>`;
-const seal = (size, extra = '') => `<svg width="${size}" height="${size}" style="flex: none; overflow: visible" ${extra}><use href="#seal-l"/></svg>`;
+const seal = (size, extra = '') => `<svg width="${size}" height="${size}" style="flex: none; overflow: visible" ${extra}><use href="#seal"/></svg>`;
 
 // 状态栏:时间、信号、Wi-Fi、电量;颜色跟着外层的 color 走
 const statusBar = (style = '') => `<div class="status" style="${style}"><b>9:41</b><span class="status-r">

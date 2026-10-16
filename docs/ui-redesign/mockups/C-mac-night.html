@@ -11,7 +11,6 @@
 <body>
 <div class="board" id="board" style="flex-direction: column; gap: 0"></div>
 <script>
-const macSeal = `<span class="lt-ink" style="flex: none; font-size: 14px; font-weight: 600">通过 · 定稿</span>${seal(46)}`;
 const gh = (tone, name, n) => `<div class="m-gh"><i class="dot tone-${tone}" style="box-shadow: none"></i><span class="nm">${name}</span><span class="n">${n}</span></div>`;
 const side = macSide({ body: gh('turn', '轮到你', 2) + macRow('turn', '跨端规则', '第 2 轮 · 2 条未交 · 10 分钟前') + macRow('conflict', '定价页', '文件在外面被改了 · 要处理', { red: true })
   + gh('ai', '已交出', 2) + macRow('ai', '产品方案', 'AI 正在修改 · 3 分钟', { cur: true, tail: '<span class="spin" style="margin-top: 4px"></span>' }) + macRow('ai', '发布说明', 'AI 正在修改 · 12 分钟', { tail: '<span class="spin" style="margin-top: 4px"></span>' })
