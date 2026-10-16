@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=9">
   <link rel="stylesheet" href="/static/desktop.css?v=20">
-  <link rel="stylesheet" href="/static/desktop-skin.css?v=3">
+  <link rel="stylesheet" href="/static/desktop-skin.css?v=5">
   <!-- 封面颜色要在第一次绘制前就位(否则先闪一下默认的青雾蓝),所以这一小段放在 head 里同步执行 -->
   <script src="/static/desktop-cover.js?v=2"></script>
 </head>
@@ -70,12 +70,17 @@
           <div id="timelinePopover" class="popover-menu timeline-popover" role="dialog" aria-label="轮次时间线" hidden></div>
         </div>
       </div>
+      <!-- 正文纸上方:这篇稿子的工具(方案 C,2026-10-17:按钮放在它管的那块上方) -->
       <div class="toolbar-right">
+        <div class="mode-switch segmented" role="group" aria-label="阅读或编辑">
+          <button id="readingModeButton" class="active" type="button" title="阅读与批注(⌘/ 切换)">阅读</button>
+          <button id="editingModeButton" type="button" title="编辑(⌘/ 切换)">编辑</button>
+        </div>
         <button id="compareToggleButton" class="compare-toggle" type="button" title="只读对比:这一轮改了哪里(⇧⌘D)" aria-pressed="false" hidden><i class="ph ph-git-diff" aria-hidden="true"></i><span>显示改动</span></button>
-        <button id="findButton" class="icon-button compact overflowable" type="button" title="查找(⌘F)" aria-label="查找"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></button>
+        <button id="findButton" class="icon-button compact overflowable" type="button" title="查找(⌘F)" aria-label="查找"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="tb-label">查找</span></button>
         <div class="export-menu-wrap overflowable">
           <button id="exportMenuButton" class="icon-button compact" type="button" aria-haspopup="menu" aria-expanded="false" title="导出或打印" aria-label="导出或打印">
-            <i class="ph ph-export" aria-hidden="true"></i>
+            <i class="ph ph-export" aria-hidden="true"></i><span class="tb-label">导出</span>
           </button>
           <div id="exportMenu" class="popover-menu" role="menu" aria-label="导出" hidden>
             <button type="button" role="menuitem" data-command="export-pdf"><span>导出为 PDF…</span><kbd>⇧⌘E</kbd></button>
@@ -98,16 +103,15 @@
             <button type="button" role="menuitem" data-command="print"><span>打印…</span><kbd>⌘P</kbd></button>
           </div>
         </div>
-        <button id="secondaryAction" class="secondary-button action-button" type="button" hidden></button>
-        <div class="mode-switch segmented" role="group" aria-label="阅读或编辑">
-          <button id="readingModeButton" class="active" type="button" title="阅读与批注(⌘/ 切换)">阅读</button>
-          <button id="editingModeButton" type="button" title="编辑(⌘/ 切换)">编辑</button>
-        </div>
+      </div>
+      <!-- 批注本上方:批注栏开关、这一轮的主按钮(交给 AI / 通过 · 定稿)与定稿的原地确认 -->
+      <div class="toolbar-notes">
         <button id="toggleRightTop" class="icon-button compact" type="button" title="显示或收起批注栏(⌥⌘I)" aria-label="显示或收起批注栏">
-          <i class="ph ph-sidebar-simple flip" aria-hidden="true"></i>
+          <i class="ph ph-sidebar-simple flip" aria-hidden="true"></i><span class="tb-label">批注栏</span>
         </button>
+        <button id="secondaryAction" class="secondary-button action-button" type="button" hidden></button>
         <button id="primaryAction" class="primary-button action-button" type="button" hidden></button>
-        <!-- 定稿的原地确认(2026-10-16 用户批准方案 C):点「通过 · 定稿」后工具栏右边换成这一组,再按一次火漆印才算定稿 -->
+        <!-- 定稿的原地确认(2026-10-16 用户批准方案 C):点「通过 · 定稿」后这里换成这一组,再按一次火漆印才算定稿 -->
         <div id="finalizeConfirm" class="finalize-confirm" role="group" aria-label="确认定稿" hidden>
           <strong id="finalizeTitle">确认定稿?</strong>
           <span id="finalizeDetail" class="finalize-detail">AI 会收到「审阅结束」</span>

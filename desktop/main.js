@@ -312,7 +312,7 @@ function createWindow() {
   };
   if (process.platform === 'darwin') {
     windowOptions.titleBarStyle = 'hiddenInset';
-    windowOptions.trafficLightPosition = { x: 16, y: 18 };
+    windowOptions.trafficLightPosition = { x: 16, y: 15 }; // 工具栏 46 像素高(方案 C),红绿灯竖直居中
   }
   mainWindow = new BrowserWindow(windowOptions);
   installNavigationGuards(mainWindow);

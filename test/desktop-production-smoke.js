@@ -677,7 +677,7 @@ async function main() {
     assert.ok(titlebarSafeArea.trafficSafeLeft >= 80, `左栏顶上的按钮必须避开 macOS 三个窗口按钮:${titlebarSafeArea.trafficSafeLeft}`);
     assert.equal(titlebarSafeArea.toolbarDraggable, true, '工具栏背景必须是 Electron 可拖动区');
     assert.equal(Math.round(titlebarSafeArea.toolbarLeft), Math.round(titlebarSafeArea.sidebarRight), '工具栏从左栏右边缘开始');
-    assert.equal(Math.round(titlebarSafeArea.toolbarHeight), 52, '只有一条 52 像素的工具栏');
+    assert.equal(Math.round(titlebarSafeArea.toolbarHeight), 46, '只有一条 46 像素的工具栏(方案 C 皮肤把它压矮了)');
     assert.equal(titlebarSafeArea.brandName, false, '窗口里不写品牌名');
     assert.ok(titlebarSafeArea.interactiveControls >= 3, '工具栏的按钮由 no-drag 规则排除');
     await chrome.cdp.click('#welcomeRecent .recent-item');
