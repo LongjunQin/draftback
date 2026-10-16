@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 C 软皮手账:皮面颜色候选(首页)</title>
+<link rel="stylesheet" href="mockup.css">
+<style>
+.group { display: flex; flex-direction: column; gap: 14px; }
+.group h2 { margin: 0; font-size: 15px; font-weight: 600; color: #8a8478; letter-spacing: .5px; }
+.row { display: flex; gap: 32px; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.tile b { font-size: 18px; font-weight: 600; color: #3f3a33; }
+.tile b i { font-style: normal; display: inline-block; min-width: 26px; margin-right: 6px; padding: 1px 6px; border-radius: 12px; background: #57524a; color: #f4f2ee; font-size: 14px; text-align: center; }
+/* 首页上半屏,原尺寸 390 宽,缩到六成 */
+.mini { zoom: .6; width: 390px; height: 560px; border-radius: 44px; overflow: hidden; padding: 44px 20px 0; display: flex; flex-direction: column; gap: 12px;
+  box-shadow: inset 0 0 40px rgba(var(--shade), .18), 0 0 0 2px rgba(0,0,0,.18), 0 14px 30px rgba(0,0,0,.22); }
+.entry { display: flex; align-items: center; gap: 10px; padding: 11px 2px 10px; border-bottom: 1.5px dotted rgba(80,95,120,.28); }
+.entry:last-child { border-bottom: 0; }
+.fold { position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 18px 0 16px; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.08), 0 6px 12px rgba(var(--shade),.28); }
+.tab { position: absolute; right: -12px; height: 30px; padding: 0 10px; border-radius: 0 10px 10px 0; font-size: 13px; box-shadow: 2px 2px 4px rgba(40,50,70,.25); }
+</style>
+<script src="themes.js"></script>
+</head>
+<body>
+<div class="board" style="flex-direction: column; gap: 30px">
+  <p class="caption" style="margin: 0">同样的颜色放在首页上:皮面、纸和彩色标签放在一起的样子。浅色皮面上的字改成深色。</p>
+  <div id="groups" style="display: flex; flex-direction: column; gap: 34px"></div>
+</div>
+<script>
+const mini = (t) => `
+<div class="mini lt-deep" style="${themeVars(t)}">
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 2px">
+    <h1 class="lt-ink" style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: 6px">回稿</h1>
+    <button class="lt-press" aria-label="从「文件」打开" style="width: 44px; height: 44px; border-radius: 50%"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="stroke: var(--ink)" stroke-width="2.2" stroke-linejoin="round"><path d="M3 7h6l2 2h10v10H3z"/></svg></button>
+  </div>
+  <section class="paper-c" style="position: relative; margin: 10px 8px 0 0; padding: 16px 16px 6px; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.08), 0 8px 16px rgba(var(--shade),.3)">
+    <span class="washi" style="--tape: rgba(150,205,180,.72); width: 58px; height: 20px; left: -16px; top: 4px; transform: rotate(-40deg)"></span>
+    <div class="tab sticker coral" style="top: 16px">4</div>
+    <div style="display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px">
+      <span class="serif" style="font-size: 18px; font-weight: 700; color: #2b2620">轮到你</span>
+      <span class="hand" style="font-size: 14px; color: #b0644e">有 1 篇稿子回来了</span>
+    </div>
+    <div class="entry"><span class="serif" style="flex: 1; font-size: 15.5px; font-weight: 700; color: #2b2620">跨端规则.md</span><span style="font-size: 12px; color: #8a8478">2 条未交</span><span class="sticker coral" style="width: 24px; height: 24px; font-size: 11px">新</span></div>
+    <div class="entry"><span class="serif" style="flex: 1; font-size: 15.5px; font-weight: 700; color: #2b2620">产品方案.md</span><span class="hand ink" style="font-size: 15px">回稿了 ✓</span></div>
+    <div class="entry"><span class="serif" style="flex: 1; font-size: 15.5px; font-weight: 700; color: #2b2620">访谈记录.md</span><span style="font-size: 12px; color: #8a8478">已通过</span></div>
+  </section>
+  <div class="fold paper-c" style="margin-right: 8px">
+    <div class="tab sticker lav" style="top: 11px">2</div>
+    <span class="serif" style="font-size: 16px; font-weight: 700; color: #2b2620">已交出</span>
+    <span style="flex: 1; font-size: 12px; color: #8a8478">发布说明.md · AI 正在修改</span>
+  </div>
+  <div class="fold paper-c" style="margin-right: 8px; filter: brightness(.985)">
+    <div class="tab sticker mint" style="top: 11px">7</div>
+    <span class="serif" style="font-size: 16px; font-weight: 700; color: #2b2620">已结束</span>
+    <span style="flex: 1; font-size: 12px; color: #8a8478">年度总结.md · 已定稿</span>
+  </div>
+</div>`;
+const groups = document.getElementById('groups');
+let n = 0, current = null;
+for (const t of THEMES) {
+  n += 1;
+  if (!current || current.dataset.group !== t.group) {
+    current = document.createElement('section');
+    current.className = 'group'; current.dataset.group = t.group;
+    current.innerHTML = `<h2>${t.group}</h2><div class="row"></div>`;
+    groups.append(current);
+  }
+  current.querySelector('.row').insertAdjacentHTML('beforeend', `<div class="tile">${mini(t)}<b><i>${n}</i>${t.name}</b></div>`);
+}
+</script>
+</body>
+</html>
