@@ -4,6 +4,8 @@
    - 按钮:顶部每个按钮都是凸起的米白按钮块(按下去陷进去);文件名在一张小标签上;定稿是纸签上压一枚火漆印。
    - 夜读:台灯下的纸。纸还是纸,暖一点、暗一点,中间亮四周暗;桌面皮面压暗。不用平的黑色。
    - 默认封面淡绿(像 iPhone 的淡绿),皮纹更细、更淡。
+   第三版(同日):一律横平竖直,不故意歪斜;拟物要合理——便签自己能粘,不贴胶带;要固定的纸用回形针(回稿卡)
+   或图钉(说明卡);状态是一块带指示灯的标签;弹框、提示是平放的纸,不贴东西。
    这一层只改外观,不改布局之外的行为;放在 desktop.css 之后加载。纹理是 static/skin/ 里的 SVG 细颗粒。
    ====================================================================== */
 
@@ -26,8 +28,6 @@
   --hl: rgba(255, 226, 120, .58); --hl-mark: rgba(255, 200, 80, .3); --hl-line: rgba(240, 160, 40, .7);
   --paper-shadow: 60, 70, 90;
   --note-1: #fff4bf; --note-2: #f9e9a2; --note-quote: #7a6a3a; --note-ink: #2c3a5a; --note-meta: #8a7a4a; --note-act: #5d6f8a;
-  --tape-coral: rgba(244, 178, 160, .82); --tape-mint: rgba(178, 222, 198, .85); --tape-sand: rgba(246, 214, 120, .85);
-  --tape-grey: rgba(222, 218, 208, .95); --tape-red: rgba(240, 170, 160, .92);
   /* 按钮块:米白,凸起;按下去陷进去 */
   --btn-1: #fffdf8; --btn-2: #ece5d6; --btn-text: #3d362a; --btn-edge: rgba(60, 45, 25, .26);
   --btn-press-1: #e3dbca; --btn-press-2: #f1ebdf;
@@ -80,8 +80,6 @@ html[data-cover="black"] { --c1: #414145; --c2: #2c2c30; --shade: 0, 0, 0; --pri
     --pen: #2b4673; --warn: #a3412a;
     --hl: rgba(236, 180, 60, .45); --hl-mark: rgba(230, 170, 50, .32); --hl-line: rgba(190, 120, 20, .7);
     --note-1: #ead88f; --note-2: #dcc674; --note-quote: #6a5a2c; --note-ink: #23324f; --note-meta: #74663c; --note-act: #3f5478;
-    --tape-coral: rgba(214, 150, 126, .85); --tape-mint: rgba(150, 196, 168, .85); --tape-sand: rgba(222, 186, 92, .85);
-    --tape-grey: rgba(196, 188, 170, .95); --tape-red: rgba(214, 140, 124, .92);
     --btn-1: #e6dac2; --btn-2: #d1c3a6; --btn-text: #33291c; --btn-edge: rgba(40, 28, 12, .34);
     --btn-press-1: #c8b99a; --btn-press-2: #d8cbb0;
     --btn-lift: 0 1px 2px rgba(0, 0, 0, .55), 0 2px 6px rgba(0, 0, 0, .25);
@@ -243,9 +241,9 @@ html, body {
 /* 定稿:一张纸签上压一枚火漆印 */
 .seal-mark { flex: none; display: inline-block; width: 40px; height: 40px; background: url(/static/skin/seal.svg) center / contain no-repeat; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .22)); transition: transform .15s ease-out; }
 .toolbar .primary-button.action-button.seal-action { position: relative; padding: 0 36px 0 13px; overflow: visible; }
-.toolbar .action-button.seal-action .seal-mark { position: absolute; top: 50%; right: -12px; width: 44px; height: 44px; margin-top: -22px; transform: rotate(-8deg); }
-.toolbar .action-button.seal-action:hover .seal-mark { transform: rotate(-14deg) scale(1.04); }
-.toolbar .action-button.seal-action:active .seal-mark { transform: rotate(-14deg) scale(.95); }
+.toolbar .action-button.seal-action .seal-mark { position: absolute; top: 50%; right: -12px; width: 44px; height: 44px; margin-top: -22px; }
+.toolbar .action-button.seal-action:hover .seal-mark { transform: scale(1.04); }
+.toolbar .action-button.seal-action:active .seal-mark { transform: scale(.94); }
 .toolbar-right { padding-right: 10px; }
 /* 点了定稿:工具栏右边原地换成一张确认纸签,再按一次火漆印才算定稿 */
 .finalize-confirm {
@@ -257,27 +255,36 @@ html, body {
 .finalize-confirm .finalize-cancel { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: 600 13px var(--ui-font); }
 .finalize-confirm .finalize-cancel:hover { background: var(--hover); }
 .finalize-confirm .finalize-stamp { height: 26px; padding: 0 2px 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--warn); font: 700 13px var(--ui-font); }
-.finalize-confirm .finalize-stamp .seal-mark { position: absolute; top: 50%; right: -12px; width: 46px; height: 46px; margin-top: -23px; animation: draftback-seal-wait 1.6s ease-in-out infinite; }
-.finalize-confirm .finalize-stamp:hover .seal-mark { animation: none; transform: rotate(-12deg) scale(1.05); }
+.finalize-confirm .finalize-stamp .seal-mark { position: absolute; top: 50%; right: -12px; width: 46px; height: 46px; margin-top: -23px; }
+.finalize-confirm .finalize-stamp:hover .seal-mark { transform: scale(1.05); }
+.finalize-confirm .finalize-stamp:active .seal-mark { transform: scale(.94); }
 .finalize-confirm .finalize-stamp:disabled { opacity: .6; }
-@keyframes draftback-seal-wait { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(-14deg) scale(1.05); } }
 .toolbar.confirming .toolbar-right > :not(.finalize-confirm) { display: none !important; }
 
-/* 正中的状态:一条彩色纸胶带 */
+/* 正中的状态:一块米白标签,左边一盏指示灯(颜色表示稿子在谁手里) */
 .review-state {
-  position: relative; height: 26px; padding: 0 18px; border: 0; border-radius: 0; color: #36423a; font-size: 13px; font-weight: 600;
-  transform: rotate(-1deg); filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .22));
-  clip-path: polygon(0 8%, 3% 0, 6% 10%, 9% 2%, 12% 0, 88% 0, 91% 9%, 94% 1%, 97% 8%, 100% 0, 100% 92%, 97% 100%, 94% 90%, 91% 98%, 88% 100%, 12% 100%, 9% 91%, 6% 99%, 3% 90%, 0 100%);
+  position: relative; height: 28px; padding: 0 13px 0 11px; gap: 8px; border: 0; border-radius: 8px;
+  color: var(--btn-text); font-size: 13px; font-weight: 600; text-shadow: none;
+  background: linear-gradient(180deg, var(--btn-1), var(--btn-2));
+  box-shadow: 0 0 0 1px var(--btn-edge), var(--btn-lift), inset 0 1px 0 rgba(255, 255, 255, .85);
 }
-.review-state i { font-size: 14px; }
-.review-state:hover { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .22)) brightness(1.03); }
-.review-state[data-status] { border: 0; color: #3d3a33; --tape: var(--tape-grey); background: var(--paper-tex), var(--tape); }
-.review-state[data-status="reviewing"], .review-state[data-status="manual"] { --tape: rgba(248, 196, 178, .95); color: #5a3324; }
-.review-state[data-status="submitted"], .review-state[data-status="listening"] { --tape: rgba(206, 208, 240, .95); color: #3b3f6e; }
-.review-state[data-status="claimed"], .review-state[data-status="applying"] { --tape: rgba(206, 198, 240, .95); color: #43357e; }
-.review-state[data-status="complete"], .review-state[data-status="approved"], .review-state[data-status="restored"], .review-state[data-status="finalized"] { --tape: rgba(152, 210, 178, .97); color: #234232; }
-.review-state[data-status="conflict"] { --tape: rgba(240, 170, 160, .97); color: #6e2418; }
-@media (prefers-color-scheme: dark) { .review-state { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .35)) brightness(.88) sepia(.15); } .review-state:hover { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .35)) brightness(.92) sepia(.15); } }
+.review-state[data-status] { border: 0; color: var(--btn-text); background: linear-gradient(180deg, var(--btn-1), var(--btn-2)); --led: #a6acb6; }
+.review-state:hover { filter: none; background: linear-gradient(180deg, #ffffff, var(--btn-1)); }
+@media (prefers-color-scheme: dark) { .review-state:hover { background: linear-gradient(180deg, #ece1cb, var(--btn-1)); } }
+.review-state[aria-expanded="true"] { background: linear-gradient(180deg, var(--btn-press-1), var(--btn-press-2)); box-shadow: 0 0 0 1px var(--btn-edge), inset 0 1px 3px rgba(0, 0, 0, .25); }
+.review-state i { display: none; }
+.review-state::before {
+  content: ""; flex: none; width: 9px; height: 9px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, rgba(255, 255, 255, .95) 0 16%, var(--led) 46%, color-mix(in srgb, var(--led), #000 28%) 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .18), 0 0 5px color-mix(in srgb, var(--led) 70%, transparent);
+}
+.review-state[data-status="reviewing"], .review-state[data-status="manual"] { --led: #ee8a6f; }
+.review-state[data-status="submitted"], .review-state[data-status="listening"] { --led: #8f97d8; }
+.review-state[data-status="claimed"], .review-state[data-status="applying"] { --led: #9d8be0; }
+.review-state[data-status="claimed"]::before, .review-state[data-status="applying"]::before { animation: draftback-pulse 1.6s ease-in-out infinite; }
+.review-state[data-status="complete"], .review-state[data-status="approved"], .review-state[data-status="restored"] { --led: #5fb98c; }
+.review-state[data-status="finalized"] { --led: #8fb39b; }
+.review-state[data-status="conflict"] { --led: #d4554b; color: var(--warn); }
 
 /* ---------- 左边目录页:稿件 / 大纲 ---------- */
 .side-switch-row { padding: 12px 10px 4px; }
@@ -422,19 +429,14 @@ html, body {
 .notes-section-hint { color: var(--muted); font-weight: 400; }
 .notes-footer { padding: 10px 14px 12px; border-top: 1.5px dotted var(--rule); color: var(--muted); font-size: 12px; text-align: center; }
 .notes-content .notes-empty, .notes-content .outline-empty { color: var(--muted); }
-.notes-list { gap: 18px; padding: 12px 14px 16px; }
-/* 一张贴着纸胶带的黄便签 */
+.notes-list { gap: 12px; padding: 12px 14px 16px; }
+.note-card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 9px; border-radius: 2px 2px 0 0; background: linear-gradient(180deg, rgba(150, 120, 20, .1), rgba(150, 120, 20, 0)); pointer-events: none; }
+/* 一张黄便签:便签背面自己有胶,平平地粘在本子上;顶上那一条胶带区颜色略深 */
 .note-card {
-  position: relative; overflow: visible; padding: 15px 14px 10px; border: 0; border-radius: 3px;
+  position: relative; overflow: visible; padding: 14px 14px 10px; border: 0; border-radius: 2px;
   background: var(--paper-tex), linear-gradient(180deg, var(--note-1), var(--note-2));
   box-shadow: 0 1px 1px rgba(0, 0, 0, .1), 0 6px 12px rgba(var(--paper-shadow), .2);
 }
-.note-card::before {
-  content: ""; position: absolute; top: -10px; left: 50%; width: 60px; height: 20px; margin-left: -30px;
-  background: var(--paper-tex), var(--tape-mint); transform: rotate(-3deg); box-shadow: 0 1px 1px rgba(0, 0, 0, .08);
-  clip-path: polygon(0 8%, 4% 0, 8% 10%, 12% 2%, 16% 0, 84% 0, 88% 9%, 92% 1%, 96% 8%, 100% 0, 100% 92%, 96% 100%, 92% 90%, 88% 98%, 84% 100%, 16% 100%, 12% 91%, 8% 99%, 4% 90%, 0 100%);
-}
-.note-card:nth-child(even)::before { transform: rotate(2deg); margin-left: -26px; }
 .note-card.focused { border: 0; background: var(--paper-tex), linear-gradient(180deg, var(--note-1), var(--note-2)); box-shadow: 0 0 0 2px rgba(240, 160, 40, .75), 0 8px 16px rgba(var(--paper-shadow), .25); }
 .note-quote, .note-quote.doc-scope { padding-left: 8px; border-left: 2.5px solid rgba(240, 160, 40, .8); color: var(--note-quote); font-family: var(--serif); font-size: 12.5px; }
 .note-quote.doc-scope { color: var(--amber-deep); font-weight: 700; }
@@ -454,18 +456,19 @@ html, body {
 .doc-note-button i { color: var(--text-2); font-size: 15px; }
 .doc-note-button .hint { margin-left: 0; color: var(--muted); font-size: 12px; font-weight: 400; }
 .doc-note-button:hover { border-color: rgba(120, 110, 95, .65); background: rgba(255, 255, 255, .6); }
-/* 回稿卡:一张白纸卡,顶上贴一截粉色纸胶带 */
+/* 回稿卡:一张白纸卡,左上角用回形针夹在批注本上(稿子回来,附一张说明夹在上面) */
 .return-card, .state-card {
-  position: relative; margin: 16px 14px 10px; padding: 16px 16px 12px; border: 0; border-radius: 4px; overflow: visible;
-  background: var(--paper-tex), var(--card); color: var(--text); transform: rotate(-.5deg);
+  position: relative; margin: 26px 14px 10px; padding: 16px 16px 12px; border: 0; border-radius: 3px; overflow: visible;
+  background: var(--paper-tex), var(--card); color: var(--text);
   box-shadow: 0 1px 1px rgba(0, 0, 0, .1), 0 6px 12px rgba(var(--paper-shadow), .2);
 }
 .return-card[data-kind], .return-card[data-kind="cancelled"], .return-card[data-kind="restored"] { border: 0; background: var(--paper-tex), var(--card); }
-.return-card::before, .state-card::before {
-  content: ""; position: absolute; top: -10px; left: 50%; width: 74px; height: 21px; margin-left: -37px;
-  background: var(--paper-tex), var(--tape-coral); transform: rotate(2deg); box-shadow: 0 1px 1px rgba(0, 0, 0, .08);
-  clip-path: polygon(0 8%, 4% 0, 8% 10%, 12% 2%, 16% 0, 84% 0, 88% 9%, 92% 1%, 96% 8%, 100% 0, 100% 92%, 96% 100%, 92% 90%, 88% 98%, 84% 100%, 16% 100%, 12% 91%, 8% 99%, 4% 90%, 0 100%);
-}
+/* 回形针:图里 y=29 是卡片上边(见 static/skin/clip.svg),按 0.9 倍放 */
+.return-card::before { content: ""; position: absolute; left: 16px; top: -26px; width: 16.2px; height: 57.6px; background: url(/static/skin/clip.svg) no-repeat center / contain; pointer-events: none; }
+.return-card .return-card-head { padding-left: 18px; }
+/* 说明卡(冲突、只读):图钉钉在顶边正中;冲突用红钉,只读用灰钉 */
+.state-card { margin-top: 20px; padding-top: 18px; }
+.state-card::before { content: ""; position: absolute; left: 50%; top: -9px; width: 26px; height: 26px; margin-left: -13px; background: url(/static/skin/pin.svg) no-repeat center / contain; pointer-events: none; }
 .return-card-head h3, .return-card[data-kind] .return-card-head h3 { color: var(--text); font-family: var(--serif); font-size: 16px; font-weight: 700; }
 .return-card-head h3 i { display: none; }
 .return-collapse { color: var(--pen); font-size: 12px; font-weight: 600; }
@@ -506,9 +509,8 @@ html, body {
 .result-item.wontfix .result-ai, .result-item.cancelled .result-ai { color: var(--text-2); }
 /* 冲突与只读的说明卡 */
 .state-card[data-tone="conflict"], .state-card[data-tone="readonly"] { background: var(--paper-tex), var(--card); }
-.state-card[data-tone="conflict"]::before { background: var(--paper-tex), var(--tape-red); }
 .state-card[data-tone="conflict"] strong { color: var(--warn); }
-.state-card[data-tone="readonly"]::before { background: var(--paper-tex), var(--tape-grey); }
+.state-card[data-tone="readonly"]::before { filter: grayscale(1) brightness(1.15); }
 .state-card strong { font-family: var(--serif); font-size: 15px; }
 /* 历史:每一轮一张纸卡 */
 .round-group { margin: 0 14px 12px; border: 0; border-radius: 4px; background: var(--paper-tex), var(--card); box-shadow: 0 1px 1px rgba(0, 0, 0, .1), 0 4px 10px rgba(var(--paper-shadow), .16); }
@@ -552,12 +554,6 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
   box-shadow: 0 2px 4px rgba(0, 0, 0, .15), 0 24px 60px rgba(0, 0, 0, .38);
 }
 .annotation-dialog { overflow: visible; padding: 22px 24px 18px; }
-.annotation-dialog::before, .confirm-dialog::before, .settings-panel::before {
-  content: ""; position: absolute; top: -10px; left: 50%; width: 108px; height: 22px; margin-left: -54px; z-index: 2;
-  background: var(--paper-tex), var(--tape-sand); transform: rotate(-2deg); box-shadow: 0 1px 1px rgba(0, 0, 0, .08); pointer-events: none;
-  clip-path: polygon(0 8%, 3% 0, 6% 10%, 9% 2%, 12% 0, 88% 0, 91% 9%, 94% 1%, 97% 8%, 100% 0, 100% 92%, 97% 100%, 94% 90%, 91% 98%, 88% 100%, 12% 100%, 9% 91%, 6% 99%, 3% 90%, 0 100%);
-}
-.confirm-dialog::before, .settings-panel::before { background: var(--paper-tex), var(--tape-coral); transform: rotate(1.5deg); }
 .confirm-dialog, .settings-panel { position: relative; overflow: visible; }
 .dialog-kicker { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 1px; }
 .annotation-dialog h2, .confirm-dialog h2 { margin: 4px 0 12px; color: var(--text); font-family: var(--serif); font-size: 20px; font-weight: 700; }
@@ -657,19 +653,19 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
 .drop-overlay { background: rgba(var(--shade), .12); }
 .drop-card { border: 2px dashed var(--pen); border-radius: 8px; background: var(--paper-tex), var(--card); color: var(--pen); }
 
-/* 提示:一张贴着纸胶带的纸条;出错的用红胶带、红字 */
+/* 提示:一张纸条,左边一盏指示灯(绿:做好了;黄:可以撤销;红:出错,字也是红的) */
 .toast {
-  position: relative; overflow: visible; padding: 10px 16px 10px 30px; border-radius: 2px;
+  position: relative; overflow: visible; padding: 10px 16px 10px 32px; border-radius: 4px;
   background: var(--paper-tex), var(--card); color: var(--text); font-size: 13px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, .15), 0 8px 20px rgba(var(--shade), .35);
 }
 .toast::before {
-  content: ""; position: absolute; left: -16px; top: 50%; width: 40px; height: 17px; margin-top: -9px;
-  background: var(--paper-tex), var(--tape-mint); transform: rotate(-32deg); box-shadow: 0 1px 1px rgba(0, 0, 0, .08);
-  clip-path: polygon(0 8%, 6% 0, 12% 10%, 18% 2%, 24% 0, 76% 0, 82% 9%, 88% 1%, 94% 8%, 100% 0, 100% 92%, 94% 100%, 88% 90%, 82% 98%, 76% 100%, 24% 100%, 18% 91%, 12% 99%, 6% 90%, 0 100%);
+  content: ""; position: absolute; left: 13px; top: 50%; width: 9px; height: 9px; margin-top: -4.5px; border-radius: 50%; --led: #5fb98c;
+  background: radial-gradient(circle at 35% 32%, rgba(255, 255, 255, .95) 0 16%, var(--led) 46%, color-mix(in srgb, var(--led), #000 28%) 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .18), 0 0 5px color-mix(in srgb, var(--led) 70%, transparent);
 }
-.toast:has(.toast-action)::before { background: var(--paper-tex), var(--tape-sand); }
+.toast:has(.toast-action)::before { --led: #e2b440; }
 .toast.error { background: var(--paper-tex), var(--card); color: var(--warn); }
-.toast.error::before { background: var(--paper-tex), var(--tape-red); }
+.toast.error::before { --led: #d4554b; }
 .toast-action { padding: 0 2px; border: 0; background: none; color: var(--pen); font-size: 13px; font-weight: 700; }
 .toast-action:hover { background: none; text-decoration: underline; }

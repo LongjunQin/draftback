@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="18" height="64" viewBox="0 0 18 64">
+  <!-- 回形针(方案 C):钢丝 = 投影 + 暗边 + 底色 + 亮面 + 高光;卡片上边在 y=29,
+       边以下夹在卡片背后的那一圈用遮罩藏起来。用法:放在卡片左上角,图的 y=29 对齐卡片上边。 -->
+  <defs>
+    <filter id="soft" x="-50%" y="-20%" width="200%" height="140%"><feGaussianBlur stdDeviation=".5"/></filter>
+    <mask id="behind" maskUnits="userSpaceOnUse" x="-10" y="-10" width="40" height="90">
+      <rect x="-10" y="-10" width="40" height="90" fill="#fff"/>
+      <rect x="4.4" y="29" width="9.2" height="23.5" fill="#000"/>
+    </mask>
+    <path id="wire" d="M15 18 V54 A6 6 0 0 1 3 54 V12 A4 4 0 0 1 11 12 V48 A2 2 0 0 1 7 48 V24"/>
+  </defs>
+  <g mask="url(#behind)" fill="none" stroke-linecap="round">
+    <use href="#wire" stroke="rgba(60,40,20,.38)" stroke-width="1.5" transform="translate(.9 1.4)" filter="url(#soft)"/>
+    <use href="#wire" stroke="#6b7076" stroke-width="1.55" transform="translate(.12 .12)"/>
+    <use href="#wire" stroke="#9aa0a7" stroke-width="1.4"/>
+    <use href="#wire" stroke="#d3d7dc" stroke-width=".85" transform="translate(-.16 -.16)"/>
+    <use href="#wire" stroke="#fff" stroke-width=".35" transform="translate(-.3 -.3)" opacity=".95"/>
+  </g>
+</svg>
