@@ -6,6 +6,22 @@
 <link rel="stylesheet" href="mockup.css">
 </head>
 <body>
+<!-- 回形针:钢丝 = 暗边 + 底色 + 亮面 + 高光四层;卡片边在 y=29,边以下夹在卡片后面的内圈用遮罩藏起来 -->
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <filter id="clip-soft" x="-50%" y="-20%" width="200%" height="140%"><feGaussianBlur stdDeviation=".5"/></filter>
+    <mask id="clip-behind" maskUnits="userSpaceOnUse" x="-10" y="-10" width="40" height="90"><rect x="-10" y="-10" width="40" height="90" fill="#fff"/><rect x="4.4" y="29" width="9.2" height="23.5" fill="#000"/></mask>
+    <symbol id="paperclip" viewBox="0 0 18 64" overflow="visible">
+      <g mask="url(#clip-behind)" fill="none" stroke-linecap="round">
+        <path d="M15 18 V54 A6 6 0 0 1 3 54 V12 A4 4 0 0 1 11 12 V48 A2 2 0 0 1 7 48 V24" stroke="rgba(60,40,20,.38)" stroke-width="1.5" transform="translate(.9 1.4)" filter="url(#clip-soft)"/>
+        <path d="M15 18 V54 A6 6 0 0 1 3 54 V12 A4 4 0 0 1 11 12 V48 A2 2 0 0 1 7 48 V24" stroke="#6b7076" stroke-width="1.55" transform="translate(.12 .12)"/>
+        <path d="M15 18 V54 A6 6 0 0 1 3 54 V12 A4 4 0 0 1 11 12 V48 A2 2 0 0 1 7 48 V24" stroke="#9aa0a7" stroke-width="1.4"/>
+        <path d="M15 18 V54 A6 6 0 0 1 3 54 V12 A4 4 0 0 1 11 12 V48 A2 2 0 0 1 7 48 V24" stroke="#d3d7dc" stroke-width=".85" transform="translate(-.16 -.16)"/>
+        <path d="M15 18 V54 A6 6 0 0 1 3 54 V12 A4 4 0 0 1 11 12 V48 A2 2 0 0 1 7 48 V24" stroke="#fff" stroke-width=".35" transform="translate(-.3 -.3)" opacity=".95"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
 <div class="board">
   <div>
     <p class="caption">读稿页(稿子回来了)</p>
@@ -26,20 +42,20 @@
         </div>
       </header>
       <main class="paper-a" style="flex: 1; min-height: 0; overflow: hidden; padding: 22px 22px 0; box-shadow: inset 0 10px 12px -10px rgba(60,35,10,.45), inset 0 -10px 12px -10px rgba(60,35,10,.45)">
-        <section class="index-card" style="position: relative; margin: 8px 2px 22px; padding: 18px 16px 14px; border-radius: 3px; background-position: 0 30px, 0 0; transform: rotate(-.6deg)">
-          <div style="position: absolute; left: 0; right: 0; top: 30px; height: 1px; background: rgba(200,70,60,.45)"></div>
-          <svg width="22" height="56" viewBox="0 0 22 56" style="position: absolute; left: 18px; top: -14px"><path d="M6 44V10a5 5 0 0 1 10 0v34a8 8 0 0 1-16 0V14" fill="none" stroke="#b8893c" stroke-width="2.6" stroke-linecap="round"/><path d="M6 44V10a5 5 0 0 1 10 0v34a8 8 0 0 1-16 0V14" fill="none" stroke="#f3d89c" stroke-width="1" stroke-linecap="round" opacity=".7"/></svg>
-          <div style="display: flex; align-items: baseline; justify-content: space-between; padding-left: 26px">
-            <h2 class="serif" style="margin: 0; font-size: 18px; font-weight: 700; color: #2c241a">第 3 轮回稿</h2>
-            <span style="font-size: 12px; color: #6d5a43">10/15 15:58 · Claude Code</span>
+        <section class="index-card" style="position: relative; margin: 30px 2px 22px; padding: 6px 16px 14px; border-radius: 3px; transform: rotate(-.6deg)">
+          <svg class="clip" viewBox="0 0 18 64" width="22.5" height="80" style="left: 14px; top: -36px"><use href="#paperclip"/></svg>
+          <div class="ruled-row head" style="padding-left: 30px; justify-content: space-between">
+            <h2 class="serif on-line" style="margin: 0 0 .16em; font-size: 18px; font-weight: 700; color: #2c241a">第 3 轮回稿</h2>
+            <span class="on-line" style="font-size: 12px; color: #6d5a43">10/15 15:58 · Claude Code</span>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px; margin-top: 14px">
-            <span class="stamp-green" style="padding: 2px 9px; font-size: 13px; transform: rotate(-3deg)">采纳 2</span>
-            <span class="stamp-red" style="padding: 2px 9px; font-size: 13px; transform: rotate(2deg)">未采纳 1</span>
-            <span style="font-size: 13px; color: #6d5a43">改了 4 处</span>
+          <div class="ruled-row" style="gap: 10px">
+            <span class="stamp green" style="margin-bottom: 3px; padding: 0 7px; font-size: 12px; transform: rotate(-3deg)">采纳 2</span>
+            <span class="stamp red" style="margin-bottom: 3px; padding: 0 7px; font-size: 12px; transform: rotate(2deg)">未采纳 1</span>
+            <span class="on-line" style="font-size: 13px; color: #6d5a43">改了 4 处</span>
           </div>
-          <p class="serif" style="margin: 12px 0; font-size: 14px; line-height: 26px; color: #3b3125">按 3 条批注改了第二节的说法,删掉一段重复的背景。</p>
-          <div style="display: flex; gap: 10px">
+          <div class="ruled-row"><span class="serif on-line" style="font-size: 14.5px; color: #3b3125">按 3 条批注改了第二节的说法,删掉一段</span></div>
+          <div class="ruled-row"><span class="serif on-line" style="font-size: 14.5px; color: #3b3125">重复的背景。</span></div>
+          <div style="display: flex; gap: 10px; margin-top: 12px">
             <button class="brass" style="height: 34px; padding: 0 14px; border-radius: 6px; font-size: 13px; font-weight: 700; box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 2px 3px rgba(0,0,0,.3)">显示改动</button>
             <button style="height: 34px; padding: 0 12px; border-radius: 6px; border: 1px solid #c9b48f; background: linear-gradient(180deg, #fffaf0, #efe3c9); box-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(0,0,0,.18); color: #5a4630; font-size: 13px; font-weight: 600">逐条结果</button>
           </div>
@@ -88,7 +104,7 @@
           </div>
           <div class="slip" style="display: flex; align-items: center; gap: 12px; padding: 11px 14px; transform: rotate(.3deg)">
             <div style="flex: 1"><div class="serif" style="font-size: 16px; font-weight: 700; color: #2c241a">产品方案.md</div><div style="margin-top: 3px; font-size: 12px; color: #6d5a43">第 3 轮回稿 · 采纳 2 · 未采纳 1</div></div>
-            <span class="stamp-green" style="padding: 1px 7px; font-size: 12px; transform: rotate(-6deg)">回稿</span>
+            <span class="stamp green" style="padding: 1px 7px; font-size: 12px; transform: rotate(-6deg)">回稿</span>
           </div>
           <div class="slip" style="display: flex; align-items: center; gap: 12px; padding: 11px 14px; transform: rotate(-.2deg)">
             <div style="flex: 1"><div class="serif" style="font-size: 16px; font-weight: 700; color: #2c241a">定价页.md</div><div style="margin-top: 3px; font-size: 12px; color: #9b3b22">文件被别的程序改了 · 要在 Mac 上处理</div></div>
