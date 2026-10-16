@@ -18,7 +18,7 @@ const { sleep, waitUntil, stopChild, startServer, startChrome } = require('./hel
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 const FAKE_BRIDGE = `
-  window.__db = { commands: [], menuState: null, recents: [], copyPath: null, batch: null, appearance: 'system', cover: 'mist', dockFollows: false, sync: true, revealed: null, external: null };
+  window.__db = { commands: [], menuState: null, recents: [], copyPath: null, batch: null, appearance: 'system', cover: 'green', dockFollows: false, sync: true, revealed: null, external: null };
   window.draftbackDesktop = {
     platform: 'darwin',
     pickMarkdown: async () => [],
@@ -263,14 +263,15 @@ async function main() {
     await waitUntil('设置打开', () => cdp.evaluate(`!document.querySelector('#settingsDialog').hidden && document.querySelector('#aboutLine').textContent.includes('9.9.9')`));
     assert.match(await cdp.evaluate(`document.querySelector('#cliStatusLine').textContent`), /指向别处/);
     assert.equal(await cdp.evaluate(`document.querySelector('#cliInstallButton').textContent`), '改为指向这个回稿');
-    // 封面颜色(方案 C,2026-10-16 用户定 6 种,默认青雾蓝):点色块,窗口跟着换色并存进设置;程序坞图标可以跟着换
+    // 封面颜色(方案 C 的 6 种;2026-10-17 用户定默认淡绿):点色块,窗口跟着换色并存进设置;程序坞图标可以跟着换
     assert.equal(await cdp.evaluate(`document.querySelectorAll('#coverSwatches [data-cover]').length`), 6);
-    assert.equal(await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="mist"]').getAttribute('aria-checked')`), 'true', '默认青雾蓝');
-    await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="sage"]').click()`);
-    await waitUntil('封面换成鼠尾草绿', async () => (await cdp.evaluate(`window.__db.cover`)) === 'sage' && (await cdp.evaluate(`document.documentElement.dataset.cover`)) === 'sage');
-    assert.equal(await cdp.evaluate(`localStorage.getItem('draftback.cover')`), 'sage', '本地留一份,下次第一次绘制前就用它');
-    assert.equal(await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="sage"]').getAttribute('aria-checked')`), 'true');
-    assert.equal(await cdp.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--c1').trim()`), '#9fb099', '皮面颜色跟着换');
+    assert.equal(await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="green"]').getAttribute('aria-checked')`), 'true', '默认淡绿');
+    assert.equal(await cdp.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--c1').trim()`), '#d3e2c6', '默认皮面是淡绿');
+    await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="mist"]').click()`);
+    await waitUntil('封面换成青雾蓝', async () => (await cdp.evaluate(`window.__db.cover`)) === 'mist' && (await cdp.evaluate(`document.documentElement.dataset.cover`)) === 'mist');
+    assert.equal(await cdp.evaluate(`localStorage.getItem('draftback.cover')`), 'mist', '本地留一份,下次第一次绘制前就用它');
+    assert.equal(await cdp.evaluate(`document.querySelector('#coverSwatches [data-cover="mist"]').getAttribute('aria-checked')`), 'true');
+    assert.equal(await cdp.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--c1').trim()`), '#8ba3b7', '皮面颜色跟着换');
     await cdp.evaluate(`document.querySelector('#dockIconToggle').click()`);
     await waitUntil('程序坞图标跟着封面换', async () => (await cdp.evaluate(`window.__db.dockFollows`)) === true && (await cdp.evaluate(`document.querySelector('#dockIconToggle').getAttribute('aria-checked')`)) === 'true');
     assert.deepEqual(await cdp.evaluate(`Array.from(document.querySelectorAll('#appearanceSegment button')).map((b) => b.textContent)`), ['跟随系统', '日间', '夜读'], '外观改叫日间 / 夜读');

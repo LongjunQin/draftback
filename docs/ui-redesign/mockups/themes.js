@@ -1,8 +1,8 @@
-// 方案 C 的封面颜色(用户 2026-10-16 定:6 种,默认青雾蓝)。所有效果图共用。
+// 方案 C 的封面颜色(用户 2026-10-16 定 6 种;2026-10-17 改:默认淡绿,鼠尾草绿拿掉)。所有效果图和 App 图标共用。
 // c1 → c2:皮面从上到下的颜色;ink:皮面上的字(浅色皮用深色字);shade:阴影和压痕的颜色(r,g,b)。
 const THEMES = [
+  { id: 'green', name: '淡绿', from: 'iPhone 15 一类的淡绿', c1: '#d3e2c6', c2: '#bfd2b0', shade: '50,70,40', ink: '#3d4a33' },
   { id: 'mist', name: '青雾蓝', from: 'iPhone 17', c1: '#8ba3b7', c2: '#7891a6', shade: '20,35,50' },
-  { id: 'sage', name: '鼠尾草绿', from: 'iPhone 17', c1: '#9fb099', c2: '#879983', shade: '30,48,28' },
   { id: 'lavender', name: '薰衣草紫', from: 'iPhone 17', c1: '#ab9fc5', c2: '#958aaf', shade: '45,35,72' },
   { id: 'gold', name: '浅金', from: 'iPhone Air', c1: '#e6d6b6', c2: '#d3bf98', shade: '92,70,30', ink: '#5e4a28' },
   { id: 'orange', name: '星宇橙', from: 'iPhone 17 Pro', c1: '#e4824a', c2: '#cd6a33', shade: '100,40,10' },

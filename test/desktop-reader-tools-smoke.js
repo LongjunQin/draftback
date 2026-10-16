@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 阅读器小件的真实浏览器冒烟(路线图 v3 第一轮阅读器线):查找、深色模式、打印样式、拖放提示、拖入手机批次导入。
+// 阅读器小件的真实浏览器冒烟(路线图 v3 第一轮阅读器线):查找、夜读(台灯下的纸)、打印样式、拖放提示、拖入手机批次导入。
 // 另外把深色与打印两种外观截图到 --shots <目录>,供人工过目。
 //
 // 用法: node test/desktop-reader-tools-smoke.js [--shots /tmp/shots]
@@ -72,35 +72,40 @@ async function main() {
     await waitUntil('查找栏关闭', () => chrome.cdp.evaluate(`document.querySelector('#findBar').hidden && !CSS.highlights.has('draftback-find')`));
     await screenshot(chrome.cdp, 'light-reading.png');
 
-    // 2. 深色模式:模拟系统深色,壳与正文背景都应变暗,文字变亮。
-    await chrome.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
-    await sleep(200);
-    const dark = await chrome.cdp.evaluate(`(() => {
+    // 2. 夜读(方案 C 第二版,2026-10-17 用户定):台灯下的纸。纸还是纸——浅暖色、比日间暗;墨是深色;
+    //    桌面皮面比日间暗得多;代码块跟着纸用浅色。先量日间,再切系统深色量夜读。
+    const measure = () => chrome.cdp.evaluate(`(() => {
       // 颜色可能是 rgb(…) 也可能是 color(srgb …)(color-mix 算出来的就是后者)
-      const lum = (color) => {
+      const rgb = (color) => {
         const srgb = color.match(/color\\(srgb ([\\d.]+) ([\\d.]+) ([\\d.]+)/);
-        const m = srgb ? srgb.slice(1, 4).map((v) => Number(v) * 255) : color.match(/[\\d.]+/g).map(Number);
-        return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+        return srgb ? srgb.slice(1, 4).map((v) => Number(v) * 255) : color.match(/[\\d.]+/g).map(Number);
       };
+      const lum = (color) => { const m = rgb(color); return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255; };
+      const paperColor = getComputedStyle(document.querySelector('#readerScroll')).backgroundColor;
       return {
         shell: lum(getComputedStyle(document.body).backgroundColor),
-        paper: lum(getComputedStyle(document.querySelector('#readerScroll')).backgroundColor),
+        paper: lum(paperColor),
+        warm: rgb(paperColor)[0] - rgb(paperColor)[2],
         text: lum(getComputedStyle(document.querySelector('#documentContent p')).color),
         code: lum(getComputedStyle(document.querySelector('#documentContent pre')).backgroundColor),
-        card: lum(getComputedStyle(document.querySelector('#openNotesList')).backgroundColor),
         titlebar: lum(getComputedStyle(document.querySelector('#leftSidebar .sidebar-card')).backgroundColor),
         toolbar: lum(getComputedStyle(document.querySelector('#appShell'), '::before').backgroundColor),
         outlineFont: parseFloat(getComputedStyle(document.querySelector('#outlinePanel .outline-link')).fontSize),
       };
     })()`);
-    // 方案 C:夜读时皮面保留颜色、只压暗一半(用户批准的效果图),比纸面亮一点;仍远暗于日间(约 0.55)
-    assert.ok(dark.shell < 0.32, `深色下外壳背景应很暗,实际亮度 ${dark.shell}`);
-    assert.ok(dark.paper < 0.25, `深色下正文背景应很暗,实际亮度 ${dark.paper}`);
-    assert.ok(dark.text > 0.7, `深色下正文文字应很亮,实际亮度 ${dark.text}`);
-    assert.ok(dark.code < 0.3, `深色下代码块背景应很暗,实际亮度 ${dark.code}`);
-    assert.ok(dark.titlebar < 0.25, `深色下侧栏不得仍是浅色,实际亮度 ${dark.titlebar}`);
-    // 工具栏那条皮面在夜读时压暗 42%(效果图 C-mac-night),比窗口四周的皮面略亮;日间约 0.6
-    assert.ok(dark.toolbar < 0.4, `深色下工具栏不得仍是浅色,实际亮度 ${dark.toolbar}`);
+    await chrome.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await sleep(200);
+    const day = await measure();
+    await chrome.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await sleep(200);
+    const dark = await measure();
+    assert.ok(dark.paper > 0.55 && dark.paper < day.paper - 0.08, `夜读时纸还是纸(浅色),比日间暗:夜读 ${dark.paper},日间 ${day.paper}`);
+    assert.ok(dark.warm > 25, `夜读的纸是暖色(台灯光,红多于蓝):${dark.warm}`);
+    assert.ok(dark.text < 0.25, `夜读时字是深色墨:${dark.text}`);
+    assert.ok(dark.code > 0.5, `代码块跟着纸用浅色:${dark.code}`);
+    assert.ok(dark.titlebar > 0.55 && dark.titlebar < day.titlebar, `左边目录页也是纸,比日间暗:夜读 ${dark.titlebar},日间 ${day.titlebar}`);
+    assert.ok(dark.shell < day.shell - 0.25, `桌面皮面比日间暗得多:夜读 ${dark.shell},日间 ${day.shell}`);
+    assert.ok(dark.toolbar < day.toolbar - 0.25, `工具栏那条皮面比日间暗得多:夜读 ${dark.toolbar},日间 ${day.toolbar}`);
     assert.ok(dark.outlineFont >= 13, `大纲字号应不小于 13px,实际 ${dark.outlineFont}`);
     await screenshot(chrome.cdp, 'dark-reading.png');
     await chrome.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });

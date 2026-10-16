@@ -22,7 +22,7 @@ html, body { margin: 0; background: transparent; }
 <script>
 const params = new URLSearchParams(location.search);
 const size = Number(params.get('size')) || 1024;
-const theme = themeById(params.get('theme') || 'mist') || THEMES[0];
+const theme = themeById(params.get('theme') || 'green') || THEMES[0];
 const canvas = document.getElementById('canvas');
 canvas.style.width = canvas.style.height = `${size}px`;
 const icon = document.getElementById('icon');

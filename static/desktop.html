@@ -13,9 +13,9 @@
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=9">
   <link rel="stylesheet" href="/static/desktop.css?v=20">
-  <link rel="stylesheet" href="/static/desktop-skin.css?v=1">
+  <link rel="stylesheet" href="/static/desktop-skin.css?v=2">
   <!-- 封面颜色要在第一次绘制前就位(否则先闪一下默认的青雾蓝),所以这一小段放在 head 里同步执行 -->
-  <script src="/static/desktop-cover.js?v=1"></script>
+  <script src="/static/desktop-cover.js?v=2"></script>
 </head>
 <body>
   <div id="appShell" class="app-shell">
@@ -303,8 +303,8 @@
         <section class="settings-group">
           <h3>外观</h3>
           <div id="coverSwatches" class="cover-swatches" role="radiogroup" aria-label="封面颜色">
+            <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="green"><i aria-hidden="true"></i>淡绿</button>
             <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="mist"><i aria-hidden="true"></i>青雾蓝</button>
-            <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="sage"><i aria-hidden="true"></i>鼠尾草绿</button>
             <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="lavender"><i aria-hidden="true"></i>薰衣草紫</button>
             <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="gold"><i aria-hidden="true"></i>浅金</button>
             <button class="cover-swatch" type="button" role="radio" aria-checked="false" data-cover="orange"><i aria-hidden="true"></i>星宇橙</button>
@@ -385,6 +385,6 @@
   <script src="/static/desktop-diff.js?v=1"></script>
   <script src="/static/desktop-history.js?v=1"></script>
   <script src="/static/desktop-compare.js?v=1"></script>
-  <script src="/static/desktop.js?v=32"></script>
+  <script src="/static/desktop.js?v=33"></script>
 </body>
 </html>

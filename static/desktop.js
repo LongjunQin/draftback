@@ -1722,17 +1722,8 @@
     },
   });
   // strict:图表文字经 Mermaid 自带的净化,不允许 HTML 标签与点击脚本进入 SVG。
-  const prefersDark = typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
-  if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: prefersDark ? 'dark' : 'default' });
-  // 外观切换(系统或「显示 → 外观」菜单)后,样式随变量立刻变,Mermaid 图要按新主题重画一次
-  if (typeof matchMedia === 'function') {
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
-      if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: event.matches ? 'dark' : 'default' });
-      // 只有含 Mermaid 图的文档需要重画(其余全靠 CSS 变量),避免无谓的整页重渲染
-      const tab = activeTab();
-      if (tab && tab.mode === 'read' && nodes.content.querySelector('.mermaid')) { tab.renderedHash = null; renderReader(tab); }
-    });
-  }
+  // 方案 C 的夜读是「台灯下的纸」:纸还是浅色,图表一律用浅色主题(不再跟着系统换深色)
+  if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
 
   function posixDir(value) { const index = value.lastIndexOf('/'); return index < 0 ? '' : value.slice(0, index); }
   function posixJoin(base, relative) {
@@ -3635,11 +3626,11 @@
     else await openDocumentPath(item.path);
   }
 
-  // ---------- 封面颜色(方案 C 的 6 种皮面颜色,2026-10-16 用户定;默认青雾蓝) ----------
+  // ---------- 封面颜色(方案 C 的 6 种皮面颜色;2026-10-17 用户定默认淡绿,鼠尾草绿拿掉) ----------
   // 设置存在 Electron 的 settings.json;本地存储里留一份,给 desktop-cover.js 在第一次绘制前用
-  const COVERS = ['mist', 'sage', 'lavender', 'gold', 'orange', 'black'];
+  const COVERS = ['green', 'mist', 'lavender', 'gold', 'orange', 'black'];
   function applyCover(cover) {
-    const id = COVERS.includes(cover) ? cover : 'mist';
+    const id = COVERS.includes(cover) ? cover : 'green';
     document.documentElement.dataset.cover = id;
     storeLocal('draftback.cover', id);
     nodes.coverSwatches.querySelectorAll('button[data-cover]').forEach((button) => button.setAttribute('aria-checked', String(button.dataset.cover === id)));

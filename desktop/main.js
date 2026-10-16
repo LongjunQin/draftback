@@ -46,14 +46,14 @@ function writeSettings(patch) {
   try { fs.mkdirSync(path.dirname(settingsPath()), { recursive: true }); fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2)); } catch {}
   return next;
 }
-// 封面颜色(方案 C,2026-10-16 用户定 6 种,默认青雾蓝);打开「程序坞图标跟着封面换」时,程序坞图标用同色的那一张。
-// macOS 只让正在运行的程序换程序坞图标:退出后程序坞和访达里仍是安装包里的青雾蓝图标。
-const COVERS = ['mist', 'sage', 'lavender', 'gold', 'orange', 'black'];
-function coverOf(settings) { return COVERS.includes(settings.cover) ? settings.cover : 'mist'; }
-// 窗口打底色:页面画出来之前先露出的颜色,用封面皮面的颜色(日间压暗 7%,夜读压暗一半),免得先闪一下灰
+// 封面颜色(方案 C 的 6 种;2026-10-17 用户定默认淡绿);打开「程序坞图标跟着封面换」时,程序坞图标用同色的那一张。
+// macOS 只让正在运行的程序换程序坞图标:退出后程序坞和访达里仍是安装包里的淡绿图标。
+const COVERS = ['green', 'mist', 'lavender', 'gold', 'orange', 'black'];
+function coverOf(settings) { return COVERS.includes(settings.cover) ? settings.cover : 'green'; }
+// 窗口打底色:页面画出来之前先露出的颜色,用封面皮面的颜色(日间压暗 6%;夜读往暖黑里压 64%,和 desktop-skin.css 一致),免得先闪一下灰
 const COVER_WINDOW_COLORS = {
-  mist: ['#70879a', '#3e4b56'], sage: ['#7e8e7a', '#465044'], lavender: ['#8b80a3', '#4d485b'],
-  gold: ['#c4b28d', '#5f5644'], orange: ['#bf632f', '#6b371b'], black: ['#29292d', '#171719'],
+  green: ['#b4c5a5', '#575846'], mist: ['#71889c', '#3d4143'], lavender: ['#8c82a4', '#483e46'],
+  gold: ['#c6b48f', '#5e523e'], orange: ['#c16430', '#5c3319'], black: ['#29292d', '#221d18'],
 };
 function windowBackgroundColor() {
   const colors = COVER_WINDOW_COLORS[coverOf(readSettings())];
@@ -61,8 +61,8 @@ function windowBackgroundColor() {
 }
 function applyDockIcon(settings = readSettings()) {
   if (process.platform !== 'darwin' || !app.dock) return;
-  const cover = settings.dockIconFollowsCover === true ? coverOf(settings) : 'mist';
-  const file = cover === 'mist' ? path.join(__dirname, 'dock-icon.png') : path.join(__dirname, 'dock-icons', `${cover}.png`);
+  const cover = settings.dockIconFollowsCover === true ? coverOf(settings) : 'green';
+  const file = cover === 'green' ? path.join(__dirname, 'dock-icon.png') : path.join(__dirname, 'dock-icons', `${cover}.png`);
   try { app.dock.setIcon(file); } catch {}
 }
 function applyAppearance(value) {

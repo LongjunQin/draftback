@@ -3,8 +3,8 @@
 
 // 方案 C 图标出图:用无头 Chrome 打开 skin-icon.html,出透明底 PNG,再拼 macOS 的 icon.icns。
 // 用法: node branding/export-icons.js
-// 产物:desktop/build/icon.png(1024)、desktop/build/icon.icns、desktop/dock-icon.png(512,青雾蓝)、
-//      desktop/dock-icons/<封面>.png(512,6 种,设置里「程序坞图标跟着封面换」用)、static/brand/icon-256.png(欢迎页)、
+// 产物:desktop/build/icon.png(1024)、desktop/build/icon.icns、desktop/dock-icon.png(512,默认淡绿)、
+//      desktop/dock-icons/<封面>.png(512,另外 5 种,设置里「程序坞图标跟着封面换」用)、static/brand/icon-256.png(欢迎页)、
 //      desktop/build/icon.ico(Windows)、branding/icon-1024.png 与 desktop/build/icon-source-fullbleed.png(全出血方块)。
 // iOS 的图标(ios/…/AppIcon.appiconset)不在这里出:改手机界面时用全出血的 branding/icon-1024.png 另出。
 
@@ -17,7 +17,8 @@ const { startChrome, stopChild, waitUntil } = require('../test/helpers/browser-s
 
 const ROOT = path.resolve(__dirname, '..');
 const PAGE = path.join(__dirname, 'skin-icon.html');
-const COVERS = ['mist', 'sage', 'lavender', 'gold', 'orange', 'black'];
+// 默认淡绿用 desktop/dock-icon.png;其余 5 种各一张
+const COVERS = ['mist', 'lavender', 'gold', 'orange', 'black'];
 
 async function shoot(cdp, theme, size, out, { full = false } = {}) {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: size, height: size, deviceScaleFactor: 1, mobile: false });
@@ -37,8 +38,8 @@ async function shoot(cdp, theme, size, out, { full = false } = {}) {
   try {
     const cdp = chrome.cdp;
     await cdp.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
-    await shoot(cdp, 'mist', 1024, path.join(ROOT, 'desktop/build/icon.png'));
-    await shoot(cdp, 'mist', 1024, path.join(ROOT, 'branding/icon-1024.png'), { full: true });
+    await shoot(cdp, 'green', 1024, path.join(ROOT, 'desktop/build/icon.png'));
+    await shoot(cdp, 'green', 1024, path.join(ROOT, 'branding/icon-1024.png'), { full: true });
     fs.copyFileSync(path.join(ROOT, 'branding/icon-1024.png'), path.join(ROOT, 'desktop/build/icon-source-fullbleed.png'));
     // Windows:和 scripts/make-icons.py 一样,从全出血方块切 40/256 的圆角
     execFileSync('python3', ['-c', [
@@ -49,15 +50,15 @@ async function shoot(cdp, theme, size, out, { full = false } = {}) {
       'win.save(sys.argv[2], sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])',
     ].join('\n'), path.join(ROOT, 'branding/icon-1024.png'), path.join(ROOT, 'desktop/build/icon.ico')]);
     console.log('desktop/build/icon.ico');
-    await shoot(cdp, 'mist', 512, path.join(ROOT, 'desktop/dock-icon.png'));
-    await shoot(cdp, 'mist', 256, path.join(ROOT, 'static/brand/icon-256.png'));
+    await shoot(cdp, 'green', 512, path.join(ROOT, 'desktop/dock-icon.png'));
+    await shoot(cdp, 'green', 256, path.join(ROOT, 'static/brand/icon-256.png'));
     for (const cover of COVERS) await shoot(cdp, cover, 512, path.join(ROOT, `desktop/dock-icons/${cover}.png`));
     // icon.icns:每个尺寸单独出图(小尺寸直接按小画布排版,比缩小大图清楚)
     const iconset = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-iconset-')), 'icon.iconset');
     fs.mkdirSync(iconset);
     for (const base of [16, 32, 128, 256, 512]) {
-      await shoot(cdp, 'mist', base, path.join(iconset, `icon_${base}x${base}.png`));
-      await shoot(cdp, 'mist', base * 2, path.join(iconset, `icon_${base}x${base}@2x.png`));
+      await shoot(cdp, 'green', base, path.join(iconset, `icon_${base}x${base}.png`));
+      await shoot(cdp, 'green', base * 2, path.join(iconset, `icon_${base}x${base}@2x.png`));
     }
     execFileSync('iconutil', ['-c', 'icns', iconset, '-o', path.join(ROOT, 'desktop/build/icon.icns')]);
     console.log('desktop/build/icon.icns');

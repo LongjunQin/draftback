@@ -73,7 +73,7 @@ button { font: inherit; cursor: default; }
 
 /* ---------- C 的 App 图标:用 em 作单位,外层 font-size 就是图标边长,皮纹和火漆印跟着一起缩 ---------- */
 .icon-c { --c1: #8ba3b7; --c2: #7891a6; --shade: 20,35,50; position: relative; flex: none; width: 1em; height: 1em; border-radius: .2267em; display: flex; align-items: center; justify-content: center;
-  background: url(textures/leather-lit.svg) 0 0 / 1.2em 1.2em, radial-gradient(ellipse at 35% 20%, rgba(255,255,255,.22), rgba(255,255,255,0) 60%), linear-gradient(180deg, var(--c1), var(--c2));
+  background: url(textures/leather-fine.svg) 0 0 / .8em .8em, radial-gradient(ellipse at 35% 20%, rgba(255,255,255,.22), rgba(255,255,255,0) 60%), linear-gradient(180deg, var(--c1), var(--c2));
   background-blend-mode: soft-light, normal, normal;
   box-shadow: inset 0 .006em 0 rgba(255,255,255,.4), inset 0 -.02em .04em rgba(var(--shade),.32), 0 .03em .07em rgba(0,0,0,.3); }
 .icon-c svg { flex: none; width: .86em; height: .86em; }
