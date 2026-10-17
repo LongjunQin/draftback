@@ -8,7 +8,9 @@
 # 用法:
 #   ios/scripts/install-device.sh              # 自动找第一台已配对、已开开发者模式的 iPhone
 #   ios/scripts/install-device.sh <设备UDID>
-# 可用环境变量覆盖:DRAFTBACK_TEAM(签名团队 ID)、DRAFTBACK_BUNDLE_ID、DRAFTBACK_DISPLAY_NAME、DRAFTBACK_CONFIGURATION
+# 手机锁着也可以跑:先编好,手机一解锁就装上(最多等 60 分钟)。
+# 可用环境变量覆盖:DRAFTBACK_TEAM(签名团队 ID)、DRAFTBACK_BUNDLE_ID、DRAFTBACK_DISPLAY_NAME、DRAFTBACK_CONFIGURATION、
+# DRAFTBACK_UNLOCK_WAIT_MINUTES(等解锁的分钟数)
 set -euo pipefail
 IOS="$(cd "$(dirname "$0")/.." && pwd)"
 TEAM="${DRAFTBACK_TEAM:-BG7Y59AT44}"
@@ -39,13 +41,34 @@ echo "目标设备: $DEVICE  签名团队: $TEAM  包标识: $BUNDLE_ID"
 "$IOS/scripts/sync-web.sh"
 (cd "$IOS" && xcodegen generate --quiet)
 
+# 手机锁着时 xcodebuild 连不上手机(要挂开发者磁盘映像)。这时先不连手机编好,解锁后马上装,
+# 免得编的那一两分钟里手机又锁上。读不出锁屏状态就当没锁,照常走。
+device_locked() {
+  xcrun devicectl device info lockState --device "$DEVICE" --json-output - 2>/dev/null \
+    | python3 -c 'import json, sys; sys.exit(0 if json.load(sys.stdin)["result"]["passcodeRequired"] else 1)' 2>/dev/null
+}
+DESTINATION="platform=iOS,id=$DEVICE"
+if device_locked; then
+  DESTINATION="generic/platform=iOS"
+  echo "手机锁着:先编好,解锁后自动装。"
+fi
+
 xcodebuild -project "$IOS/Draftback.xcodeproj" -scheme Draftback -configuration "$CONFIGURATION" \
-  -destination "platform=iOS,id=$DEVICE" -derivedDataPath "$DERIVED" \
+  -destination "$DESTINATION" -derivedDataPath "$DERIVED" \
   -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
   DEVELOPMENT_TEAM="$TEAM" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" DRAFTBACK_DISPLAY_NAME_ZH="$DISPLAY_NAME" DRAFTBACK_DISPLAY_NAME_EN="$DISPLAY_NAME_EN" \
   build -quiet
 
 APP="$DERIVED/Build/Products/$CONFIGURATION-iphoneos/Draftback.app"
+WAIT_MINUTES="${DRAFTBACK_UNLOCK_WAIT_MINUTES:-60}"
+if device_locked; then
+  echo "等手机解锁(最多 $WAIT_MINUTES 分钟)…"
+  for _ in $(seq 1 $((WAIT_MINUTES * 6))); do device_locked || break; sleep 10; done
+  if device_locked; then
+    echo "手机一直锁着。解锁后重跑本脚本。" >&2
+    exit 1
+  fi
+fi
 xcrun devicectl device install app --device "$DEVICE" "$APP"
 LAUNCH_LOG="$(mktemp)"
 if xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID" >"$LAUNCH_LOG" 2>&1; then

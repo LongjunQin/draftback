@@ -1,0 +1,18 @@
+# 名字 启动参数(都会自动加 --demo-drafts)
+# 演示稿件:demo-rules 批注中、demo-plan 稿子回来了、demo-interview 已通过、demo-weekly 已交出等 AI、
+#           demo-release AI 在改、demo-pricing 文件被改了、demo-annual 已定稿、demo-draft 已作废
+home --demo-expand-all
+home-collapsed --demo-collapse-all
+search --demo-search
+settings --demo-settings
+plan --demo-open demo-plan
+changes --demo-open demo-plan --demo-changes
+results --demo-open demo-plan --demo-results
+outline --demo-open demo-plan --demo-outline-sheet
+confirm --demo-open demo-plan --demo-confirm-finalize
+select --demo-open demo-rules --demo-select
+notes --demo-open demo-rules --show-notes
+compose --demo-open demo-rules --demo-compose
+release --demo-open demo-release
+pricing --demo-open demo-pricing
+annual --demo-open demo-annual

@@ -248,6 +248,7 @@ xcrun simctl launch <UDID> app.draftback.ios --demo-drafts
 ios/scripts/install-device.sh            # 团队 BG7Y59AT44 签名,包标识 app.draftback.ios.dev,主屏名「回稿 测试」
 ```
 
+手机锁着也可以跑:脚本先编好,手机一解锁就装上(最多等 60 分钟)。
 首次安装后要在手机「设置 → 通用 → VPN 与设备管理」里信任开发者证书。
 把文件放进手机应用文件夹(「文件」→ 我的 iPhone → 回稿 测试):
 
@@ -255,6 +256,8 @@ ios/scripts/install-device.sh            # 团队 BG7Y59AT44 签名,包标识 ap
 xcrun devicectl device copy to --device <设备UDID> --domain-type appDataContainer \
   --domain-identifier app.draftback.ios.dev --source <本机文件> --destination Documents/<文件名>
 ```
+
+开发用小脚本(装 Mac 安装包、同步联调、Mac 与手机界面截图)在 `scripts/dev/`,用法见 `scripts/dev/README.md`。
 
 外观(0.6.1 起):菜单栏「显示 → 外观」可选跟随系统 / 浅色 / 深色,存在应用数据目录的 settings.json;大纲随 ⌘+ / ⌘- 一起缩放。
 
