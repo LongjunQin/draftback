@@ -1,6 +1,6 @@
 {
   "name": "draftback-desktop",
-  "version": "1.0.0-beta.24",
+  "version": "1.0.0-beta.25",
   "private": true,
   "description": "Draftback (回稿) desktop app: you mark up the draft, the AI revises it, the draft comes back",
   "main": "main.js",
@@ -24,7 +24,8 @@
     "dompurify": "3.2.6",
     "electron": "43.1.1",
     "electron-builder": "26.15.3",
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.1",
+    "remark-cjk-friendly": "2.3.2"
   },
   "build": {
     "appId": "app.draftback.mac",

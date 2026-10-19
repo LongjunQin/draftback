@@ -39,6 +39,7 @@
         return '';
       },
     });
+    if (window.draftbackCjkEmphasis) md.use(window.draftbackCjkEmphasis);
     if (texmath && window.katex) { try { md.use(texmath, { engine: window.katex, delimiters: 'dollars', katexOptions: { throwOnError: false, strict: false } }); } catch (_) {} }
     const htmlBlockRule = md.renderer.rules.html_block;
     md.renderer.rules.html_block = function htmlBlock(tokens, index, options, env, self) {

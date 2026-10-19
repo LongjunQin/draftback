@@ -11,7 +11,8 @@ import { toolbar } from '@milkdown/crepe/feature/toolbar';
 import { codeMirror } from '@milkdown/crepe/feature/code-mirror';
 import { table } from '@milkdown/crepe/feature/table';
 import { editorViewCtx, editorViewOptionsCtx, remarkStringifyOptionsCtx, parserCtx, serializerCtx, commandsCtx, schemaCtx } from '@milkdown/kit/core';
-import { replaceAll, $prose } from '@milkdown/kit/utils';
+import { replaceAll, $prose, $remark } from '@milkdown/kit/utils';
+import remarkCjkFriendly from 'remark-cjk-friendly';
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { keymap } from '@milkdown/kit/prose/keymap';
@@ -225,6 +226,8 @@ function create(container, options = {}) {
       attributes: { ...(current.attributes || {}), class: 'markdown-body' },
     }));
   });
+  // 中文旁的加粗、斜体(「**设立背景。**聚变」):读入和存回都按中文放宽,与阅读页的 static/markdown-cjk.js 一致
+  crepe.editor.use($remark('remarkCjkFriendly', () => remarkCjkFriendly));
   crepe.editor.use(findPlugin).use(linkShortcut);
   if (uploadImage) crepe.editor.use(imagePastePlugin(uploadImage));
   crepe.on((listener) => {

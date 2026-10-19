@@ -1644,6 +1644,7 @@
         return '';
       },
     });
+    if (window.draftbackCjkEmphasis) engine.use(window.draftbackCjkEmphasis);
     if (texmath && window.katex) {
       try { engine.use(texmath, { engine: window.katex, delimiters: 'dollars', katexOptions: { throwOnError: false, strict: false } }); }
       catch (_) {}

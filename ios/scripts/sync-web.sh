@@ -11,6 +11,8 @@ for f in markdown-it.min.js katex.min.js katex.min.css texmath.min.js highlight.
 done
 rm -rf "$DEST/fonts" && cp -R "$SRC/vendor/fonts" "$DEST/fonts"
 cp "$SRC/desktop-anchor.js" "$DEST/desktop-anchor.js"
+# 中文旁的加粗、斜体(「**设立背景。**聚变」)
+cp "$SRC/markdown-cjk.js" "$DEST/markdown-cjk.js"
 # 回稿卡「显示改动」:与 Mac 对比视图同一套对比算法(纯函数)与字级差异库
 cp "$SRC/desktop-diff.js" "$DEST/desktop-diff.js"
 cp "$SRC/vendor/diff-match-patch.js" "$DEST/diff-match-patch.js"

@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const { findPandoc, exportDocx } = require('../export-docx');
+const { findPandoc, exportDocx, fixCjkEmphasis } = require('../export-docx');
 
 test('没有 pandoc 时给出明确的 NO_PANDOC 错误', async () => {
   await assert.rejects(
@@ -59,4 +59,27 @@ test('有 pandoc 时:中文行合并、公式、表格、同目录图片都进 d
   assert.match(xml, /<w:tbl>/, '表格应是 Word 表格');
   assert.match(xml, /SourceCode/, '代码块应是代码样式');
   assert.match(xml, />const</);
+});
+
+test('中文旁的加粗:标点挪到星号外面,pandoc 才认得;英文、代码不动', () => {
+  assert.equal(fixCjkEmphasis('**设立背景。**聚变与新能源联合实验室'), '**设立背景**。聚变与新能源联合实验室');
+  assert.equal(fixCjkEmphasis('中文**“引用”**中文'), '中文“**引用**”中文');
+  assert.equal(fixCjkEmphasis('普通**加粗**文字'), '普通**加粗**文字');
+  assert.equal(fixCjkEmphasis('英文 foo**bar.**baz'), '英文 foo**bar.**baz');
+  assert.equal(fixCjkEmphasis('代码 `a**b。**c` 不动'), '代码 `a**b。**c` 不动');
+  assert.equal(fixCjkEmphasis('```\n**设立。**x\n```'), '```\n**设立。**x\n```');
+});
+
+test('有 pandoc 时:「**设立背景。**聚变」在 Word 里是加粗,没有星号,原文不变', { skip: !findPandoc() && 'pandoc 未安装' }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-docx-cjk-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const source = path.join(root, '建议书.md');
+  const text = '**设立背景。**聚变与新能源联合实验室。\n\n**定位。**联合实验室是一个平台,普通**加粗**也行。\n';
+  fs.writeFileSync(source, text);
+  const output = path.join(root, '建议书.docx');
+  await exportDocx({ sourcePath: source, outputPath: output });
+  const xml = execFileSync('unzip', ['-p', output, 'word/document.xml'], { encoding: 'utf8' });
+  assert.doesNotMatch(xml, /\*\*/, 'Word 里不应留下星号');
+  assert.match(xml, /<w:b \/>[\s\S]*?设立背景/, '「设立背景」应加粗');
+  assert.equal(fs.readFileSync(source, 'utf8'), text, '原文不动');
 });
