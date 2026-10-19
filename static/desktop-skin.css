@@ -33,7 +33,6 @@
   --btn-press-1: #e3dbca; --btn-press-2: #f1ebdf;
   --btn-lift: 0 1px 2px rgba(var(--shade), .5), 0 2px 5px rgba(var(--shade), .18);
   --serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC", serif;
-  --hand: "Hannotate SC", "HanziPen SC", -apple-system, "PingFang SC", sans-serif;
   --reading-font: var(--serif);
 
   /* 原有变量换成纸面的颜色,各处随之变化 */
@@ -479,7 +478,7 @@ html, body {
 .note-card.focused { border: 0; background: var(--paper-tex), linear-gradient(180deg, var(--note-1), var(--note-2)); box-shadow: 0 0 0 2px rgba(240, 160, 40, .75), 0 8px 16px rgba(var(--paper-shadow), .25); }
 .note-quote, .note-quote.doc-scope { padding-left: 8px; border-left: 2.5px solid rgba(240, 160, 40, .8); color: var(--note-quote); font-family: var(--serif); font-size: 12.5px; }
 .note-quote.doc-scope { color: var(--amber-deep); font-weight: 700; }
-.note-comment { margin-top: 7px; color: var(--note-ink); font-family: var(--hand); font-size: 17px; line-height: 1.45; }
+.note-comment { margin-top: 7px; color: var(--note-ink); font-family: var(--serif); font-size: 14.5px; line-height: 1.65; }
 .note-footer { margin-top: 8px; }
 .note-footer .note-location, .note-meta, .note-time { color: var(--note-meta); font-size: 11.5px; }
 .note-actions button { color: var(--note-act); font-size: 11.5px; font-weight: 600; }
@@ -542,7 +541,7 @@ html, body {
 .result-item.open .result-mark { background: linear-gradient(160deg, #ecd497, #dcbd70); color: #5b4512; }
 .result-quote { color: var(--text); font-family: var(--serif); font-size: 13px; font-weight: 700; }
 .result-quote.doc-scope { color: var(--amber-deep); }
-.result-you { color: var(--pen); font-family: var(--hand); font-size: 14.5px; }
+.result-you { color: var(--pen); font-family: var(--serif); font-size: 13.5px; }
 .result-you b, .result-ai b { font-weight: 600; }
 .result-ai { color: var(--text-2); }
 .result-item.wontfix .result-ai, .result-item.cancelled .result-ai { color: var(--text-2); }
