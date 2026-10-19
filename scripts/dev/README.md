@@ -45,7 +45,7 @@ node scripts/dev/mac-shots.js /tmp/shots back night --cover mist --scale 2
 ```
 
 - 稿子造在临时目录里,不碰 `~/.draftback`。原生外壳用假桥代替,改了 `static/` 不用打包就能截。
-- 场景:`welcome` `back` `diff` `confirm` `settings` `comment` `dialog` `toast` `conflict` `night` `popovers` `approve` `handed` `edit` `narrow`。
+- 场景:`welcome` `back` `diff` `confirm` `settings` `comment` `dialog` `toast` `conflict` `night` `popovers` `approve` `handed` `applying` `edit` `panels` `narrow`。
 - `--cover` 是封面颜色:`green` `mist` `lavender` `gold` `orange` `black`。`--size` 默认 `1440x900`。
 - 截夜读时加 `NO_ANIM=1`,关掉指示灯闪烁。
 

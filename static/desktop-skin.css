@@ -132,21 +132,20 @@ html, body {
 @media (prefers-color-scheme: dark) { .app-shell::before { box-shadow: inset 0 -1px 0 rgba(255, 220, 170, .06), 0 2px 6px rgba(0, 0, 0, .45); } }
 /* 顶部(2026-10-17 用户说太空、按钮太小):矮一点;按钮放在它管的那块上方——
    正文纸上方:左边文件名,右边这篇的工具(右端和纸的右边对齐),状态标签在两者之间的空当正中(窄窗口也不会压住按钮);
-   批注本上方:批注栏开关和这一轮的主按钮。最后一格的宽度正好是右栏那一列 */
+   批注本上方:这一轮的主按钮。最后一格的宽度正好是右栏那一列。两栏的收起按钮不在这里,在各自的卡上 */
 :root { --toolbar-height: 46px; }
 .toolbar {
   display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto minmax(0, 1fr) max-content minmax(var(--right-width), max-content);
   align-items: center; column-gap: 0; padding: 0 0 0 var(--gap); border-bottom: 0; background: transparent;
 }
-.left-collapsed .toolbar { padding-left: 84px; }
+/* 目录收起时文件名让开红绿灯,并且正好落在正文纸左边的上方(书脊宽度就是按这个定的) */
+.left-collapsed .toolbar { padding-left: calc(var(--gap) * 2 + var(--spine-width)); }
 .toolbar-left { grid-column: 1; min-width: 0; padding-right: 10px; }
 .toolbar-center { grid-column: 3; min-width: 0; justify-content: center; }
 .toolbar-right { grid-column: 5; }
 .toolbar-notes { grid-column: 6; }
 .toolbar-right { min-width: 0; justify-content: flex-end; gap: 8px; padding: 0 var(--gap) 0 12px; }
-.toolbar-notes { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-width: max-content; padding-right: var(--gap); }
-/* 批注栏开关靠左;「我自己改」和主按钮靠右挨在一起 */
-.toolbar-notes #toggleRightTop { margin-right: auto; }
+.toolbar-notes { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: max-content; padding-right: var(--gap); }
 /* 火漆印伸出纸签右端 12 像素:让印的右边和批注本的右边对齐 */
 .toolbar .primary-button.action-button.seal-action { margin-right: 12px; }
 .no-doc .toolbar-notes { visibility: hidden; }
@@ -261,12 +260,6 @@ html, body {
 }
 .toolbar .action-button .action-count .sep { display: none; }
 .toolbar .primary-button.action-button { font-weight: 700; }
-/* AI 在改:「改稿中…」不能点,陷在那里 */
-.toolbar .primary-button.action-button[data-action="busy"]:disabled {
-  opacity: 1; color: var(--muted); background: linear-gradient(180deg, var(--btn-press-1), var(--btn-press-2));
-  box-shadow: 0 0 0 1px var(--btn-edge), inset 0 1px 3px rgba(0, 0, 0, .22);
-}
-.toolbar .primary-button.action-button[data-action="busy"]:disabled i { color: var(--muted); }
 
 /* 定稿:一张纸签上压一枚火漆印 */
 .seal-mark { flex: none; display: inline-block; width: 40px; height: 40px; background: url(/static/skin/seal.svg) center / contain no-repeat; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .22)); transition: transform .15s ease-out; }
@@ -326,8 +319,49 @@ html, body {
 }
 @keyframes draftback-blink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
+/* ---------- 收起与书脊(2026-10-19 用户:原来左上角和「批注栏」的开关图标看不懂、突兀) ----------
+   收起按钮在它管的那张卡上,写着「收起」,箭头指向卡收去的那一边;收起后卡缩成一条书脊,写着它是什么,点一下展开。
+   书脊的箭头和收起按钮在同一个角上,来回点不用找。
+   书脊宽 52:左边书脊 + 两道缝 = 80,正文纸的左边正好在红绿灯右边,和文件名对齐 */
+:root { --spine-width: 52px; }
+.app-shell.left-collapsed { --left-width: calc(var(--spine-width) + var(--gap)); }
+.app-shell.right-collapsed:not(.no-doc) { --right-width: calc(var(--spine-width) + var(--gap)); }
+.panel-collapse {
+  display: inline-flex; align-items: center; justify-content: center; gap: 2px; flex: none;
+  height: 30px; padding: 0 9px; border: 0; border-radius: 8px;
+  color: var(--btn-text); font: 600 12.5px var(--ui-font); white-space: nowrap; text-shadow: none;
+  background: linear-gradient(180deg, var(--btn-1), var(--btn-2));
+  box-shadow: 0 0 0 1px var(--btn-edge), var(--btn-lift), inset 0 1px 0 rgba(255, 255, 255, .85);
+}
+.panel-collapse i { color: var(--muted); font-size: 13px; }
+.panel-collapse:hover { background: linear-gradient(180deg, #ffffff, var(--btn-1)); }
+.panel-collapse:hover i { color: var(--btn-text); }
+.panel-collapse:active {
+  background: linear-gradient(180deg, var(--btn-press-1), var(--btn-press-2));
+  box-shadow: 0 0 0 1px var(--btn-edge), inset 0 1px 3px rgba(0, 0, 0, .28), 0 1px 0 rgba(255, 255, 255, .35);
+}
+.panel-spine {
+  flex-direction: column; align-items: center; gap: 7px; width: var(--spine-width); min-width: 0;
+  margin: var(--gap) 0 var(--gap) var(--gap); padding: 17px 0 0; border: 0; border-radius: 6px; cursor: pointer;
+  background: var(--paper-tex), var(--index); color: var(--text); box-shadow: var(--card-lift); text-shadow: none;
+}
+.spine-right { margin: var(--gap) var(--gap) var(--gap) 0; background: var(--paper-tex), var(--tray); }
+.panel-spine i { color: var(--muted); font-size: 15px; }
+.panel-spine .spine-label { color: var(--text-strong); font-family: var(--serif); font-size: 15px; font-weight: 700; }
+.panel-spine .spine-count { margin-top: -3px; color: var(--muted); font: 600 12px var(--ui-font); }
+.panel-spine:hover { background: linear-gradient(rgba(255, 255, 255, .35), rgba(255, 255, 255, .35)), var(--paper-tex), var(--index); }
+.spine-right:hover { background: linear-gradient(rgba(255, 255, 255, .35), rgba(255, 255, 255, .35)), var(--paper-tex), var(--tray); }
+.panel-spine:hover i { color: var(--text); }
+.panel-spine:active { box-shadow: 0 0 1px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .18); }
+@media (prefers-color-scheme: dark) {
+  .panel-collapse:hover { background: linear-gradient(180deg, #ece1cb, var(--btn-1)); }
+  .panel-spine:hover { background: linear-gradient(rgba(255, 238, 205, .1), rgba(255, 238, 205, .1)), var(--paper-tex), var(--index); }
+  .spine-right:hover { background: linear-gradient(rgba(255, 238, 205, .1), rgba(255, 238, 205, .1)), var(--paper-tex), var(--tray); }
+}
+
 /* ---------- 左边目录页:稿件 / 大纲 ---------- */
-.side-switch-row { padding: 12px 10px 4px; }
+.side-switch-row { display: flex; align-items: center; gap: 8px; padding: 12px 10px 4px; }
+.side-switch-row .segmented { flex: 1 1 auto; min-width: 0; }
 .side-switch-row .segmented, .notes-tabs.segmented { height: 30px; padding: 3px; border: 0; border-radius: 15px; background: rgba(90, 75, 50, .1); box-shadow: inset 0 1px 2px rgba(0, 0, 0, .1); }
 .side-switch-row .segmented button, .notes-tabs.segmented button { border-radius: 12px; color: var(--muted); font-size: 13px; font-weight: 500; text-shadow: none; }
 .side-switch-row .segmented button.active, .notes-tabs.segmented button.active { background: var(--paper-tex), var(--card); color: var(--text-strong); font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, .22); }
@@ -418,19 +452,15 @@ html, body {
   box-shadow: 0 3px 8px rgba(0, 0, 0, .25); font-size: 13px; font-weight: 700;
 }
 .annotate-button:hover { background: linear-gradient(100deg, rgba(255, 206, 70, 1), rgba(255, 220, 100, 1)); }
-/* AI 在改:纸面顶上一条淡紫纸条 */
+/* AI 在改:纸面顶上一条说明,只说纸面上的事(原文只读、改完自动换新版),前面一把锁。
+   「AI 正在修改」只在工具栏正中说,闪的灯也只在那里(2026-10-19 用户:同一件事说了好几处);不用紫色(用户:紫色代表 AI 没有理由) */
 .reader-banner {
-  top: 0; left: 0; right: 0; transform: none; display: flex; align-items: center; gap: 9px;
-  padding: 9px 22px; border: 0; border-radius: 6px 6px 0 0; white-space: normal;
-  background: var(--paper-tex), var(--violet-soft); color: var(--text); font-size: 13px; box-shadow: 0 2px 4px rgba(0, 0, 0, .1);
+  top: 0; left: 0; right: 0; transform: none; display: flex; align-items: center; gap: 8px;
+  padding: 9px 22px; border: 0; border-bottom: 1.5px dotted var(--rule); border-radius: 6px 6px 0 0; white-space: normal;
+  background: var(--paper-tex), var(--index); color: var(--text-2); font-size: 13px; box-shadow: none;
 }
 .multi-tab .reader-banner { border-radius: 0; }
-.reader-banner::before {
-  content: ""; flex: none; width: 13px; height: 13px; border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--violet) 30%, transparent); border-top-color: var(--violet);
-  animation: draftback-spin 1s linear infinite;
-}
-@keyframes draftback-spin { to { transform: rotate(360deg); } }
+.reader-banner::before { content: "\e308"; flex: none; color: var(--muted); font: 15px/1 "Phosphor"; }
 .reader-banner:not([hidden]) ~ .reader-scroll { padding-top: 36px; }
 /* 对比视图:纸面顶上一条浅绿纸条 */
 .compare-view { border-radius: inherit; background: var(--paper-tex), var(--paper); }
@@ -460,7 +490,8 @@ html, body {
 .multi-tab .editor-toolbar { border-radius: 0; }
 
 /* ---------- 右边批注本 ---------- */
-.notes-header { height: 50px; padding: 4px 14px 0 16px; border-bottom: 1.5px dotted var(--rule); }
+.notes-header { justify-content: flex-start; height: 50px; padding: 4px 10px 0 16px; border-bottom: 1.5px dotted var(--rule); }
+.notes-header .notes-tabs { margin-left: auto; }
 .notes-title strong { color: var(--text-strong); font-family: var(--serif); font-size: 16px; }
 .notes-total { color: var(--muted); font-weight: 600; }
 .notes-section-heading { padding: 14px 16px 8px; color: var(--text-2); font-size: 12.5px; font-weight: 700; }

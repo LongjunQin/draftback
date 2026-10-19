@@ -495,6 +495,13 @@ async function saveNewAnnotation(cdp, source, comment, expectedCount) {
   return annotations.find((note) => note.comment === comment);
 }
 
+// 窄窗口(DRAFTBACK_SMOKE_WIDTH < 1280)里批注栏默认收成书脊,刷新后也收着:要点批注栏里的东西,先点书脊展开
+async function openNotesRail(cdp) {
+  if (!(await cdp.evaluate(`document.querySelector('#appShell').classList.contains('right-collapsed')`))) return;
+  await cdp.click('#expandRight');
+  await waitUntil('展开批注栏', () => cdp.evaluate(`!document.querySelector('#appShell').classList.contains('right-collapsed')`));
+}
+
 async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draftback-desktop-smoke-'));
   const dataDir = path.join(root, '.draftback');
@@ -885,17 +892,50 @@ async function main() {
         inTrafficZone,
         sidebarWidth: document.querySelector('#leftSidebar').getBoundingClientRect().width,
         toolbarPadding: parseFloat(getComputedStyle(toolbar).paddingLeft),
-        revealVisible: getComputedStyle(document.querySelector('#toggleLeftTop')).display !== 'none',
+        spineVisible: getComputedStyle(document.querySelector('#expandLeft')).display !== 'none',
+        spineText: document.querySelector('#expandLeft').textContent.trim(),
       } : null;
     })()`));
     assert.equal(collapsed.sidebarWidth, 0, '左栏可以完全收起');
     assert.equal(collapsed.inTrafficZone, 0, '收起左栏后也没有控件落进红绿灯区域');
     assert.ok(collapsed.toolbarPadding >= 80, '收起左栏后工具栏仍避开 macOS 窗口按钮');
-    assert.equal(collapsed.revealVisible, true, '收起后工具栏上出现「显示稿件栏」');
-    await chrome.cdp.click('#toggleLeftTop');
+    assert.equal(collapsed.spineVisible, true, '收起后左边留一条书脊');
+    assert.equal(collapsed.spineText, '目录', '书脊上写着它是什么');
+    await chrome.cdp.click('#expandLeft');
     await waitUntil('左栏重新展开', () => chrome.cdp.evaluate(
       `!document.querySelector('#appShell').classList.contains('left-collapsed')`,
     ));
+    // 批注栏同理:卡上的「收起」收成右边的书脊(写着「批注」和条数),点书脊展开。
+    // 窄窗口里批注栏默认收着:先展开(浮在稿纸上),测完再收回去
+    const rightCollapsedAtStart = await chrome.cdp.evaluate(`document.querySelector('#appShell').classList.contains('right-collapsed')`);
+    if (rightCollapsedAtStart) {
+      await chrome.cdp.click('#expandRight');
+      await waitUntil('批注栏先展开', () => chrome.cdp.evaluate(`!document.querySelector('#appShell').classList.contains('right-collapsed')`));
+    }
+    await chrome.cdp.click('#collapseRight');
+    const rightSpine = await waitUntil('批注栏收成书脊', () => chrome.cdp.evaluate(`(() => {
+      if (!document.querySelector('#appShell').classList.contains('right-collapsed')) return null;
+      const spine = document.querySelector('#expandRight');
+      return {
+        sidebarShown: getComputedStyle(document.querySelector('#rightSidebar')).display !== 'none',
+        spineShown: getComputedStyle(spine).display !== 'none',
+        label: spine.querySelector('.spine-label').textContent,
+        count: spine.querySelector('.spine-count').hidden ? '' : spine.querySelector('.spine-count').textContent,
+        total: document.querySelector('#notesTotal').textContent,
+      };
+    })()`));
+    assert.equal(rightSpine.sidebarShown, false, '批注栏收起');
+    assert.equal(rightSpine.spineShown, true, '右边留一条书脊');
+    assert.equal(rightSpine.label, '批注');
+    assert.equal(rightSpine.count, rightSpine.total, '书脊上的条数和批注栏标题一致');
+    await chrome.cdp.click('#expandRight');
+    await waitUntil('批注栏重新展开', () => chrome.cdp.evaluate(
+      `!document.querySelector('#appShell').classList.contains('right-collapsed')`,
+    ));
+    if (rightCollapsedAtStart) {
+      await chrome.cdp.click('#collapseRight');
+      await waitUntil('批注栏收回原样', () => chrome.cdp.evaluate(`document.querySelector('#appShell').classList.contains('right-collapsed')`));
+    }
 
     // 5. Create a later note, then prove open notes are newest-first even though
     // the sidecar remains append-only after the historical record.
@@ -913,6 +953,8 @@ async function main() {
       `Array.from(document.querySelectorAll('#openNotesList .note-comment')).map((item) => item.textContent)`,
     );
     assert.deepEqual(openOrder, ['最新批注应该置顶', '较早的跨两段批注'], '未处理批注必须最新置顶');
+    // 窄窗口里量的是浮在稿纸上的那一版批注栏
+    await openNotesRail(chrome.cdp);
     const railLayout = await chrome.cdp.evaluate(`(() => {
       const rail = document.querySelector('#notesContent');
       const cards = Array.from(document.querySelectorAll('#openNotesList .note-card'));
@@ -1358,6 +1400,7 @@ async function main() {
 
     // Resolve both open notes only after the source save, then complete the
     // applying session through the desktop controls.
+    await openNotesRail(chrome.cdp);
     for (const expectedOpen of [1, 0]) {
       await chrome.cdp.click('#openNotesList .note-actions button.resolve');
       await waitUntil(`手工处理批注，剩余 ${expectedOpen}`, () => {

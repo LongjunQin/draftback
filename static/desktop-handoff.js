@@ -12,9 +12,9 @@
   'use strict';
 
   const STALE_LISTENING_MS = 10 * 60 * 1000; // 有程序在听却迟迟没领取,提示重新复制指令
+  // 不显示的按钮。AI 在改时主按钮也不显示:状态只在工具栏正中说一次,不再放不能点的「改稿中…」
+  // (2026-10-19 用户:正中「AI 正在修改…」和右边「改稿中…」重复)
   const HIDDEN = Object.freeze({ hidden: true, label: '', action: '' });
-  // AI 在改时主按钮的位置不空着:一个不能点的「改稿中…」(UI 方案 3.3),位置不跳
-  const BUSY = Object.freeze({ hidden: false, disabled: true, label: '改稿中…', action: 'busy', title: 'AI 改完稿子会自己回来', icon: 'ph-sparkle' });
   function dateText(value) {
     const t = Date.parse(value || '');
     if (!Number.isFinite(t)) return '';
@@ -57,7 +57,7 @@
       const submittedAt = Date.parse(review.submittedAt || 0);
       const stale = Number.isFinite(submittedAt) && now - submittedAt > STALE_LISTENING_MS;
       if (agentState === 'claimed') {
-        view = { status: 'claimed', text: 'AI 正在修改…', detail: `${review.claimedBy || agent} 已领取这一轮,改完会自动刷新;期间不能批注。`, icon: 'ph-robot', primary: BUSY, secondary: HIDDEN };
+        view = { status: 'claimed', text: 'AI 正在修改…', detail: `${review.claimedBy || agent} 已领取这一轮,改完会自动刷新;期间不能批注。`, icon: 'ph-robot', primary: HIDDEN, secondary: HIDDEN };
       } else if (agentState === 'listening') {
         view = {
           status: 'listening',
@@ -83,7 +83,7 @@
           ? { status: 'manual', text: '我自己改 · 改完点「提交修改」', detail: '这轮没有批注,你直接改;提交后本轮结束。期间智能体不会碰这篇文档。', icon: 'ph-pencil-simple-line', primary: button('提交修改', 'finish-manual', { icon: 'ph-check' }), secondary: HIDDEN }
           : { status: 'manual', text: '我自己改 · 逐条处理批注', detail: '所有未处理批注清零后才能提交。', icon: 'ph-pencil-simple-line', primary: button('提交修改', 'finish-manual', { icon: 'ph-check' }), secondary: HIDDEN };
       } else {
-        view = { status: 'applying', text: 'AI 正在修改…', detail: `${review.applyActor || 'AI'} 正在按批注改稿,文档暂时只读,改完会自动刷新。`, icon: 'ph-robot', primary: BUSY, secondary: HIDDEN };
+        view = { status: 'applying', text: 'AI 正在修改…', detail: `${review.applyActor || 'AI'} 正在按批注改稿,文档暂时只读,改完会自动刷新。`, icon: 'ph-robot', primary: HIDDEN, secondary: HIDDEN };
       }
     } else if (review.status === 'complete') {
       if (review.outcome === 'finalized') {

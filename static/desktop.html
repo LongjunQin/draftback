@@ -12,8 +12,8 @@
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=9">
-  <link rel="stylesheet" href="/static/desktop.css?v=20">
-  <link rel="stylesheet" href="/static/desktop-skin.css?v=6">
+  <link rel="stylesheet" href="/static/desktop.css?v=21">
+  <link rel="stylesheet" href="/static/desktop-skin.css?v=7">
   <!-- 封面颜色要在第一次绘制前就位(否则先闪一下默认的青雾蓝),所以这一小段放在 head 里同步执行 -->
   <script src="/static/desktop-cover.js?v=2"></script>
 </head>
@@ -21,13 +21,11 @@
   <div id="appShell" class="app-shell">
     <!-- 左栏通顶:红绿灯在它上面;「稿件 / 大纲」 -->
     <aside id="leftSidebar" class="left-sidebar" aria-label="稿件与大纲">
-      <div class="sidebar-top drag-region">
-        <button id="collapseLeft" class="icon-button compact" type="button" title="收起稿件栏(⌃⌘S)" aria-label="收起稿件栏">
-          <i class="ph ph-sidebar-simple" aria-hidden="true"></i>
-        </button>
-      </div>
+      <div class="sidebar-top drag-region"></div>
       <div class="sidebar-card">
+      <!-- 收起按钮在它管的这张卡上,箭头指向卡要去的那一边;收起后同一个位置是书脊(2026-10-19 用户:原来的图标看不懂) -->
       <div class="side-switch-row">
+        <button id="collapseLeft" class="panel-collapse" type="button" title="收起目录(⌃⌘S)"><i class="ph ph-caret-double-left" aria-hidden="true"></i>收起</button>
         <div class="segmented" role="tablist" aria-label="左栏内容">
           <button id="filesModeButton" type="button" role="tab" aria-selected="false">稿件</button>
           <button id="outlineModeButton" class="active" type="button" role="tab" aria-selected="true">大纲</button>
@@ -46,13 +44,14 @@
       </button>
       </div>
     </aside>
+    <!-- 目录收起后留在左边的书脊:写着「目录」,点一下展开 -->
+    <button id="expandLeft" class="panel-spine spine-left" type="button" title="展开目录(⌃⌘S)" aria-label="展开目录">
+      <i class="ph ph-caret-double-right" aria-hidden="true"></i><span class="spine-label">目录</span>
+    </button>
 
     <!-- 一条工具栏:左边文档名,正中状态区,右边六样 -->
     <header id="documentToolbar" class="toolbar drag-region">
       <div class="toolbar-left">
-        <button id="toggleLeftTop" class="icon-button compact sidebar-reveal" type="button" title="显示稿件栏(⌃⌘S)" aria-label="显示稿件栏">
-          <i class="ph ph-sidebar-simple" aria-hidden="true"></i>
-        </button>
         <div class="doc-title-wrap">
           <button id="docTitleButton" class="doc-title" type="button" aria-haspopup="dialog" aria-expanded="false" hidden>
             <i class="ph ph-file-text" aria-hidden="true"></i><span id="docTitleText">文档</span><i class="ph ph-caret-down menu-caret" aria-hidden="true"></i>
@@ -104,11 +103,8 @@
           </div>
         </div>
       </div>
-      <!-- 批注本上方:批注栏开关、这一轮的主按钮(交给 AI / 通过 · 定稿)与定稿的原地确认 -->
+      <!-- 批注本上方:这一轮的主按钮(交给 AI / 通过 · 定稿)与定稿的原地确认 -->
       <div class="toolbar-notes">
-        <button id="toggleRightTop" class="icon-button compact" type="button" title="显示或收起批注栏(⌥⌘I)" aria-label="显示或收起批注栏">
-          <i class="ph ph-sidebar-simple flip" aria-hidden="true"></i><span class="tb-label">批注栏</span>
-        </button>
         <button id="secondaryAction" class="secondary-button action-button" type="button" hidden></button>
         <button id="primaryAction" class="primary-button action-button" type="button" hidden></button>
         <!-- 定稿的原地确认(2026-10-16 用户批准方案 C):点「通过 · 定稿」后这里换成这一组,再按一次火漆印才算定稿 -->
@@ -217,6 +213,7 @@
           <button id="notesCurrentTab" class="active" type="button" role="tab" aria-selected="true">本轮</button>
           <button id="notesHistoryTab" type="button" role="tab" aria-selected="false">历史</button>
         </div>
+        <button id="collapseRight" class="panel-collapse" type="button" title="收起批注栏(⌥⌘I)">收起<i class="ph ph-caret-double-right" aria-hidden="true"></i></button>
       </div>
       <div id="notesContent" class="notes-content">
         <div id="currentPane" class="notes-pane">
@@ -243,6 +240,10 @@
       </div>
       <footer id="notesFooter" class="notes-footer">⌥⌘M 批注 · ⌘↩ 交给 AI · ⌥⌘↓ 下一条批注</footer>
     </aside>
+    <!-- 批注栏收起后留在右边的书脊:写着「批注」和条数,点一下展开 -->
+    <button id="expandRight" class="panel-spine spine-right" type="button" title="展开批注栏(⌥⌘I)" aria-label="展开批注栏">
+      <i class="ph ph-caret-double-left" aria-hidden="true"></i><span class="spine-label">批注</span><span id="spineNotesTotal" class="spine-count" hidden>0</span>
+    </button>
   </div>
 
   <button id="annotateButton" class="annotate-button" type="button" hidden>
@@ -384,12 +385,12 @@
   <script src="/static/vendor/draftback-editor.js?v=10"></script>
   <script src="/static/markdown-patch.js?v=2"></script>
   <script src="/static/desktop-anchor.js?v=5"></script>
-  <script src="/static/desktop-handoff.js?v=3"></script>
-  <script src="/static/desktop-actions.js?v=2"></script>
+  <script src="/static/desktop-handoff.js?v=4"></script>
+  <script src="/static/desktop-actions.js?v=3"></script>
   <script src="/static/desktop-drafts.js?v=1"></script>
   <script src="/static/desktop-diff.js?v=1"></script>
   <script src="/static/desktop-history.js?v=1"></script>
   <script src="/static/desktop-compare.js?v=1"></script>
-  <script src="/static/desktop.js?v=34"></script>
+  <script src="/static/desktop.js?v=35"></script>
 </body>
 </html>

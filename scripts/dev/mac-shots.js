@@ -6,7 +6,7 @@
 // 用法: node scripts/dev/mac-shots.js <输出目录> [--scale 2] [--cover green] [--size 1440x900] [场景...]
 //   不写场景就全截。场景:welcome back diff confirm settings comment dialog(含 selection) toast conflict
 //   night(含 night-back) popovers(history-timeline docinfo export find quickopen shortcuts)
-//   approve(approve-confirm approve-done) handed edit narrow(含 collapsed)
+//   approve(approve-confirm approve-done) handed applying edit panels(panels-left / both / right) narrow(含 collapsed)
 //   封面:green mist lavender gold orange black。NO_ANIM=1 关掉指示灯闪烁,截夜读时用。
 const fs = require('node:fs');
 const os = require('node:os');
@@ -248,6 +248,7 @@ async function openDoc(cdp, name) {
       console.log('toasts:', await cdp.evaluate(`Array.from(document.querySelectorAll('#toastRegion .toast')).map((t) => t.textContent).join(' | ')`));
     }
     if (want('handed')) { await openDoc(cdp, '等人接手'); await shot(cdp, 'handed'); }
+    if (want('applying')) { await openDoc(cdp, '发布说明'); await shot(cdp, 'applying'); }
     if (want('edit')) {
       await openDoc(cdp, '会议纪要');
       await click(cdp, '#editingModeButton');
@@ -256,17 +257,28 @@ async function openDoc(cdp, name) {
       await shot(cdp, 'edit');
       await click(cdp, '#readingModeButton');
     }
+    if (want('panels')) {
+      // 两栏收起成书脊:先收左边,再收右边,最后都展开
+      await openDoc(cdp, '跨端规则');
+      await click(cdp, '#collapseLeft');
+      await shot(cdp, 'panels-left');
+      await click(cdp, '#collapseRight');
+      await shot(cdp, 'panels-both');
+      await click(cdp, '#expandLeft');
+      await shot(cdp, 'panels-right');
+      await click(cdp, '#expandRight');
+    }
     if (want('narrow')) {
       await openDoc(cdp, '跨端规则');
       await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1180, height: 800, deviceScaleFactor: scale, mobile: false });
       await sleep(400);
-      await cdp.evaluate(`document.querySelector('#toggleRightTop').click()`);
+      await click(cdp, '#expandRight');
       await shot(cdp, 'narrow');
-      await cdp.evaluate(`document.querySelector('#toggleRightTop').click()`);
-      await cdp.evaluate(`document.querySelector('#collapseLeft').click()`);
+      await click(cdp, '#collapseRight');
+      await click(cdp, '#collapseLeft');
       await shot(cdp, 'collapsed');
-      await cdp.evaluate(`document.querySelector('#toggleLeftTop').click()`);
-      await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: scale, mobile: false });
+      await click(cdp, '#expandLeft');
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: scale, mobile: false });
     }
     if (chrome.cdp.exceptions.length) console.log('页面异常:', chrome.cdp.exceptions.join(' | '));
   } finally {

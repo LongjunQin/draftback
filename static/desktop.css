@@ -1141,8 +1141,10 @@ button.review-state:hover { filter: brightness(.97); }
 .no-doc .toolbar-center, .no-doc .toolbar-right { visibility: hidden; }
 .app-shell.no-doc { --right-width: 0px; }
 .no-doc .right-sidebar { display: none !important; }
-.sidebar-reveal { display: none !important; }
-.left-collapsed .sidebar-reveal { display: inline-grid !important; }
+/* 收起的栏留一条书脊(写着是什么,点一下展开);展开时不显示。宽度和样子在 desktop-skin.css */
+.panel-spine { display: none; }
+.left-collapsed .spine-left { display: flex; grid-column: 1; grid-row: 2 / -1; }
+.right-collapsed:not(.no-doc) .spine-right { display: flex; grid-column: 3; grid-row: 2 / -1; }
 .toolbar .icon-button.compact, .sidebar-top .icon-button.compact { width: 28px; height: 28px; color: var(--muted); font-size: 17px; }
 .toolbar .icon-button.compact:hover, .sidebar-top .icon-button.compact:hover { color: var(--text); }
 .icon-button.active { background: var(--green-soft); color: var(--green-text) !important; }
@@ -1293,8 +1295,6 @@ button.review-state:hover { filter: brightness(.97); }
 /* 新版正文换进来时淡入 */
 .markdown-body.content-refresh { animation: draftback-fade-in .25s ease-out; }
 @keyframes draftback-fade-in { from { opacity: .35; } to { opacity: 1; } }
-/* AI 在改:主按钮位置上一个不能点的「改稿中…」 */
-.primary-button.action-button[data-action="busy"]:disabled { opacity: 1; border-color: var(--violet-line); background: var(--violet-soft); color: var(--violet-text); }
 
 /* 欢迎页 */
 .welcome-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }

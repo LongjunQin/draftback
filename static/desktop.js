@@ -13,8 +13,9 @@
 
   const nodes = {
     shell: $('#appShell'), tabList: $('#tabList'), openTabButton: $('#openTabButton'), primaryAction: $('#primaryAction'), secondaryAction: $('#secondaryAction'), findButton: $('#findButton'),
-    left: $('#leftSidebar'), right: $('#rightSidebar'), collapseLeft: $('#collapseLeft'), toggleLeftTop: $('#toggleLeftTop'),
-    toggleRightTop: $('#toggleRightTop'), outlineMode: $('#outlineModeButton'), filesMode: $('#filesModeButton'),
+    left: $('#leftSidebar'), right: $('#rightSidebar'), collapseLeft: $('#collapseLeft'), expandLeft: $('#expandLeft'),
+    collapseRight: $('#collapseRight'), expandRight: $('#expandRight'), spineNotesTotal: $('#spineNotesTotal'),
+    outlineMode: $('#outlineModeButton'), filesMode: $('#filesModeButton'),
     outlinePanel: $('#outlinePanel'), filesPanel: $('#filesPanel'), recentList: $('#recentList'), openFileButton: $('#openFileButton'),
     toolbar: $('#documentToolbar'), reviewState: $('#reviewStatePill'), reviewStateIcon: $('#reviewStateIcon'),
     reviewStateText: $('#reviewStateText'), readingMode: $('#readingModeButton'),
@@ -1512,10 +1513,14 @@
     renderLayoutState();
   }
 
+  // 收起按钮和书脊在同一个位置:用键盘收起 / 展开后,焦点留在那里,不掉回页面开头
+  function keepPanelFocus(hadFocus, target) { if (hadFocus) target.focus({ preventScroll: true }); }
   function toggleLeft(force) {
+    const hadFocus = [nodes.collapseLeft, nodes.expandLeft].includes(document.activeElement);
     state.leftCollapsed = typeof force === 'boolean' ? force : !state.leftCollapsed;
     storeLocal('draftback.leftCollapsed', state.leftCollapsed ? '1' : '0');
     renderLayoutState();
+    keepPanelFocus(hadFocus, state.leftCollapsed ? nodes.expandLeft : nodes.collapseLeft);
     requestAnimationFrame(scheduleMarkerPositions);
   }
 
@@ -1530,10 +1535,12 @@
     requestAnimationFrame(scheduleMarkerPositions);
   }
   function toggleRight(force) {
+    const hadFocus = [nodes.collapseRight, nodes.expandRight].includes(document.activeElement);
     state.rightCollapsed = typeof force === 'boolean' ? force : !state.rightCollapsed;
     // 窄窗口里打开的批注栏浮在稿纸上,只是临时的;偏好只记宽窗口下的选择
     if (!state.narrow) storeLocal('draftback.rightCollapsed', state.rightCollapsed ? '1' : '0');
     renderLayoutState();
+    keepPanelFocus(hadFocus, state.rightCollapsed ? nodes.expandRight : nodes.collapseRight);
     requestAnimationFrame(scheduleMarkerPositions);
   }
 
@@ -2283,7 +2290,7 @@
     const next = Number.isInteger(review.round) ? review.round + 1 : null;
     if (isPlain(tab)) return '划词写下第一条批注,就开始第 1 轮。⌥⌘M 批注所选文字。';
     if (review.status === 'reviewing') return '⌥⌘M 批注 · ⌘↩ 交给 AI · ⌥⌘↓ 下一条批注';
-    if (review.status === 'ready_to_apply' || (review.status === 'applying' && review.applyMode !== 'manual')) return 'AI 改完稿子会自己回来;这期间不能批注。';
+    if (review.status === 'ready_to_apply' || (review.status === 'applying' && review.applyMode !== 'manual')) return 'AI 改完之前不能批注。';
     if (review.status === 'applying') return '对照批注逐条处理;改完点「提交修改」。';
     if (review.status === 'conflict') return '文件在外面被改了:点工具栏的「处理…」。';
     if (review.status === 'complete' && review.outcome === 'finalized') return '这篇已定稿。再划词批注会开始新一轮。';
@@ -2293,7 +2300,8 @@
     const status = tab ? tab.review.status : null;
     const aiEditing = Boolean(tab && (status === 'applying' && tab.review.applyMode !== 'manual' || (status === 'ready_to_apply' && tab.review.agentState === 'claimed')));
     nodes.readerBanner.hidden = !aiEditing || tab.mode !== 'read';
-    nodes.readerBanner.textContent = aiEditing ? 'AI 正在按批注修改。原文只读,改完会自动换成新版。' : '';
+    // 只说纸面上的事:原文只读、改完自动换新版;「AI 正在修改」只在工具栏正中说
+    nodes.readerBanner.textContent = aiEditing ? '原文只读,AI 改完会自动换成新版。' : '';
     nodes.stateCard.replaceChildren();
     let card = null;
     if (tab && status === 'conflict') {
@@ -2326,6 +2334,12 @@
     renderNotes(tab);
   }
 
+  function setNotesTotal(count) {
+    nodes.notesTotal.textContent = String(count);
+    nodes.spineNotesTotal.textContent = String(count);
+    nodes.spineNotesTotal.hidden = !count;
+  }
+
   function renderNotes(tab) {
     nodes.openNotesList.replaceChildren(); nodes.historyNotesList.replaceChildren();
     nodes.docNoteButton.hidden = !tab || tab.mode !== 'read' || !ANNOTATABLE.has(tab.review.status) || isReadOnly(tab);
@@ -2333,7 +2347,7 @@
     renderNotesPane(tab);
     if (!tab || isPlain(tab)) {
       nodes.returnCard.hidden = true; nodes.returnCard.replaceChildren(); openSection.hidden = false;
-      nodes.notesTotal.textContent = '0'; nodes.openNotesCount.textContent = '0'; nodes.historyNotesCount.textContent = '0';
+      setNotesTotal(0); nodes.openNotesCount.textContent = '0'; nodes.historyNotesCount.textContent = '0';
       nodes.openNotesList.appendChild(emptyBlock(tab
         ? '还没有批注。划词写下第一条,就开始第 1 轮审阅并锁定原文;批注会交给 AI。'
         : '打开文档后，这里会显示当前轮次的批注。'));
@@ -2354,7 +2368,7 @@
     // 回稿卡(规则⑤第三段):稿子回来 / 通过 / 恢复 / 作废时右栏顶部;数据来自版本事件,不读会继续变的旁注
     const card = History.returnCard({ review: tab.review, versions, annotations: tab.annotations });
     renderReturnCard(tab, card);
-    nodes.notesTotal.textContent = String(organized.totalCount);
+    setNotesTotal(organized.totalCount);
     nodes.openNotesCount.textContent = String(organized.open.count);
     const status = tab.review.status;
     nodes.openNotesLabel.textContent = status === 'reviewing' ? '未交' : status === 'applying' && tab.review.applyMode === 'manual' ? '待处理' : status === 'ready_to_apply' || status === 'applying' ? '已交出' : '本轮';
@@ -4055,7 +4069,6 @@
   async function runAction(action) {
     const tab = activeTab(); if (!tab || !action) return;
     if (action === 'resolve-conflict') return resolveConflict(tab);
-    if (action === 'busy') return undefined;
     if (action === 'submit') return submitReview(tab, { skipConfirm: true });
     if (action === 'approve' || action === 'finalize') return openFinalizeConfirm(tab, action);
     if (action === 'copy-instruction') return copyInstruction(tab);
@@ -4113,8 +4126,9 @@
     nodes.outlineMode.addEventListener('click', () => setLeftMode('outline'));
     nodes.filesMode.addEventListener('click', () => setLeftMode('files'));
     nodes.collapseLeft.addEventListener('click', () => toggleLeft(true));
-    nodes.toggleLeftTop.addEventListener('click', () => toggleLeft(false));
-    nodes.toggleRightTop.addEventListener('click', () => toggleRight());
+    nodes.expandLeft.addEventListener('click', () => toggleLeft(false));
+    nodes.collapseRight.addEventListener('click', () => toggleRight(true));
+    nodes.expandRight.addEventListener('click', () => toggleRight(false));
     nodes.notesCurrentTab.addEventListener('click', () => showNotesPane('current'));
     nodes.notesHistoryTab.addEventListener('click', () => showNotesPane('history'));
     // 单击文件名开信息卡;双击就地改名。鼠标单击先等一下看是不是双击,免得信息卡先闪一下;

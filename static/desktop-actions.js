@@ -119,7 +119,7 @@
       id: 'view', label: '显示', items: [
         { id: 'toggle-mode', label: '切换阅读与批注 / 编辑', accelerator: 'CmdOrCtrl+/', command: 'toggle-mode', when: 'canToggleMode' },
         SEP,
-        { id: 'toggle-left', label: '显示稿件栏', accelerator: 'Ctrl+CmdOrCtrl+S', command: 'toggle-left', checked: 'leftShown' },
+        { id: 'toggle-left', label: '显示目录', accelerator: 'Ctrl+CmdOrCtrl+S', command: 'toggle-left', checked: 'leftShown' },
         { id: 'left-files', label: '稿件', accelerator: 'Ctrl+CmdOrCtrl+1', command: 'left-files', checked: 'leftFiles' },
         { id: 'left-outline', label: '大纲', accelerator: 'Ctrl+CmdOrCtrl+2', command: 'left-outline', checked: 'leftOutline' },
         { id: 'toggle-right', label: '显示批注栏', accelerator: 'Alt+CmdOrCtrl+I', command: 'toggle-right', checked: 'rightShown' },

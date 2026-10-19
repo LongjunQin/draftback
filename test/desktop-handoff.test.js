@@ -37,14 +37,13 @@ test('状态表:稿子在谁手里只有这几种,主按钮随之变化', () => 
   const claimed = Handoff.describe({ review: { status: 'ready_to_apply', agentState: 'claimed', claimedBy: 'Codex' } });
   assert.equal(claimed.status, 'claimed');
   assert.equal(claimed.text, 'AI 正在修改…');
-  assert.equal(claimed.primary.hidden, false, 'AI 在改时主按钮位置不空着');
-  assert.equal(claimed.primary.disabled, true);
-  assert.equal(claimed.primary.label, '改稿中…');
+  assert.equal(claimed.primary.hidden, true, 'AI 在改时状态只在正中说一次,主按钮位置不放「改稿中…」');
   assert.equal(claimed.secondary.hidden, true, '领取后不再提供「我自己改」');
 
   const applying = Handoff.describe({ review: { status: 'applying', applyMode: 'agent', applyActor: 'Claude Code' } });
   assert.equal(applying.text, 'AI 正在修改…');
   assert.match(applying.detail, /文档暂时只读/);
+  assert.equal(applying.primary.hidden, true, 'AI 在改时主按钮位置空着');
   const manual = Handoff.describe({ review: { status: 'applying', applyMode: 'manual' } });
   assert.equal(manual.primary.label, '提交修改');
 
