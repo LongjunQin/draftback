@@ -1585,6 +1585,8 @@
     nodes.editingMode.disabled = review.status === 'conflict' || (review.status === 'applying' && review.applyMode !== 'manual') || isReadOnly(tab);
     paintAction(nodes.primaryAction, view.primary);
     paintAction(nodes.secondaryAction, view.secondary);
+    // 选着字的时候稿子变成不能批注(文件在外面被改了、AI 领走了):浮着的「批注」也收起来
+    if (!statusCanAnnotate(tab)) { state.cachedAnchor = null; nodes.annotate.hidden = true; }
     renderFinalizeConfirm();
     publishMenuState();
   }
@@ -2284,16 +2286,17 @@
     scheduleMarkerPositions();
   }
 
+  // 批注栏底下一行:只放快捷键,或者别处没说的下一步。稿子在什么状态由工具栏正中说,这里不再重复(2026-10-19 用户:同一件事说了好几处)
   function notesFooterText(tab) {
     if (!tab) return '';
     const review = tab.review;
     const next = Number.isInteger(review.round) ? review.round + 1 : null;
-    if (isPlain(tab)) return '划词写下第一条批注,就开始第 1 轮。⌥⌘M 批注所选文字。';
+    if (isPlain(tab)) return '⌥⌘M 批注所选文字';
     if (review.status === 'reviewing') return '⌥⌘M 批注 · ⌘↩ 交给 AI · ⌥⌘↓ 下一条批注';
     if (review.status === 'ready_to_apply' || (review.status === 'applying' && review.applyMode !== 'manual')) return 'AI 改完之前不能批注。';
-    if (review.status === 'applying') return '对照批注逐条处理;改完点「提交修改」。';
-    if (review.status === 'conflict') return '文件在外面被改了:点工具栏的「处理…」。';
-    if (review.status === 'complete' && review.outcome === 'finalized') return '这篇已定稿。再划词批注会开始新一轮。';
+    if (review.status === 'applying') return review.round === 'manual-edit' ? '' : '都处理完,点上方「提交修改」。';
+    if (review.status === 'conflict') return '';
+    if (review.status === 'complete' && review.outcome === 'finalized') return '再划词批注会开始新一轮。';
     return `要继续改:直接在正文划词批注,自动开始${next ? `第 ${next} 轮` : '下一轮'}。`;
   }
   function renderStateNotice(tab) {
@@ -2304,10 +2307,11 @@
     nodes.readerBanner.textContent = aiEditing ? '原文只读,AI 改完会自动换成新版。' : '';
     nodes.stateCard.replaceChildren();
     let card = null;
+    // 说明卡只说别处没说的:为什么、后果、怎么办。状态名在工具栏正中,「处理…」只在工具栏上放一个
     if (tab && status === 'conflict') {
-      card = { tone: 'conflict', title: '文件在外面被改了', text: '审阅期间有别的程序改了这个文件,回稿已停止写入。选一条路:以磁盘上的版本重新开始,或把锁定时的版本另存一份。', action: ['处理…', () => resolveConflict(tab)] };
+      card = { tone: 'conflict', title: '回稿已停止写入', text: '审阅期间有别的程序改了这个文件。点上方「处理…」选一条路:以磁盘上的版本重新开始,或把锁定时的版本另存一份。' };
     } else if (tab && isReadOnly(tab)) {
-      card = { tone: 'readonly', title: `${String(tab.sourceMeta.encoding || '非 UTF-8').toUpperCase()} 编码 · 只读`, text: '回稿按原样显示这个文件,不会改写它。要编辑,请先用其他工具另存为 UTF-8。' };
+      card = { tone: 'readonly', title: `这个文件是 ${String(tab.sourceMeta.encoding || '非 UTF-8').toUpperCase()} 编码`, text: '回稿按原样显示,不会改写它。要编辑,请先用别的工具另存为 UTF-8。' };
     }
     nodes.stateCard.hidden = !card;
     if (!card) return;
@@ -2315,7 +2319,6 @@
     const title = document.createElement('strong'); title.textContent = card.title;
     const text = document.createElement('p'); text.textContent = card.text;
     nodes.stateCard.append(title, text);
-    if (card.action) { const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary-button compact-button'; button.textContent = card.action[0]; button.addEventListener('click', () => { void card.action[1](); }); nodes.stateCard.appendChild(button); }
   }
   function renderNotesPane(tab) {
     renderStateNotice(tab);
@@ -2376,7 +2379,7 @@
     const openItems = organized.open.items.slice()
       .sort((left, right) => (isDocNote(right) ? 1 : 0) - (isDocNote(left) ? 1 : 0));
     openSection.hidden = card.show && !openItems.length;
-    if (!openItems.length) nodes.openNotesList.appendChild(emptyBlock('本轮还没有批注。选中正文可划词批注；针对全篇的意见请点上方“写总体意见”。'));
+    if (!openItems.length) nodes.openNotesList.appendChild(emptyBlock('本轮还没有批注。选中正文可划词批注;针对全篇的意见请点上方「写总体意见」。'));
     else openItems.forEach((note) => nodes.openNotesList.appendChild(noteCard(tab, note, false)));
     // 历史按轮折叠:每轮一行「第 N 轮 · 类型 · 采纳 a · 未采纳 b」;没有轮次归属的旧批注归「更早(未分轮)」
     const grouped = History.buildRounds({ review: tab.review, versions, annotations: tab.annotations });

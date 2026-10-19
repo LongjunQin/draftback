@@ -128,7 +128,7 @@ async function main() {
     await key(cdp, '/', 'Slash', 191, META);
     await sleep(200);
     assert.equal(await cdp.evaluate(`document.querySelector('#editorPane').hidden`), true, '只读文件 ⌘/ 不进编辑');
-    assert.match(await cdp.evaluate(`document.querySelector('#stateCard').hidden ? '' : document.querySelector('#stateCard').textContent`), /GBK 编码 · 只读.*另存为 UTF-8/, '批注栏顶部说明只读与怎么办');
+    assert.match(await cdp.evaluate(`document.querySelector('#stateCard').hidden ? '' : document.querySelector('#stateCard').textContent`), /这个文件是 GBK 编码.*另存为 UTF-8/, '批注栏顶部说明为什么只读、怎么办');
 
     // 2. ⌘/ 切换到编辑;粘贴图片 → 存到 images/,编辑器里显示;⌘S 写回相对路径
     await openRecent(cdp, '普通稿.md');
@@ -248,6 +248,8 @@ async function main() {
     await cdp.evaluate(`Array.from(document.querySelectorAll('#tabList .tab')).find((t) => t.textContent.includes('冲突稿.md')).click()`);
     await waitUntil('冲突状态与「处理…」', () => cdp.evaluate(`document.querySelector('#reviewStateText').textContent.includes('外面被改') && document.querySelector('#primaryAction').textContent === '处理…'`));
     assert.equal(await cdp.evaluate(`!document.querySelector('#stateCard').hidden && document.querySelector('#stateCard').dataset.tone`), 'conflict', '批注栏顶部一张冲突说明卡');
+    assert.equal(await cdp.evaluate(`document.querySelectorAll('#stateCard button').length`), 0, '「处理…」只在工具栏上放一个');
+    assert.equal(await cdp.evaluate(`document.querySelector('#notesFooter').hidden`), true, '冲突时批注栏底下不再重复说一遍');
     const forkPath = path.join(docs, '冲突稿 我的版本.md');
     await cdp.evaluate(`window.__db.copyPath = ${JSON.stringify(forkPath)}`);
     await cdp.evaluate(`document.querySelector('#primaryAction').click()`);

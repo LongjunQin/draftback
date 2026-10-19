@@ -136,7 +136,8 @@ test('高并发批注 POST 不丢失，同 clientRequestId 只写一条', async 
   const f = fixture(t);
   const file = writeMd(f.docRoot, '并发.md');
   const { review } = await store.openReview(file, { dataDir: f.dataDir });
-  const { port } = await startServer(t, f);
+  // 这里测的是不丢、不重复,不是快慢:110 个写入排队过同一把锁,整套测试并行跑、机器忙时会超过默认 8 秒等锁时间
+  const { port } = await startServer(t, f, { DRAFTBACK_LOCK_TIMEOUT_MS: '60000' });
 
   const unique = Array.from({ length: 80 }, (_, index) => rawRequest(
     port,
