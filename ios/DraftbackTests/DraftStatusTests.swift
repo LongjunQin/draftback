@@ -77,7 +77,8 @@ final class DraftStatusTests: XCTestCase {
         // 交出后:等待同步 → 等待 Mac 收到 → 久等没回执给「重新发送」;这期间不能再批注
         let queued = reader(reviewing, submitted: 2, pending: 1, submittedMinutesAgo: 1)
         XCTAssertEqual(queued.statusLine, "等待同步 2 条")
-        XCTAssertEqual(queued.primary, .handedOff)
+        XCTAssertEqual(queued.subtitle, "已交出", "交出后副标题跟着变,不再说「可批注」")
+        XCTAssertNil(queued.primary, "不放不能点的「已交出」")
         XCTAssertFalse(queued.canAnnotate)
         XCTAssertEqual(reader(reviewing, submitted: 2, submittedMinutesAgo: 1).statusDetail, "等待 Mac 收到")
         let late = reader(reviewing, submitted: 2, submittedMinutesAgo: 4)
@@ -98,15 +99,18 @@ final class DraftStatusTests: XCTestCase {
         let none = reader(doc("waiting-agent", agent: "none"))
         XCTAssertEqual(none.banner?.text, "还没有 AI 接入")
         XCTAssertEqual(none.subtitle, "已交出")
-        XCTAssertEqual(none.primary, .handedOff)
+        XCTAssertNil(none.primary, "不放不能点的「已交出」")
+        XCTAssertEqual(none.statusLine, "稿子回来会自动换成新版")
         XCTAssertFalse(none.canAnnotate)
         XCTAssertEqual(reader(doc("waiting-agent", agent: "listening")).banner?.text, "AI 在线,等待领取")
         let claimed = reader(doc("waiting-agent", agent: "claimed"), received: 3)
-        XCTAssertEqual(claimed.primary, .busy)
+        XCTAssertNil(claimed.primary, "不放不能点的「改稿中…」")
+        XCTAssertEqual(claimed.subtitle, "AI 正在修改")
         XCTAssertEqual(claimed.statusLine, "Mac 已收到 3 条")
-        XCTAssertEqual(claimed.banner?.spinning, true)
-        XCTAssertEqual(reader(doc("applying")).primary, .busy)
-        XCTAssertEqual(reader(doc("applying")).statusLine, "这一轮在 Mac 上交出")
+        XCTAssertEqual(claimed.statusDetail, "改完会自动换成新版")
+        XCTAssertNil(claimed.banner, "副标题已经说了 AI 正在修改,不再出横幅")
+        XCTAssertNil(reader(doc("applying")).primary)
+        XCTAssertEqual(reader(doc("applying")).statusLine, "改完会自动换成新版")
     }
 
     func testEndStatesBlockAnnotation() {
@@ -115,9 +119,21 @@ final class DraftStatusTests: XCTestCase {
             XCTAssertFalse(status.canAnnotate, state)
             XCTAssertNotNil(status.blockedReason, state)
         }
-        XCTAssertEqual(reader(doc("completed")).subtitle, "第 2 轮回稿")
-        XCTAssertEqual(reader(doc("completed", outcome: "approved")).statusLine, "已通过 · 没有批注")
-        XCTAssertEqual(reader(doc("conflict")).banner?.tone, .conflict)
+        XCTAssertEqual(reader(doc("completed")).subtitle, "稿子回来了", "回稿卡标题已经是「第 2 轮回稿」")
+        XCTAssertEqual(reader(doc("completed", outcome: "approved")).statusLine, "要接着改,在 Mac 上开下一轮")
+        XCTAssertNil(reader(doc("conflict")).banner, "副标题和底栏已经说了,不再加红横幅")
+        XCTAssertEqual(reader(doc("conflict")).statusLine, "等你在 Mac 上处理")
+    }
+
+    /// 一件事只在一处说(2026-10-19 用户):副标题说状态,底栏和横幅不再把它说一遍
+    func testStatusSaidOnce() {
+        for state in ["reviewing", "waiting-agent", "applying", "manual-editing", "completed", "restored", "finalized", "cancelled", "conflict"] {
+            for agent in [nil, "none", "listening", "claimed"] where agent == nil || state == "waiting-agent" {
+                let status = reader(doc(state, agent: agent))
+                XCTAssertFalse(status.statusLine.contains(status.subtitle), "\(state) \(agent ?? "")")
+                if let banner = status.banner { XCTAssertFalse(banner.text.contains(status.subtitle), "\(state) \(agent ?? "")") }
+            }
+        }
     }
 
     func testNewerVersionBanner() {

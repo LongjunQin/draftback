@@ -97,6 +97,8 @@ enum DraftStatus {
 }
 
 /// 读稿页上的状态:导航栏副标题、正文上方横幅、底栏左槽(状态两行)、右槽主按钮,以及这会儿能不能批注。
+/// 一件事只在一处说(2026-10-19 用户:同一件事说了好几处,和 Mac 一样):副标题说稿子在什么状态;横幅只说副标题没说的
+/// (AI 三档里的哪一档、Mac 推来了新版);底栏左边说你的批注走到哪、下一步;右边只放能点的按钮,没有就空着。
 /// 跨端规则第 7 节:每一步都由真实事件推进(本地已保存 → 等待同步 → Mac 已收到 → AI 领取 → 稿子回来),界面不凭猜测前进。
 struct ReaderStatus: Equatable {
     struct Banner: Equatable {
@@ -110,8 +112,6 @@ struct ReaderStatus: Equatable {
     enum Primary: Equatable {
         case handOff(Int)        // 交给 AI · k
         case handOffDisabled     // 交给 AI(还没有批注)
-        case handedOff           // 已交出(不能点)
-        case busy                // 改稿中…(不能点,与 Mac 的主按钮一致)
         case resend              // 重新发送(久等没回执)
         case exportBatch(Int)    // 导出批注 · k(手机独立打开的文件)
         case reexport            // 重新导出
@@ -192,19 +192,20 @@ struct ReaderStatus: Equatable {
         switch sync.phoneState {
         case "reviewing":
             let subtitle = "\(round) · 可批注"
+            // 手机交出了这一轮:副标题跟着变成「已交出」(这时已经不能再批),底栏说批注走到哪
             if input.submitted > 0 {
                 if input.pendingUploads > 0 {
-                    return ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "等待同步 \(input.submitted) 条", statusDetail: "联网后自动上传",
-                                        statusTap: .openNotes, primary: .handedOff, canAnnotate: false, blockedReason: handedNote)
+                    return ReaderStatus(subtitle: "已交出", subtitleTone: .waiting, statusLine: "等待同步 \(input.submitted) 条", statusDetail: "联网后自动上传",
+                                        statusTap: .openNotes, canAnnotate: false, blockedReason: handedNote)
                 }
                 let waitedLong = input.oldestSubmittedAt.map { input.now.timeIntervalSince($0) > receiptPatience } ?? false
-                return ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "已交出 \(input.submitted) 条",
+                return ReaderStatus(subtitle: "已交出", subtitleTone: .waiting, statusLine: "\(input.submitted) 条已上传",
                                     statusDetail: waitedLong ? "等待 Mac 在线" : "等待 Mac 收到", statusTap: .openNotes,
-                                    primary: waitedLong ? .resend : .handedOff, canAnnotate: false, blockedReason: handedNote)
+                                    primary: waitedLong ? .resend : nil, canAnnotate: false, blockedReason: handedNote)
             }
             if input.received > 0 {
-                return ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "Mac 已收到 \(input.received) 条", statusDetail: "等待 AI 开始修改",
-                                    statusTap: .openNotes, primary: .handedOff, canAnnotate: false, blockedReason: handedNote)
+                return ReaderStatus(subtitle: "已交出", subtitleTone: .waiting, statusLine: "Mac 已收到 \(input.received) 条", statusDetail: "等待 AI 开始修改",
+                                    statusTap: .openNotes, canAnnotate: false, blockedReason: handedNote)
             }
             if !input.annotationAllowed {
                 return ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "正文还在同步", statusDetail: "同步完成后才能批注",
@@ -220,53 +221,47 @@ struct ReaderStatus: Equatable {
             }
             // 一条批注都没有:Mac 支持且 Mac 上这一轮也没有批注时,可以「通过 · 定稿」(与 Mac 同一个顺序:先记为通过再定稿)
             let approve = input.supportsIntents && input.macOpenCount == 0
-            var status = ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "\(round) · 可批注", statusDetail: "选中文字就能批注",
+            var status = ReaderStatus(subtitle: subtitle, subtitleTone: .turn, statusLine: "还没有批注", statusDetail: "选中文字就能批注",
                                       primary: approve ? .approve : .handOffDisabled, canAnnotate: true)
             if case .rejected(let reason) = input.finalize { status.statusLine = "没有定稿"; status.statusDetail = reason; status.statusTap = .dismissFinalize }
             return status
         case "waiting-agent":
             // 副标题已经说了「已交出」,横幅只说三档里的哪一档
             let agentState = sync.effectiveAgentState(now: input.now)
-            if agentState == "claimed" {
-                return ReaderStatus(subtitle: "AI 正在修改", subtitleTone: .ai, banner: Banner(text: "AI 正在修改,改完会自动换成新版", tone: .ai, spinning: true),
-                                    statusLine: receivedLine(input), statusDetail: nil, statusTap: input.received > 0 ? .openNotes : nil,
-                                    primary: .busy, canAnnotate: false, blockedReason: handedNote)
-            }
+            if agentState == "claimed" { return aiEditing(input, handedNote: handedNote) }
             // 旧版 Mac 不推三档(agentState 为空):不出横幅,不猜有没有 AI 接入
             let banner: Banner? = agentState == "listening" ? Banner(text: "AI 在线,等待领取", tone: .waiting)
                 : agentState == "none" ? Banner(text: "还没有 AI 接入", tone: .waiting) : nil
-            return ReaderStatus(subtitle: "已交出", subtitleTone: .waiting, banner: banner, statusLine: receivedLine(input),
-                                statusDetail: "稿子回来会自动换成新版", statusTap: input.received + input.rejected > 0 ? .openNotes : nil,
-                                primary: .handedOff, canAnnotate: false, blockedReason: handedNote)
+            let lines = handedLines(input, next: "稿子回来会自动换成新版")
+            return ReaderStatus(subtitle: "已交出", subtitleTone: .waiting, banner: banner, statusLine: lines.line,
+                                statusDetail: lines.detail, statusTap: input.received + input.rejected > 0 ? .openNotes : nil,
+                                canAnnotate: false, blockedReason: handedNote)
         case "applying":
-            return ReaderStatus(subtitle: "AI 正在修改", subtitleTone: .ai, banner: Banner(text: "AI 正在修改,改完会自动换成新版", tone: .ai, spinning: true),
-                                statusLine: receivedLine(input), statusDetail: nil, statusTap: input.received > 0 ? .openNotes : nil,
-                                primary: .busy, canAnnotate: false, blockedReason: handedNote)
+            return aiEditing(input, handedNote: handedNote)
         case "manual-editing":
-            return ReaderStatus(subtitle: "我自己改", subtitleTone: .turn, banner: Banner(text: "你在 Mac 上自己改,改完会自动换成新版", tone: .turn),
-                                statusLine: "在 Mac 上自己改", statusDetail: "改完会自动换成新版", canAnnotate: false,
+            return ReaderStatus(subtitle: "我自己改", subtitleTone: .turn, statusLine: "在 Mac 上改完会自动换成新版", statusDetail: nil, canAnnotate: false,
                                 blockedReason: "这一轮在 Mac 上自己改。改完后再批注。")
+        // 下面几种副标题已经说了状态,底栏只说下一步
         case "completed":
             if sync.outcome == "approved" {
-                return ReaderStatus(subtitle: "\(round) · 已通过", subtitleTone: .back, statusLine: "已通过 · 没有批注", statusDetail: "要接着改,在 Mac 上开下一轮",
+                return ReaderStatus(subtitle: "\(round) · 已通过", subtitleTone: .back, statusLine: "要接着改,在 Mac 上开下一轮", statusDetail: nil,
                                     canAnnotate: false, blockedReason: "这一轮已通过。要接着改,先在 Mac 上开下一轮。")
             }
-            return ReaderStatus(subtitle: "\(round)回稿", subtitleTone: .back, statusLine: "稿子回来了",
-                                statusDetail: "要接着改,在 Mac 上开下一轮",
+            return ReaderStatus(subtitle: "稿子回来了", subtitleTone: .back, statusLine: "要接着改,在 Mac 上开下一轮", statusDetail: nil,
                                 canAnnotate: false, blockedReason: "稿子回来了。要接着改,先在 Mac 上开下一轮。")
         case "restored":
-            return ReaderStatus(subtitle: "已恢复到改稿前", subtitleTone: .back, statusLine: "已恢复到\(round)改稿前", statusDetail: "要接着改,在 Mac 上开下一轮",
+            return ReaderStatus(subtitle: "已恢复到改稿前", subtitleTone: .back, statusLine: "要接着改,在 Mac 上开下一轮", statusDetail: nil,
                                 canAnnotate: false, blockedReason: "正文已恢复到改稿前。要接着改,先在 Mac 上开下一轮。")
         case "finalized":
-            return ReaderStatus(subtitle: "已定稿", subtitleTone: .done, statusLine: "这篇已定稿", statusDetail: nil,
+            return ReaderStatus(subtitle: "已定稿", subtitleTone: .done, statusLine: "要再改,在 Mac 上开新一轮", statusDetail: nil,
                                 canAnnotate: false, blockedReason: "这篇已定稿。")
         case "cancelled":
-            return ReaderStatus(subtitle: "本轮已作废", subtitleTone: .idle, statusLine: "本轮已作废", statusDetail: "要接着改,在 Mac 上开下一轮",
+            return ReaderStatus(subtitle: "本轮已作废", subtitleTone: .idle, statusLine: "要接着改,在 Mac 上开下一轮", statusDetail: nil,
                                 canAnnotate: false, blockedReason: "这一轮已作废。")
         case "conflict":
+            // 副标题说「文件被改了」,底栏说要在 Mac 上处理;不再加一条红横幅把两样再说一遍
             let rejected = input.rejected > 0
             return ReaderStatus(subtitle: "文件被改了", subtitleTone: .conflict,
-                                banner: Banner(text: "文件在 Mac 上被别的程序改了,要在 Mac 上处理", tone: .conflict),
                                 statusLine: rejected ? "\(input.rejected) 条被 Mac 拒收" : "等你在 Mac 上处理",
                                 statusDetail: rejected ? "点这里看原因" : "处理完这里会自动更新", statusTap: rejected ? .openNotes : nil,
                                 canAnnotate: false, blockedReason: "文件在 Mac 上被别的程序改了。在 Mac 上处理完才能批注。")
@@ -278,7 +273,8 @@ struct ReaderStatus: Equatable {
 
     private static func subtitleFor(_ sync: SyncedDocument) -> String {
         switch sync.phoneState {
-        case "completed": return sync.outcome == "approved" ? "第 \(sync.round) 轮 · 已通过" : "第 \(sync.round) 轮回稿"
+        // 稿子回来了:正文顶上回稿卡的标题是「第 N 轮回稿」,副标题换个说法,不把同一行字叠两遍(和 Mac 正中的标签一样)
+        case "completed": return sync.outcome == "approved" ? "第 \(sync.round) 轮 · 已通过" : "稿子回来了"
         case "restored": return "已恢复到改稿前"
         case "finalized": return "已定稿"
         case "cancelled": return "本轮已作废"
@@ -302,7 +298,7 @@ struct ReaderStatus: Equatable {
         let subtitle = subtitleFor(sync), tone = toneFor(sync)
         if input.nextRoundInFlight > 0 {
             return ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: "已交出 \(input.nextRoundInFlight) 条", statusDetail: "等 Mac 开\(next)",
-                                statusTap: .openNotes, primary: .handedOff, canAnnotate: false, blockedReason: "这批已经交出,等 Mac 开\(next)后再批。")
+                                statusTap: .openNotes, canAnnotate: false, blockedReason: "这批已经交出,等 Mac 开\(next)后再批。")
         }
         guard input.annotationAllowed else {
             return ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: "正文还在同步", statusDetail: "同步完成后才能批注",
@@ -312,15 +308,9 @@ struct ReaderStatus: Equatable {
             return ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: "本地已保存 \(input.open) 条 · \(next)", statusDetail: "交出时 Mac 会开\(next)",
                                 statusTap: .openNotes, primary: .handOff(input.open), canAnnotate: true)
         }
-        let line: String
-        switch sync.phoneState {
-        case "completed": line = sync.outcome == "approved" ? "已通过 · 没有批注" : "稿子回来了"
-        case "restored": line = "已恢复到改稿前"
-        case "finalized": line = "这篇已定稿"
-        default: line = "本轮已作废"
-        }
+        // 副标题已经说了稿子回来了 / 已定稿……底栏只说下一步
         let canFinalize = sync.phoneState == "completed" || sync.phoneState == "restored"
-        var status = ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: line, statusDetail: "划词就开始\(next)",
+        var status = ReaderStatus(subtitle: subtitle, subtitleTone: tone, statusLine: "划词就开始\(next)", statusDetail: nil,
                                   primary: canFinalize ? .finalize : nil, canAnnotate: true)
         // 交出的这批被 Mac 拒收了:底栏说清楚,点开看原因(可以复制到本轮再交)
         if input.rejected > 0 { status.statusLine = "\(input.rejected) 条被 Mac 拒收"; status.statusDetail = "点这里看原因"; status.statusTap = .openNotes }
@@ -328,9 +318,17 @@ struct ReaderStatus: Equatable {
         return status
     }
 
-    private static func receivedLine(_ input: Inputs) -> String {
-        if input.received > 0 { return "Mac 已收到 \(input.received) 条" }
-        if input.submitted > 0 { return "已交出 \(input.submitted) 条" }
-        return "这一轮在 Mac 上交出"
+    /// AI 领走了这一轮(已领取或正在改):副标题「AI 正在修改」带闪的黄灯就够了;不出横幅,右边不放不能点的「改稿中…」
+    private static func aiEditing(_ input: Inputs, handedNote: String) -> ReaderStatus {
+        let lines = handedLines(input, next: "改完会自动换成新版")
+        return ReaderStatus(subtitle: "AI 正在修改", subtitleTone: .ai, statusLine: lines.line, statusDetail: lines.detail,
+                            statusTap: input.received > 0 ? .openNotes : nil, canAnnotate: false, blockedReason: handedNote)
+    }
+
+    /// 底栏左边:手机交过批注就先说走到哪了,下面一行说接下来会怎样;这一轮是在 Mac 上交出的就只说接下来会怎样
+    private static func handedLines(_ input: Inputs, next: String) -> (line: String, detail: String?) {
+        if input.received > 0 { return ("Mac 已收到 \(input.received) 条", next) }
+        if input.submitted > 0 { return ("\(input.submitted) 条已上传", next) }
+        return (next, nil)
     }
 }

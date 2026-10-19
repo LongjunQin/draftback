@@ -454,8 +454,6 @@ struct ReaderView: View {
         switch primary {
         case .handOff(let count): return ("交给 AI · \(count)", true)
         case .handOffDisabled: return ("交给 AI", false)
-        case .handedOff: return ("已交出", false)
-        case .busy: return ("改稿中…", false)
         case .finalize: return ("盖章定稿", true)
         case .approve: return ("通过 · 定稿", true)
         case .resend: return ("重新发送", true)
@@ -474,7 +472,7 @@ struct ReaderView: View {
         case .finalize, .approve:
             if let reviewId = document.sync?.reviewId { finalizeTarget = (reviewId, document.hash) }
             confirmFinalize = primary
-        case .handOffDisabled, .handedOff, .busy:
+        case .handOffDisabled:
             break
         }
     }
