@@ -5,7 +5,7 @@
 //
 // 用法: node scripts/dev/mac-shots.js <输出目录> [--scale 2] [--cover green] [--size 1440x900] [场景...]
 //   不写场景就全截。场景:welcome back diff confirm settings comment dialog(含 selection) toast conflict
-//   night(含 night-back) popovers(history-timeline docinfo export find quickopen shortcuts)
+//   night(含 night-back) popovers(history-timeline docinfo rename export find quickopen shortcuts)
 //   approve(approve-confirm approve-done) handed applying edit panels(panels-left / both / right) narrow(含 collapsed)
 //   封面:green mist lavender gold orange black。NO_ANIM=1 关掉指示灯闪烁,截夜读时用。
 const fs = require('node:fs');
@@ -129,7 +129,7 @@ async function openDoc(cdp, name) {
   await cdp.evaluate(`document.querySelector('#filesModeButton').click()`);
   await waitUntil(`列表里有 ${name}`, () => cdp.evaluate(`Array.from(document.querySelectorAll('#recentList .recent-item')).some((i) => i.textContent.includes(${JSON.stringify(name)}))`));
   await cdp.evaluate(`Array.from(document.querySelectorAll('#recentList .recent-item')).find((i) => i.textContent.includes(${JSON.stringify(name)})).click()`);
-  await waitUntil(`打开 ${name}`, () => cdp.evaluate(`(document.querySelector('#docTitleText') || {}).textContent.includes(${JSON.stringify(name)}) && document.querySelector('#documentContent').textContent.length > 20`));
+  await waitUntil(`打开 ${name}`, () => cdp.evaluate(`(document.querySelector('#tabList .tab.active .tab-title') || {}).textContent.includes(${JSON.stringify(name)}) && document.querySelector('#documentContent').textContent.length > 20`));
   await sleep(300);
 }
 
@@ -213,10 +213,14 @@ async function openDoc(cdp, name) {
       await shot(cdp, 'history-timeline');
       await click(cdp, '#reviewStatePill');
       await click(cdp, '#notesCurrentTab');
-      await click(cdp, '#docTitleButton');
+      await click(cdp, '#tabList .tab.active');
       await sleep(300);
       await shot(cdp, 'docinfo');
-      await click(cdp, '#docTitleButton');
+      await click(cdp, '#tabList .tab.active');
+      await cdp.evaluate(`document.querySelector('#tabList .tab.active').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+      await sleep(300);
+      await shot(cdp, 'rename');
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
       await click(cdp, '#exportMenuButton');
       await sleep(300);
       await shot(cdp, 'export');

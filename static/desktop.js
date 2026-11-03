@@ -41,7 +41,7 @@
     comparePrev: $('#comparePrev'), compareNext: $('#compareNext'), compareClose: $('#compareClose'), compareScroll: $('#compareScroll'),
     compareContent: $('#compareContent'), compareNote: $('#compareNote'),
     confirmAlt: $('#confirmAlt'),
-    tabStrip: $('#tabStrip'), docTitleButton: $('#docTitleButton'), docTitleText: $('#docTitleText'), docInfoPopover: $('#docInfoPopover'),
+    tabStrip: $('#tabStrip'), docInfoPopover: $('#docInfoPopover'),
     compareToggleButton: $('#compareToggleButton'), toolbarMoreButton: $('#toolbarMoreButton'), toolbarMoreMenu: $('#toolbarMoreMenu'),
     syncFooter: $('#syncFooter'), syncFooterText: $('#syncFooterText'), syncFooterIcon: $('#syncFooterIcon'),
     notesFooter: $('#notesFooter'), openNotesLabel: $('#openNotesLabel'), readerBanner: $('#readerBanner'), stateCard: $('#stateCard'), notesSectionHint: document.querySelector('.notes-section-hint'),
@@ -1429,13 +1429,21 @@
     });
   }
 
+  // 纸上方的标签:开着几篇就几张,一篇也一样,都能 × 关掉(2026-11-03 用户:只开一篇时不该换成别的样子)。
+  // 文件名只在这里写一次:单击当前这张开信息卡(字数、改名、在访达中显示),双击就地改名;右键哪张都开信息卡
   function renderTabs() {
-    nodes.shell.classList.toggle('multi-tab', state.tabs.length > 1);
+    const current = activeTab();
+    // 换了当前这篇:收起改名框(不提交)和信息卡
+    if (state.renaming && state.renaming.tab !== current) endRename(state.renaming, { focus: false });
+    if (!current || (state.docInfoTabId && state.docInfoTabId !== current.id)) toggleDocInfo(false);
+    nodes.shell.classList.toggle('has-tabs', state.tabs.length > 0);
     nodes.tabList.replaceChildren();
     state.tabs.forEach((tab) => {
+      const active = tab === current;
       const button = document.createElement('button');
-      button.type = 'button'; button.className = `tab${tab.id === state.activeId ? ' active' : ''}`;
-      button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(tab.id === state.activeId));
+      button.type = 'button'; button.className = `tab${active ? ' active' : ''}${state.renaming && state.renaming.tab === tab ? ' renaming' : ''}`;
+      button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(active));
+      if (active) { button.setAttribute('aria-haspopup', 'dialog'); button.setAttribute('aria-expanded', String(!nodes.docInfoPopover.hidden)); }
       button.title = tab.review.sourceFile || tab.review.title;
       const title = document.createElement('span'); title.className = 'tab-title'; title.textContent = tab.review.title || 'Markdown';
       const dot = document.createElement('span'); dot.className = `tab-state ${tab.review.status || ''}${tab.review.applyMode === 'manual' ? ' manual' : ''}`;
@@ -1447,12 +1455,49 @@
       close.addEventListener('pointerdown', (event) => event.stopPropagation());
       close.addEventListener('click', (event) => { event.stopPropagation(); void closeTab(tab.id); });
       button.append(title, dot, close);
-      button.addEventListener('click', () => activateTab(tab.id));
+      // 当前这张:鼠标单击先等一下看是不是双击,免得信息卡先闪一下;键盘与脚本触发(detail 为 0)立刻开
+      button.addEventListener('click', (event) => {
+        if (tab.id !== state.activeId) { state.tabSwitchClick = true; activateTab(tab.id); return; }
+        if (event.detail === 1) state.tabSwitchClick = false; // 在当前这张上新起一串点击
+        if (event.detail === 0) { toggleDocInfo(); return; }
+        if (event.detail > 1) return;
+        clearTimeout(state.tabClickTimer);
+        state.tabClickTimer = setTimeout(() => { state.tabClickTimer = 0; toggleDocInfo(); }, 250);
+      });
+      // 双击别的标签只算切过去,不改名:这一串的第一下是切换(标签栏已重画),第二下落在新的当前这张上
+      button.addEventListener('dblclick', (event) => {
+        if (tab.id !== state.activeId || state.tabSwitchClick) return;
+        event.preventDefault();
+        clearTimeout(state.tabClickTimer); state.tabClickTimer = 0;
+        toggleDocInfo(false);
+        startRename(tab);
+      });
+      button.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        if (tab.id !== state.activeId) activateTab(tab.id);
+        toggleDocInfo(true);
+      });
       nodes.tabList.appendChild(button);
-      if (tab.id === state.activeId) {
-        requestAnimationFrame(() => button.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
-      }
+      if (active) requestAnimationFrame(() => { button.scrollIntoView({ block: 'nearest', inline: 'nearest' }); placeTabOverlays(); });
     });
+    placeTabOverlays();
+  }
+  // 信息卡和改名框挂在标签栏上,左边对齐当前这张标签
+  function placeTabOverlays() {
+    const button = nodes.tabList.querySelector('.tab.active');
+    if (!button) return;
+    const left = button.getBoundingClientRect().left - nodes.tabStrip.getBoundingClientRect().left;
+    if (!nodes.docInfoPopover.hidden) {
+      nodes.docInfoPopover.style.left = `${Math.max(0, Math.min(left, nodes.tabStrip.clientWidth - nodes.docInfoPopover.offsetWidth))}px`;
+    }
+    if (state.renaming) {
+      state.renaming.input.style.left = `${left}px`;
+      state.renaming.input.style.minWidth = `${button.offsetWidth}px`;
+    }
+  }
+  function focusActiveTab() {
+    const button = nodes.tabList.querySelector('.tab.active');
+    if (button) button.focus({ preventScroll: true });
   }
 
   function renderApp() {
@@ -1461,7 +1506,6 @@
     const tab = activeTab();
     nodes.shell.classList.toggle('no-doc', !tab);
     markCurrentDraft(tab);
-    renderDocTitle(tab);
     if (!tab) {
       destroyEditor();
       clearMarkerOverlay();
@@ -1493,7 +1537,7 @@
   function renderLayoutState() {
     nodes.shell.classList.toggle('left-collapsed', state.leftCollapsed);
     nodes.shell.classList.toggle('right-collapsed', state.rightCollapsed);
-    nodes.shell.classList.toggle('multi-tab', state.tabs.length > 1);
+    nodes.shell.classList.toggle('has-tabs', state.tabs.length > 0);
     // 没有打开文档时大纲是空的:左栏显示稿件(不改用户的选择)
     const leftMode = activeTab() ? state.leftMode : 'files';
     nodes.outlineMode.classList.toggle('active', leftMode === 'outline');
@@ -3484,16 +3528,7 @@
     toast(ok ? '改稿指令已复制。贴给任何智能体(Claude Code、Codex…),它就能接上这一轮。' : '没能复制到剪贴板,请检查系统权限。', ok ? 'info' : 'error');
   }
 
-  // ---------- 工具栏左边:文档名,点开看字数等(UI 方案 3.2) ----------
-  function renderDocTitle(tab) {
-    // 改名中切到了别的标签:收起输入框(不提交)
-    if (state.renaming && state.renaming.tab !== tab) endRename(state.renaming, { focus: false });
-    nodes.docTitleButton.hidden = !tab || Boolean(state.renaming);
-    if (!tab || (state.docInfoTabId && state.docInfoTabId !== tab.id)) toggleDocInfo(false);
-    if (!tab) return;
-    nodes.docTitleText.textContent = tab.review.title || tab.review.file || '文档';
-    nodes.docTitleButton.title = tab.review.sourceFile || '';
-  }
+  // ---------- 信息卡:单击当前这张标签,看字数等(UI 方案 3.2) ----------
   function docStats(text) {
     const body = splitFrontMatter(String(text || '')).body;
     const prose = body.replace(/```[\s\S]*?```/g, ' ').replace(/<[^>]+>/g, ' ').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1');
@@ -3505,7 +3540,8 @@
   function toggleDocInfo(force) {
     const open = typeof force === 'boolean' ? force : nodes.docInfoPopover.hidden;
     nodes.docInfoPopover.hidden = !open;
-    nodes.docTitleButton.setAttribute('aria-expanded', String(open));
+    const button = nodes.tabList.querySelector('.tab.active');
+    if (button) button.setAttribute('aria-expanded', String(open));
     if (!open) { state.docInfoTabId = null; return; }
     const tab = activeTab();
     if (!tab) { nodes.docInfoPopover.hidden = true; return; }
@@ -3534,6 +3570,7 @@
     setTimeout(() => rename.focus(), 20);
     actions.append(rename, reveal, copy);
     root.appendChild(actions);
+    placeTabOverlays();
   }
 
   // 工具栏上的「显示改动 / 隐藏改动」:只在有可对比的一轮时出现(情境层)。2026-10-15 用户定:从回稿卡挪到这里,
@@ -3847,7 +3884,7 @@
     });
   }
 
-  // ---------- 改名(双击文件名、信息卡「重新命名…」、菜单 文件 → 重新命名…) ----------
+  // ---------- 改名(双击标签、信息卡「重新命名…」、菜单 文件 → 重新命名…) ----------
   // 同一文件夹里换名字;批注、审阅历史跟着走(服务端 documents.renameDocument)。这一轮没走完、有没保存的编辑时先不改
   function renameBlockedReason(tab) {
     if (!tab) return '没有打开的文档。';
@@ -3875,9 +3912,13 @@
     input.title = '回车确认,Esc 取消;扩展名 .md 不用写';
     const session = { tab, input, original, done: false, busy: false };
     state.renaming = session;
-    nodes.docTitleButton.hidden = true;
-    nodes.docTitleButton.parentElement.insertBefore(input, nodes.docTitleButton);
-    const fit = () => { input.style.width = `${Math.round(Math.min(460, Math.max(140, textWidthOf(input.value || ' ', input) + 30)))}px`; };
+    // 改名框盖在这张标签的位置上(标签栏重画时会换掉标签,框不放在标签里面)
+    nodes.tabStrip.appendChild(input);
+    const button = nodes.tabList.querySelector('.tab.active');
+    if (button) button.classList.add('renaming');
+    placeTabOverlays();
+    // 最窄和这张标签一样宽(placeTabOverlays 给的 min-width),名字长了再往右伸
+    const fit = () => { input.style.width = `${Math.round(Math.min(460, Math.max(60, textWidthOf(input.value || ' ', input) + 30)))}px`; };
     fit();
     input.addEventListener('input', fit);
     input.addEventListener('keydown', (event) => {
@@ -3894,8 +3935,9 @@
     session.done = true;
     session.input.remove();
     if (state.renaming === session) state.renaming = null;
-    renderDocTitle(activeTab());
-    if (options.focus !== false && !nodes.docTitleButton.hidden) nodes.docTitleButton.focus({ preventScroll: true });
+    const button = nodes.tabList.querySelector('.tab.renaming');
+    if (button) button.classList.remove('renaming');
+    if (options.focus !== false) focusActiveTab();
   }
   async function commitRename(session) {
     if (session.done || session.busy) return;
@@ -4134,30 +4176,15 @@
     nodes.expandRight.addEventListener('click', () => toggleRight(false));
     nodes.notesCurrentTab.addEventListener('click', () => showNotesPane('current'));
     nodes.notesHistoryTab.addEventListener('click', () => showNotesPane('history'));
-    // 单击文件名开信息卡;双击就地改名。鼠标单击先等一下看是不是双击,免得信息卡先闪一下;
-    // 键盘与脚本触发(detail 为 0)立刻开
-    nodes.docTitleButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (event.detail === 0) { toggleDocInfo(); return; }
-      if (event.detail > 1) return;
-      clearTimeout(state.docTitleClickTimer);
-      state.docTitleClickTimer = setTimeout(() => { state.docTitleClickTimer = 0; toggleDocInfo(); }, 250);
-    });
     // 改名时点别的标签或左栏的稿件:按下时就收起改名(不提交)——失焦会先于切换触发,提交到的就是上一篇
     document.addEventListener('pointerdown', (event) => {
       const session = state.renaming;
       if (!session || event.target === session.input) return;
       if (event.target.closest('#tabList .tab, #recentList .recent-item, #welcomeRecent .recent-item')) endRename(session, { focus: false });
     }, true);
-    nodes.docTitleButton.addEventListener('dblclick', (event) => {
-      event.preventDefault(); event.stopPropagation();
-      clearTimeout(state.docTitleClickTimer); state.docTitleClickTimer = 0;
-      toggleDocInfo(false);
-      startRename();
-    });
     nodes.compareToggleButton.addEventListener('click', () => toggleCompare());
     nodes.syncFooter.addEventListener('click', () => { void openSettings(); });
-    document.addEventListener('click', (event) => { if (!nodes.docInfoPopover.hidden && !event.target.closest('#docInfoPopover, #docTitleButton')) toggleDocInfo(false); });
+    document.addEventListener('click', (event) => { if (!nodes.docInfoPopover.hidden && !event.target.closest('#docInfoPopover, #tabList .tab.active')) toggleDocInfo(false); });
     nodes.readingMode.addEventListener('click', () => { void enterReadMode(); });
     nodes.editingMode.addEventListener('click', enterEditMode);
     nodes.primaryAction.addEventListener('click', handlePrimaryAction);
@@ -4247,7 +4274,7 @@
         else if (state.finalizeConfirm && !nodes.finalizeConfirm.hidden) closeFinalizeConfirm();
         else if (!nodes.exportMenu.hidden) { toggleExportMenu(false); nodes.exportMenuButton.focus(); }
         else if (!nodes.toolbarMoreMenu.hidden) { toggleToolbarMore(false); nodes.toolbarMoreButton.focus(); }
-        else if (!nodes.docInfoPopover.hidden) { toggleDocInfo(false); nodes.docTitleButton.focus(); }
+        else if (!nodes.docInfoPopover.hidden) { toggleDocInfo(false); focusActiveTab(); }
         else if (!nodes.timelinePopover.hidden) { toggleTimeline(false); nodes.reviewState.focus(); }
         else if (Compare.isOpen()) Compare.close();
         else if (!nodes.findBar.hidden) closeFind();

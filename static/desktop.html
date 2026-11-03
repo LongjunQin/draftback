@@ -12,8 +12,8 @@
   <link rel="stylesheet" href="/static/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/vendor/phosphor.css">
   <link rel="stylesheet" href="/static/vendor/draftback-editor.css?v=9">
-  <link rel="stylesheet" href="/static/desktop.css?v=21">
-  <link rel="stylesheet" href="/static/desktop-skin.css?v=7">
+  <link rel="stylesheet" href="/static/desktop.css?v=22">
+  <link rel="stylesheet" href="/static/desktop-skin.css?v=8">
   <!-- 封面颜色要在第一次绘制前就位(否则先闪一下默认的青雾蓝),所以这一小段放在 head 里同步执行 -->
   <script src="/static/desktop-cover.js?v=2"></script>
 </head>
@@ -49,16 +49,8 @@
       <i class="ph ph-caret-double-right" aria-hidden="true"></i><span class="spine-label">目录</span>
     </button>
 
-    <!-- 一条工具栏:左边文档名,正中状态区,右边六样 -->
+    <!-- 一条工具栏:正中状态区,右边这篇的工具。文件名只写在纸上方的标签上 -->
     <header id="documentToolbar" class="toolbar drag-region">
-      <div class="toolbar-left">
-        <div class="doc-title-wrap">
-          <button id="docTitleButton" class="doc-title" type="button" aria-haspopup="dialog" aria-expanded="false" hidden>
-            <i class="ph ph-file-text" aria-hidden="true"></i><span id="docTitleText">文档</span><i class="ph ph-caret-down menu-caret" aria-hidden="true"></i>
-          </button>
-          <div id="docInfoPopover" class="popover-menu doc-info" role="dialog" aria-label="文档信息" hidden></div>
-        </div>
-      </div>
       <div class="toolbar-center">
         <div class="review-state-wrap">
           <button id="reviewStatePill" class="review-state" data-status="plain" type="button" hidden
@@ -117,12 +109,14 @@
       </div>
     </header>
 
-    <!-- 两篇以上才出现的标签栏 -->
+    <!-- 纸上方的一排标签:开着几篇就几张,一篇也一样,每张都能 × 关掉(2026-11-03 用户定)。
+         单击当前这张开信息卡,双击就地改名;信息卡和改名框都挂在这一排上 -->
     <div id="tabStrip" class="tab-strip">
       <div id="tabList" class="tab-list" role="tablist" aria-label="打开的 Markdown 文档"></div>
       <button id="openTabButton" class="icon-button compact" type="button" title="打开 Markdown(⌘O)" aria-label="打开 Markdown">
         <i class="ph ph-plus" aria-hidden="true"></i>
       </button>
+      <div id="docInfoPopover" class="popover-menu doc-info" role="dialog" aria-label="文档信息" hidden></div>
     </div>
 
     <section id="workspace" class="workspace">
@@ -391,6 +385,6 @@
   <script src="/static/desktop-diff.js?v=1"></script>
   <script src="/static/desktop-history.js?v=1"></script>
   <script src="/static/desktop-compare.js?v=1"></script>
-  <script src="/static/desktop.js?v=36"></script>
+  <script src="/static/desktop.js?v=37"></script>
 </body>
 </html>

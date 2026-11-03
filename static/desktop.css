@@ -1127,15 +1127,14 @@ button.review-state:hover { filter: brightness(.97); }
 }
 .outline-link .outline-text { flex: 1 1 auto; min-width: 0; }
 
-/* 一条工具栏:左边文档名,正中状态区,右边六样 */
+/* 一条工具栏:正中状态区,右边这篇的工具。文件名不在这里,在纸上方的标签上 */
 .toolbar {
   grid-column: 2 / 4; grid-row: 1;
-  /* 状态区在剩余空间里居中:左右两边等分空间;放不下时右边按钮保持完整,左边的文档名先缩 */
+  /* 状态区在剩余空间里居中;放不下时右边按钮保持完整,状态区先缩 */
   display: flex; align-items: center; gap: 12px;
   min-width: 0; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line); background: var(--toolbar-bg);
 }
 .left-collapsed .toolbar { grid-column: 1 / 4; padding-left: 84px; }
-.toolbar-left { display: flex; flex: 1 1 0; align-items: center; gap: 4px; min-width: 0; }
 .toolbar-center { display: flex; flex: 0 1 auto; justify-content: center; min-width: 0; }
 .toolbar-right { display: flex; flex: 1 1 0; align-items: center; justify-content: flex-end; gap: 6px; min-width: max-content; }
 .no-doc .toolbar-center, .no-doc .toolbar-right { visibility: hidden; }
@@ -1149,16 +1148,10 @@ button.review-state:hover { filter: brightness(.97); }
 .toolbar .icon-button.compact:hover, .sidebar-top .icon-button.compact:hover { color: var(--text); }
 .icon-button.active { background: var(--green-soft); color: var(--green-text) !important; }
 .flip { display: inline-block; transform: scaleX(-1); }
-.doc-title-wrap { position: relative; min-width: 0; }
-.doc-title {
-  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 8px;
-  border: 0; border-radius: 6px; background: transparent; color: var(--text-strong); font-size: 13px; font-weight: 600;
-}
-.doc-title i { flex: none; color: var(--muted); }
-.doc-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.doc-title:hover { background: var(--hover); }
-/* 双击文件名就地改名 */
+/* 双击标签就地改名:改名框盖在这张标签的位置上(左边由脚本对齐) */
+.tab.renaming { visibility: hidden; }
 .doc-title-input {
+  position: absolute; bottom: 0; z-index: 2;
   height: 28px; max-width: 100%; padding: 0 8px; border: 1px solid var(--accent-line-2); border-radius: 6px;
   background: var(--paper); color: var(--text-strong); font: inherit; font-size: 13px; font-weight: 600;
   outline: none; box-shadow: 0 0 0 3px var(--accent-soft); -webkit-app-region: no-drag;
@@ -1203,14 +1196,14 @@ button.review-state:hover { filter: brightness(.97); }
 .toolbar .action-button i { font-size: 15px; }
 .overflow-more { display: none; }
 
-/* 两篇以上才出现的标签栏 */
+/* 纸上方的标签栏:开着文档就有,一篇也有;信息卡、改名框挂在这里 */
 .tab-strip {
-  grid-column: 2 / 4; grid-row: 2;
+  grid-column: 2 / 4; grid-row: 2; position: relative;
   display: none; align-items: center; gap: 4px; min-width: 0; height: var(--tabstrip-height); padding: 0 8px;
   border-bottom: 1px solid var(--line); background: var(--shell);
 }
 .left-collapsed .tab-strip { grid-column: 1 / 4; }
-.multi-tab .tab-strip { display: flex; }
+.has-tabs .tab-strip { display: flex; }
 .tab-list { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tab-list::-webkit-scrollbar { display: none; }
 .tab {
@@ -1307,7 +1300,7 @@ button.review-state:hover { filter: brightness(.97); }
     position: fixed; top: var(--toolbar-height); right: 0; bottom: 0; z-index: 60; width: 320px;
     box-shadow: var(--shadow-pop);
   }
-  .multi-tab:not(.right-collapsed) .right-sidebar { top: calc(var(--toolbar-height) + var(--tabstrip-height)); }
+  .has-tabs:not(.right-collapsed) .right-sidebar { top: calc(var(--toolbar-height) + var(--tabstrip-height)); }
 }
 @media (max-width: 1159px) {
   .overflowable { display: none !important; }

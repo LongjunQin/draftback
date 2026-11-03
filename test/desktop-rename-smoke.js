@@ -2,11 +2,13 @@
 'use strict';
 
 // 在回稿里改名(2026-10-15 用户要的功能)的真实浏览器冒烟:
-//   1. 双击文件名:就地变成输入框(信息卡不闪出来),回车改名;磁盘上的文件、标签、左栏跟着变。
-//   2. 单击文件名照旧开信息卡;卡里「重新命名…」也能改;Esc 取消,什么都不动。
-//   3. 同一文件夹里已有同名文件:提示,输入框留着让你改。
+//   0. 只开一篇也有标签栏,和开几篇一样带 ×;工具栏上不另写文件名(2026-11-03 用户定)。
+//   1. 双击当前这张标签:就地变成输入框盖在标签上(信息卡不闪出来),回车改名;磁盘上的文件、标签、左栏跟着变。
+//   2. 单击当前这张标签开信息卡;卡里「重新命名…」也能改;Esc 取消,什么都不动。
+//   3. 同一文件夹里已有同名文件:提示,输入框留着让你改。双击别的标签只切过去,不改名。
 //   4. 这一轮还没走完:提示「走完再改名」,不出输入框。
 //   5. 有审阅历史的文档改名后,批注和历史跟着走(标签还是同一轮)。
+//   6. 每张标签的 × 都能关;只剩一篇时也能关,关完回到欢迎页。
 //
 // 用法: node test/desktop-rename-smoke.js   (需要本机有 Google Chrome / Chromium)
 
@@ -33,7 +35,8 @@ async function typeName(cdp, text) {
   await cdp.evaluate(`document.querySelector('.doc-title-input').select()`);
   await cdp.send('Input.insertText', { text });
 }
-const titleText = `document.querySelector('#docTitleText').textContent`;
+const ACTIVE_TAB = '#tabList .tab.active';
+const titleText = `(document.querySelector('#tabList .tab.active .tab-title') || {}).textContent`;
 const lastToast = `(() => { const items = document.querySelectorAll('.toast-region .toast, .toast-region > *'); return items.length ? items[items.length - 1].textContent : ''; })()`;
 
 async function openPath(cdp, filePath) {
@@ -59,24 +62,36 @@ async function main() {
     await cdp.send('Page.navigate', { url: `http://127.0.0.1:${server.port}/desktop` });
     await waitUntil('欢迎页就绪', () => cdp.evaluate(`document.readyState === 'complete' && !document.querySelector('#welcome').hidden`));
     await openPath(cdp, plain);
-    await waitUntil('普通文档打开', () => cdp.evaluate(`${titleText} === '未命名.md' && !document.querySelector('#docTitleButton').hidden`));
+    await waitUntil('普通文档打开', () => cdp.evaluate(`${titleText} === '未命名.md'`));
+
+    // 0. 只开一篇:标签栏照样在,一张标签带 ×;工具栏上没有另一个文件名
+    const single = await cdp.evaluate(`(() => {
+      const tabs = document.querySelectorAll('#tabList .tab');
+      return { strip: getComputedStyle(document.querySelector('#tabStrip')).display, tabs: tabs.length,
+        close: Boolean(tabs[0] && tabs[0].querySelector('.tab-close')), toolbarName: document.querySelector('#documentToolbar').textContent.includes('未命名') };
+    })()`);
+    assert.deepEqual(single, { strip: 'flex', tabs: 1, close: true, toolbarName: false }, JSON.stringify(single));
 
     // 1. 双击:就地改名,信息卡不闪出来
-    await mouseClick(cdp, '#docTitleButton', 2);
+    await mouseClick(cdp, ACTIVE_TAB, 2);
     await waitUntil('输入框出现', () => cdp.evaluate(`Boolean(document.querySelector('.doc-title-input')) && document.activeElement === document.querySelector('.doc-title-input')`));
     assert.equal(await cdp.evaluate(`document.querySelector('.doc-title-input').value`), '未命名', '输入框里是不带扩展名的名字');
     await sleep(350);
     assert.equal(await cdp.evaluate(`document.querySelector('#docInfoPopover').hidden`), true, '双击不打开信息卡');
-    assert.equal(await cdp.evaluate(`document.querySelector('#docTitleButton').hidden`), true, '改名时原来的标题藏起来');
+    const cover = await cdp.evaluate(`(() => {
+      const tab = document.querySelector('#tabList .tab.renaming').getBoundingClientRect(); const input = document.querySelector('.doc-title-input').getBoundingClientRect();
+      return { left: Math.round(input.left - tab.left), bottom: Math.round(input.bottom - tab.bottom), wide: input.width >= tab.width - 1 };
+    })()`);
+    assert.deepEqual(cover, { left: 0, bottom: 0, wide: true }, `改名框正好盖在这张标签上:${JSON.stringify(cover)}`);
     await typeName(cdp, '周报');
     await pressKey(cdp, 'Enter', 'Enter', 13);
-    await waitUntil('改名完成', () => cdp.evaluate(`${titleText} === '周报.md' && !document.querySelector('.doc-title-input') && !document.querySelector('#docTitleButton').hidden`));
+    await waitUntil('改名完成', () => cdp.evaluate(`${titleText} === '周报.md' && !document.querySelector('.doc-title-input') && !document.querySelector('#tabList .tab.renaming')`));
     assert.ok(fs.existsSync(path.join(docDir, '周报.md')), '磁盘上是新名字');
     assert.equal(fs.existsSync(plain), false, '旧名字不在了');
     await waitUntil('标签与左栏跟着变', () => cdp.evaluate(`document.querySelector('#tabList .tab.active') ? document.querySelector('#tabList .tab.active').textContent.includes('周报.md') : true`));
 
     // 2. 单击开信息卡;卡里「重新命名…」;Esc 取消
-    await mouseClick(cdp, '#docTitleButton', 1);
+    await mouseClick(cdp, ACTIVE_TAB, 1);
     await waitUntil('单击打开信息卡', () => cdp.evaluate(`!document.querySelector('#docInfoPopover').hidden`));
     const renameButton = await cdp.evaluate(`Array.from(document.querySelectorAll('#docInfoPopover button')).map((b) => b.textContent)`);
     assert.ok(renameButton.includes('重新命名…'), `信息卡里有「重新命名…」:${renameButton.join(' / ')}`);
@@ -89,7 +104,7 @@ async function main() {
     assert.equal(fs.existsSync(path.join(docDir, '不要这个名字.md')), false);
 
     // 3. 同名文件已存在:提示,输入框留着
-    await mouseClick(cdp, '#docTitleButton', 2);
+    await mouseClick(cdp, ACTIVE_TAB, 2);
     await waitUntil('输入框出现', () => cdp.evaluate(`Boolean(document.querySelector('.doc-title-input'))`));
     await typeName(cdp, '月报');
     await pressKey(cdp, 'Enter', 'Enter', 13);
@@ -104,7 +119,7 @@ async function main() {
     fs.writeFileSync(second, '# 第二篇\n');
     await openPath(cdp, second);
     await waitUntil('第二篇打开', () => cdp.evaluate(`${titleText} === '第二篇.md' && document.querySelectorAll('#tabList .tab').length >= 2`));
-    await mouseClick(cdp, '#docTitleButton', 2);
+    await mouseClick(cdp, ACTIVE_TAB, 2);
     await waitUntil('输入框出现', () => cdp.evaluate(`Boolean(document.querySelector('.doc-title-input'))`));
     await typeName(cdp, '不该改成这个');
     const otherTab = await cdp.evaluate(`(() => { const tab = Array.from(document.querySelectorAll('#tabList .tab')).find((t) => t.textContent.includes('周报')); tab.id = tab.id || 'rename-smoke-other-tab'; return '#' + tab.id; })()`);
@@ -114,6 +129,14 @@ async function main() {
     assert.ok(fs.existsSync(second), '点别的标签不提交改名');
     assert.equal(fs.existsSync(path.join(docDir, '不该改成这个.md')), false);
 
+    // 3c. 双击别的标签只算切过去:不出改名框,也不开信息卡
+    const secondTab = await cdp.evaluate(`(() => { const tab = Array.from(document.querySelectorAll('#tabList .tab')).find((t) => t.textContent.includes('第二篇')); tab.id = 'rename-smoke-second-tab'; return '#' + tab.id; })()`);
+    await mouseClick(cdp, secondTab, 2);
+    await waitUntil('双击切到第二篇', () => cdp.evaluate(`${titleText} === '第二篇.md'`));
+    await sleep(400);
+    assert.deepEqual(await cdp.evaluate(`({ input: Boolean(document.querySelector('.doc-title-input')), card: !document.querySelector('#docInfoPopover').hidden })`),
+      { input: false, card: false }, '双击别的标签只切换');
+
     // 4. 这一轮还没走完:不出输入框
     const active = path.join(docDir, '审阅中.md');
     fs.writeFileSync(active, '# 审阅中\n\n正文。\n');
@@ -121,7 +144,7 @@ async function main() {
     fs.writeFileSync(`${active}.annotations.json`, JSON.stringify({ version: 1, file: '审阅中.md', annotations: [] }));
     await openPath(cdp, active);
     await waitUntil('审阅中的文档打开', () => cdp.evaluate(`${titleText} === '审阅中.md' && document.querySelector('#reviewStateText').textContent.includes('批注中')`));
-    await mouseClick(cdp, '#docTitleButton', 2);
+    await mouseClick(cdp, ACTIVE_TAB, 2);
     await waitUntil('走完再改名', () => cdp.evaluate(`${lastToast}.includes('走完再改名')`));
     assert.equal(await cdp.evaluate(`Boolean(document.querySelector('.doc-title-input'))`), false);
 
@@ -129,7 +152,7 @@ async function main() {
     await store.submitReview(review.id, { dataDir });
     await cdp.evaluate(`window.dispatchEvent(new Event('focus'))`);
     await waitUntil('本轮结束', () => cdp.evaluate(`!document.querySelector('#reviewStateText').textContent.includes('批注中')`), 20_000);
-    await mouseClick(cdp, '#docTitleButton', 2);
+    await mouseClick(cdp, ACTIVE_TAB, 2);
     await waitUntil('输入框出现', () => cdp.evaluate(`Boolean(document.querySelector('.doc-title-input'))`));
     await typeName(cdp, '审阅过的方案');
     await pressKey(cdp, 'Enter', 'Enter', 13);
@@ -137,9 +160,18 @@ async function main() {
     assert.ok(fs.existsSync(path.join(docDir, '审阅过的方案.md.annotations.json')), '批注文件跟着新名字');
     assert.equal((await store.getReviewById(review.id, { dataDir })).absPath, path.join(docDir, '审阅过的方案.md'));
 
+    // 6. 用 × 关到只剩一篇:还是一张带 × 的标签;再关就回到欢迎页,标签栏收起
+    for (let left = await cdp.evaluate(`document.querySelectorAll('#tabList .tab').length`); left > 1; left -= 1) {
+      await cdp.evaluate(`document.querySelector('#tabList .tab:not(.active) .tab-close').click()`);
+      await waitUntil(`剩 ${left - 1} 篇`, () => cdp.evaluate(`document.querySelectorAll('#tabList .tab').length === ${left - 1}`));
+    }
+    assert.equal(await cdp.evaluate(`getComputedStyle(document.querySelector('#tabStrip')).display`), 'flex', '剩一篇时标签栏还在');
+    await cdp.evaluate(`document.querySelector('#tabList .tab.active .tab-close').click()`);
+    await waitUntil('关完回到欢迎页', () => cdp.evaluate(`!document.querySelector('#welcome').hidden && getComputedStyle(document.querySelector('#tabStrip')).display === 'none'`));
+
     const errors = cdp.exceptions.concat(cdp.consoleMessages.filter((m) => m.type === 'error').map((m) => m.text)).filter((text) => !/favicon|ERR_|net::|Failed to load resource/.test(text));
     assert.deepEqual(errors, [], `页面不应有脚本异常或 console.error: ${errors.join(' | ')}`);
-    console.log('PASS: 双击就地改名、单击开信息卡、卡里重新命名、Esc 取消、同名提示、点别的标签不提交、这一轮没走完不改、审阅历史跟着走。');
+    console.log('PASS: 一篇也有带 × 的标签、双击标签就地改名、单击开信息卡、卡里重新命名、Esc 取消、同名提示、点别的标签不提交、双击别的标签只切换、这一轮没走完不改、审阅历史跟着走、× 关到欢迎页。');
   } finally {
     if (chrome) await stopChild(chrome.child);
     if (server) await stopChild(server.child);

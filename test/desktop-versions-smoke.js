@@ -144,7 +144,7 @@ async function main() {
     await key(cdp, 'd', 'KeyD', 68, 4 | 8);
     await waitUntil('⇧⌘D 打开', () => cdp.evaluate(`!document.querySelector('#compareView').hidden`));
     // Esc 先关最上层的小弹层(文档信息卡),对比视图还开着;再按一次才关对比(Codex 审查第二步第 9 条)
-    await cdp.evaluate(`document.querySelector('#docTitleButton').click()`);
+    await cdp.evaluate(`document.querySelector('#tabList .tab.active').click()`);
     await waitUntil('文档信息卡', () => cdp.evaluate(`!document.querySelector('#docInfoPopover').hidden`));
     await key(cdp, 'Escape', 'Escape', 27);
     await waitUntil('先关信息卡', () => cdp.evaluate(`document.querySelector('#docInfoPopover').hidden && !document.querySelector('#compareView').hidden`));
