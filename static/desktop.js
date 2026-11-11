@@ -1478,9 +1478,16 @@
         toggleDocInfo(true);
       });
       nodes.tabList.appendChild(button);
-      if (active) requestAnimationFrame(() => { button.scrollIntoView({ block: 'nearest', inline: 'nearest' }); placeTabOverlays(); });
+      if (active) requestAnimationFrame(() => { button.scrollIntoView({ block: 'nearest', inline: 'nearest' }); placeTabOverlays(); markTabOverflow(); });
     });
     placeTabOverlays();
+    markTabOverflow();
+  }
+  // 标签窄到底还放不下时能左右滚:哪一边还有标签,哪一边渐渐变淡
+  function markTabOverflow() {
+    const list = nodes.tabList;
+    list.classList.toggle('more-left', list.scrollLeft > 1);
+    list.classList.toggle('more-right', list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
   }
   // 信息卡和改名框挂在标签栏上,左边对齐当前这张标签
   function placeTabOverlays() {
@@ -4182,6 +4189,8 @@
       if (!session || event.target === session.input) return;
       if (event.target.closest('#tabList .tab, #recentList .recent-item, #welcomeRecent .recent-item')) endRename(session, { focus: false });
     }, true);
+    nodes.tabList.addEventListener('scroll', markTabOverflow, { passive: true });
+    window.addEventListener('resize', markTabOverflow);
     nodes.compareToggleButton.addEventListener('click', () => toggleCompare());
     nodes.syncFooter.addEventListener('click', () => { void openSettings(); });
     document.addEventListener('click', (event) => { if (!nodes.docInfoPopover.hidden && !event.target.closest('#docInfoPopover, #tabList .tab.active')) toggleDocInfo(false); });

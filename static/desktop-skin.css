@@ -25,7 +25,7 @@
   --muted: #746d60; --muted-2: #8a8478;
   --rule: rgba(80, 70, 50, .24);
   --pen: #34558b; --warn: #c0553c;
-  --hl: rgba(255, 226, 120, .58); --hl-mark: rgba(255, 200, 80, .3); --hl-line: rgba(240, 160, 40, .7);
+  --hl: rgba(255, 226, 120, .58); --hl-select: rgba(255, 216, 70, .72); --hl-mark: rgba(255, 200, 80, .3); --hl-line: rgba(240, 160, 40, .7);
   --paper-shadow: 60, 70, 90;
   --note-1: #fff4bf; --note-2: #f9e9a2; --note-quote: #7a6a3a; --note-ink: #2c3a5a; --note-meta: #8a7a4a; --note-act: #5d6f8a;
   /* 按钮块:米白,凸起;按下去陷进去 */
@@ -79,7 +79,7 @@ html[data-cover="black"] { --c1: #414145; --c2: #2c2c30; --shade: 0, 0, 0; --pri
     --text: #2a2117; --text-strong: #1e170e; --text-2: #3b3124; --muted: #665846; --muted-2: #7a6b57;
     --rule: rgba(80, 60, 30, .28);
     --pen: #2b4673; --warn: #a3412a;
-    --hl: rgba(236, 180, 60, .45); --hl-mark: rgba(230, 170, 50, .32); --hl-line: rgba(190, 120, 20, .7);
+    --hl: rgba(236, 180, 60, .45); --hl-select: rgba(232, 168, 40, .62); --hl-mark: rgba(230, 170, 50, .32); --hl-line: rgba(190, 120, 20, .7);
     --note-1: #ead88f; --note-2: #dcc674; --note-quote: #6a5a2c; --note-ink: #23324f; --note-meta: #74663c; --note-act: #3f5478;
     --btn-1: #e6dac2; --btn-2: #d1c3a6; --btn-text: #33291c; --btn-edge: rgba(40, 28, 12, .34);
     --btn-press-1: #c8b99a; --btn-press-2: #d8cbb0;
@@ -190,9 +190,23 @@ html, body {
   }
 }
 
-/* ---------- 滚动条:纸面上压一条浅槽,槽里一个凸起的米白滑块(和设置里的字号滑杆同一种做法) ----------
+/* ---------- 系统自带的小零件换成自己的(2026-11-11 审查) ----------
+   划词:荧光笔划过去的黄色(批注记号本来就是荧光黄,前后是同一支笔) */
+::selection { background: var(--hl-select); color: inherit; }
+/* 键盘焦点:贴着按钮的一圈细线,颜色跟封面走(原来是网页常见的一圈蓝灰) */
+button:focus-visible, textarea:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary-2) 78%, transparent); outline-offset: 1px;
+}
+/* 批注输入框:不要系统的拖拽角,随内容自己变高 */
+.annotation-dialog textarea { resize: none; field-sizing: content; min-height: 132px; max-height: 46vh; }
+
+/* ---------- 滚动条:纸面上压一条浅槽,槽里一根磨砂金属的滑块 ----------
    2026-11-11 用户:系统自带的滚动条有一条纯白的底,和纸不搭;滑块也不够拟物。
-   槽和滑块都比滚动条窄:两边用透明边框让出来,只在边框以内上色 */
+   同一天看了米白滑块:颜色和纸太像,要磨砂金属,有区分又协调(和回形针是同一种金属)。
+   槽和滑块都比滚动条窄:两边用透明边框让出来,只在边框以内上色。
+   磨砂 = 一层细颗粒压在一根圆棒的明暗上(中间偏亮、两边暗),不要镜面那种细亮线 */
+:root { --metal: linear-gradient(90deg, #9da19c, #cfd2cd 28%, #e6e8e3 46%, #c3c6c1 72%, #969a95); --metal-lit: linear-gradient(90deg, #a9ada8, #dcdfda 28%, #f2f4f0 46%, #cfd2cd 72%, #a2a6a1); --metal-down: linear-gradient(90deg, #8a8e89, #b6b9b4 28%, #c9ccc7 46%, #adb0ab 72%, #848883); --metal-edge: rgba(62, 68, 62, .5); }
+@media (prefers-color-scheme: dark) { :root { --metal: linear-gradient(90deg, #7f7b70, #aaa598 28%, #beb9ab 46%, #a09b8e 72%, #78746a); --metal-lit: linear-gradient(90deg, #8b877b, #b8b3a5 28%, #cdc8b9 46%, #ada89a 72%, #848075); --metal-down: linear-gradient(90deg, #6f6b61, #959083 28%, #a5a093 46%, #8c877b 72%, #696559); --metal-edge: rgba(30, 24, 14, .55); } }
 ::-webkit-scrollbar { width: 14px; height: 14px; background: transparent; }
 ::-webkit-scrollbar-track {
   border: 5px solid transparent; border-radius: 7px; background: rgba(110, 95, 70, .17); background-clip: padding-box;
@@ -200,12 +214,13 @@ html, body {
 }
 ::-webkit-scrollbar-thumb {
   min-height: 44px; min-width: 44px; border: 3px solid transparent; border-radius: 7px; background-clip: padding-box;
-  background-image: linear-gradient(90deg, var(--btn-1), var(--btn-2));
-  box-shadow: inset 0 0 0 1px var(--btn-edge), inset 1px 1px 0 1px rgba(255, 255, 255, .7), inset -1px -1px 1px 1px rgba(var(--shade), .16);
+  background-image: var(--paper-tex), var(--metal); background-blend-mode: multiply, normal;
+  box-shadow: inset 0 0 0 1px var(--metal-edge), inset 0 1px 0 1px rgba(255, 255, 255, .35);
 }
-::-webkit-scrollbar-thumb:horizontal { background-image: linear-gradient(180deg, var(--btn-1), var(--btn-2)); }
-::-webkit-scrollbar-thumb:hover { background-image: linear-gradient(90deg, #ffffff, var(--btn-1)); }
-::-webkit-scrollbar-thumb:active { background-image: linear-gradient(90deg, var(--btn-press-1), var(--btn-press-2)); }
+::-webkit-scrollbar-thumb:hover { background-image: var(--paper-tex), var(--metal-lit); }
+::-webkit-scrollbar-thumb:active { background-image: var(--paper-tex), var(--metal-down); }
+/* 横着的滚动条:圆棒的明暗改成上下方向 */
+::-webkit-scrollbar-thumb:horizontal { background-image: var(--paper-tex), linear-gradient(180deg, #9da19c, #cfd2cd 28%, #e6e8e3 46%, #c3c6c1 72%, #969a95); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* ---------- 正文纸顶上一排文件夹标签(一篇也有,每张带 ×),当前这篇和纸连在一起 ---------- */
@@ -231,6 +246,12 @@ html, body {
 .tab-state.conflict { --led: var(--light-stop); }
 .tab-strip #openTabButton { width: 26px; height: 24px; margin: 0 0 3px 4px; border-radius: 6px; color: var(--text-2); }
 .tab-strip #openTabButton:hover { background: rgba(255, 255, 255, .5); }
+/* 标签多了一起变窄(像浏览器),名字用省略号;窄到 76 像素还放不下才滚动,这时还有标签的那一边渐渐变淡 */
+.tab { flex: 0 1 auto; min-width: 76px; }
+.tab-title { flex: 1 1 auto; min-width: 0; }
+.tab-list.more-left { -webkit-mask-image: linear-gradient(90deg, transparent, #000 34px); mask-image: linear-gradient(90deg, transparent, #000 34px); }
+.tab-list.more-right { -webkit-mask-image: linear-gradient(270deg, transparent, #000 34px); mask-image: linear-gradient(270deg, transparent, #000 34px); }
+.tab-list.more-left.more-right { -webkit-mask-image: linear-gradient(90deg, transparent, #000 34px, #000 calc(100% - 34px), transparent); mask-image: linear-gradient(90deg, transparent, #000 34px, #000 calc(100% - 34px), transparent); }
 /* 改名框:盖在当前这张标签上,样子还是这张标签 */
 .tab-strip .doc-title-input { height: 30px; padding: 0 12px; border-radius: 7px 7px 0 0; background: var(--paper-tex), var(--paper); font-size: 13px; }
 
@@ -407,11 +428,15 @@ html, body {
 .draft-unread { background: var(--unread); box-shadow: 0 0 0 2px rgba(47, 124, 246, .16); }
 .files-actions { gap: 8px; margin-top: 12px; padding: 10px 4px 2px; border-top: 0; }
 .files-actions .text-button {
-  flex: 1; justify-content: center; padding: 6px 0; border: 1px dashed rgba(120, 110, 95, .4); border-radius: 6px;
-  color: var(--text-2); font-size: 12px;
+  flex: 1; justify-content: center; height: 30px; padding: 0; border: 0; border-radius: 8px;
+  color: var(--btn-text); font-size: 12px; font-weight: 600;
+  background: linear-gradient(180deg, var(--btn-1), var(--btn-2));
+  box-shadow: 0 0 0 1px var(--btn-edge), 0 1px 2px rgba(0, 0, 0, .16), inset 0 1px 0 rgba(255, 255, 255, .85);
 }
 .files-actions .text-button i { display: none; }
-.files-actions .text-button:hover { background: var(--hover); color: var(--text); }
+.files-actions .text-button:hover { background: linear-gradient(180deg, #ffffff, var(--btn-1)); color: var(--btn-text); }
+.files-actions .text-button:active { background: linear-gradient(180deg, var(--btn-press-1), var(--btn-press-2)); box-shadow: 0 0 0 1px var(--btn-edge), inset 0 1px 3px rgba(0, 0, 0, .28); }
+@media (prefers-color-scheme: dark) { .files-actions .text-button:hover { background: linear-gradient(180deg, #ece1cb, var(--btn-1)); } }
 .files-actions .text-button kbd { margin-left: 4px; padding: 0; border: 0; background: none; color: inherit; font-size: 12px; font-weight: 400; }
 .sync-footer { height: 34px; padding: 0 16px; border-top: 1.5px dotted var(--rule); color: var(--muted); font-size: 12px; }
 .sync-footer:hover { color: var(--text); }
@@ -446,7 +471,15 @@ html, body {
 .code-editor .milkdown .ProseMirror.markdown-body :is(h1, h2, h3, h4, h5, h6) { font-weight: 700; letter-spacing: 0; color: var(--text-strong); }
 .code-editor .milkdown .ProseMirror.markdown-body h1 { font-size: 30px; }
 .code-editor .milkdown .ProseMirror.markdown-body h3 { font-size: 20px; }
-.code-editor .milkdown { --crepe-font-default: var(--serif); --crepe-font-title: var(--serif); }
+.code-editor .milkdown { --crepe-font-default: var(--serif); --crepe-font-title: var(--serif); --crepe-color-selected: var(--hl-select); }
+/* 编辑时还是同一张纸:编辑器自己铺的平底色去掉,露出下面带颗粒的纸(2026-11-11 审查) */
+.code-editor .milkdown { background: transparent; }
+/* 表格和阅读时一个样子:格子里的字 13 像素、格距 8×10、只画右边和下边的线 */
+.code-editor .milkdown .ProseMirror.markdown-body .milkdown-table-block { margin: 1.1em 0; font-size: 13px; }
+.code-editor .milkdown .ProseMirror.markdown-body .milkdown-table-block :is(th, td) { padding: 8px 10px; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.code-editor .milkdown .ProseMirror.markdown-body .milkdown-table-block :is(th, td):last-child { border-right: 0; }
+.code-editor .milkdown .ProseMirror.markdown-body .milkdown-table-block tr:last-child td { border-bottom: 0; }
+.code-editor .milkdown .ProseMirror.markdown-body .milkdown-table-block :is(th, td) p { margin: 0; font-family: var(--ui-font); font-size: 13px; line-height: 1.5; }
 /* 荧光笔划过的批注、正在看的那条更深 */
 ::highlight(draftback-open) { background-color: var(--hl-mark); text-decoration: underline 2px var(--hl-line); }
 ::highlight(draftback-focus) { background-color: var(--amber-focus); }
@@ -495,7 +528,10 @@ html, body {
 .compare-nav .secondary-button.compact-button i { display: none; }
 .compare-note { background: var(--paper-tex), var(--amber-pale); }
 .compare-legend { color: var(--muted); }
-.compare-legend .legend-insert::before { background: var(--green-hl); border-color: var(--green-line); }
+.compare-legend span::before { content: none; }
+.compare-legend .legend-insert { padding: 1px 5px; border-radius: 2px; background: var(--green-hl); color: var(--green-text); }
+.compare-legend .legend-delete { color: var(--warn); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.compare-legend .legend-replace { padding-left: 6px; border-left: 3px solid var(--green); }
 .diff-change { border-left: 2.5px solid var(--diff-mark); }
 .diff-change.current { background: color-mix(in srgb, var(--diff-mark) 8%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--diff-mark) 8%, transparent); }
 .diff-insert { background: var(--green-hl); }
@@ -574,7 +610,7 @@ html, body {
 .return-summary { color: var(--text-2); font-family: var(--serif); font-size: 13.5px; line-height: 1.65; }
 .return-more { color: var(--pen); }
 .return-hint { color: var(--muted); }
-.return-actions .secondary-button { border-radius: 15px; }
+.return-actions .secondary-button { border-radius: 7px; }
 .result-heading { padding: 10px 0 4px; color: var(--muted); font-size: 12px; font-weight: 700; justify-content: flex-start; gap: 6px; }
 .result-list { gap: 0; padding: 0; }
 .result-item { grid-template-columns: 20px 1fr; padding: 9px 0; border: 0; border-top: 1.5px dotted var(--rule); border-radius: 0; background: transparent; font-size: 13px; }
@@ -611,9 +647,10 @@ html, body {
 .welcome > p { color: var(--muted); font-size: 14px; }
 .welcome-recent { width: min(360px, 100%); margin-top: 34px; }
 
-/* ---------- 纸上的按钮:主要的是一块随封面颜色的皮面,次要的是一张纸签 ---------- */
+/* ---------- 纸上的按钮:主要的是一块随封面颜色的皮面,次要的是一张纸签。
+   形状和顶部的按钮块一样是方角(2026-11-11 审查:原来这里是两头圆的药丸形,全软件有两种按钮形状) ---------- */
 .primary-button {
-  border: 0; border-radius: 17px; color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, .25);
+  border: 0; border-radius: 8px; color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, .25);
   background-color: var(--primary-2);
   background-image: var(--leather-tex), linear-gradient(180deg, var(--primary-1), var(--primary-2));
   background-blend-mode: soft-light, normal;
@@ -621,14 +658,14 @@ html, body {
 }
 .primary-button:hover { border: 0; filter: brightness(1.06); background-color: var(--primary-2); background-image: var(--leather-tex), linear-gradient(180deg, var(--primary-1), var(--primary-2)); }
 .secondary-button {
-  border: 0; border-radius: 17px; color: var(--btn-text);
+  border: 0; border-radius: 8px; color: var(--btn-text);
   background: var(--paper-tex), linear-gradient(180deg, var(--btn-1), var(--btn-2));
   box-shadow: 0 0 0 1px var(--btn-edge), 0 1px 2px rgba(0, 0, 0, .16), inset 0 1px 0 rgba(255, 255, 255, .85);
 }
 .secondary-button:hover { background: var(--paper-tex), linear-gradient(180deg, #ffffff, var(--btn-1)); }
 @media (prefers-color-scheme: dark) { .secondary-button:hover { background: var(--paper-tex), linear-gradient(180deg, #ece1cb, var(--btn-1)); } }
-.primary-button.large, .secondary-button.large { min-height: 40px; padding: 0 20px; border-radius: 20px; font-size: 14px; }
-.compact-button { border-radius: 14px; }
+.primary-button.large, .secondary-button.large { min-height: 40px; padding: 0 20px; border-radius: 9px; font-size: 14px; }
+.compact-button { border-radius: 7px; }
 kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--muted); }
 
 /* ---------- 弹出来的东西:纸卡 ---------- */
@@ -673,7 +710,6 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
 .settings-row label, .settings-switch { color: var(--text); }
 .settings-note { color: var(--text-2); }
 .settings-hint { color: var(--muted); }
-.settings-switch input { accent-color: var(--primary-2); }
 .settings-row input[type="range"] { -webkit-appearance: none; appearance: none; height: 22px; background: transparent; }
 .settings-row input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: rgba(120, 110, 95, .25); box-shadow: inset 0 1px 1px rgba(0, 0, 0, .12); }
 .settings-row input[type="range"]::-webkit-slider-thumb {
@@ -710,10 +746,14 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
 .settings-toggle-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1.5px dotted var(--rule); }
 .settings-toggle-row .t { flex: 1; color: var(--text); font-size: 13px; }
 .settings-toggle-row .t small { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
-.skin-toggle { flex: none; position: relative; width: 46px; height: 28px; border: 0; border-radius: 14px; background: rgba(120, 110, 95, .22); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .25); cursor: default; }
-.skin-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(180deg, var(--btn-1), var(--btn-2)); box-shadow: 0 1px 3px rgba(0, 0, 0, .35), inset 0 1px 0 #fff; transition: left .15s; }
-.skin-toggle[aria-checked="true"] { background-color: var(--primary-2); background-image: var(--leather-tex), linear-gradient(180deg, var(--primary-1), var(--primary-2)); background-blend-mode: soft-light, normal; box-shadow: inset 0 1px 3px rgba(var(--shade), .5); }
-.skin-toggle[aria-checked="true"]::after { left: 20px; }
+.skin-toggle, .settings-switch input { flex: none; position: relative; width: 46px; height: 28px; border: 0; border-radius: 14px; background: rgba(120, 110, 95, .22); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .25); cursor: default; }
+.skin-toggle::after, .settings-switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(180deg, var(--btn-1), var(--btn-2)); box-shadow: 0 1px 3px rgba(0, 0, 0, .35), inset 0 1px 0 #fff; transition: left .15s; }
+.skin-toggle[aria-checked="true"], .settings-switch input:checked { background-color: var(--primary-2); background-image: var(--leather-tex), linear-gradient(180deg, var(--primary-1), var(--primary-2)); background-blend-mode: soft-light, normal; box-shadow: inset 0 1px 3px rgba(var(--shade), .5); }
+.skin-toggle[aria-checked="true"]::after, .settings-switch input:checked::after { left: 20px; }
+/* 「同步到 iPhone」原来是系统的勾选框:换成同一种拨动开关,字在左、开关在右 */
+.settings-switch { flex-direction: row-reverse; justify-content: space-between; gap: 12px; }
+.settings-switch input { -webkit-appearance: none; appearance: none; margin: 0; }
+.settings-switch input:disabled { opacity: .5; }
 .settings-appearance-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0 6px; border-top: 1.5px dotted var(--rule); }
 .settings-appearance-row > span { color: var(--text); font-size: 13px; }
 .settings-appearance-row .settings-segmented { flex: none; margin-bottom: 0; }
@@ -727,7 +767,7 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
 .quick-open-item.active strong { color: var(--text); }
 .quick-open-hint { border-top: 1.5px dotted var(--rule); }
 .popover-menu { border: 0; border-radius: 8px; background: var(--paper-tex), var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, .15), 0 12px 32px rgba(var(--paper-shadow), .3); }
-.popover-menu button:hover, .popover-menu button:focus-visible { background: var(--hover); }
+.popover-menu button:hover, .popover-menu button:focus-visible { background: var(--hl); }
 .popover-sep { background: none; border-top: 1.5px dotted var(--rule); height: 0; }
 .timeline-item.current { background: var(--hl); }
 .timeline-item.current i { color: var(--text-2); }
